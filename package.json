@@ -1,6 +1,6 @@
 {
   "name": "neximail",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,10 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "bootstrap:owner": "tsx scripts/bootstrap-owner.ts"
+    "bootstrap:owner": "tsx scripts/bootstrap-owner.ts",
+    "worker:campaign": "tsx scripts/workers/campaign-worker.ts",
+    "worker:policy": "tsx scripts/workers/policy-worker.ts",
+    "worker:transport": "tsx scripts/workers/transport-worker.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
