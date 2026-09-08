@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sql } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
-import { campaigns, lists, sendingAccounts, suppressions, templates } from "@/db/schema";
+import { campaigns, contacts, lists, sendingAccounts, suppressions, systemSettings, templates, validationJobs } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { isValidEmail, normalizeEmail } from "@/lib/contact-utils";
 
@@ -54,6 +55,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const rows = await db.insert(sendingAccounts).values({ name, fromName, fromEmail, replyTo: text(body.replyTo) || null, transportType: "postfix" }).onConflictDoNothing({ target: sendingAccounts.name }).returning({ id: sendingAccounts.id });
       if (!rows.length) return NextResponse.json({ error: "A sending account with this name already exists." }, { status: 409 });
       return NextResponse.json({ ok: true, id: rows[0].id }, { status: 201 });
+    }
+
+    if (resource === "validation-jobs") {
+      const [countRow] = await db.select({ value: sql<number>`count(*)::int` }).from(contacts).where(sql`lower(${contacts.normalizedEmail}) like '%@gmail.com' and ${contacts.status} = 'active'`);
+      const total = countRow?.value ?? 0;
+      const rows = await db.insert(validationJobs).values({ scope: "gmail", totalRows: total, status: "pending" }).returning({ id: validationJobs.id });
+      return NextResponse.json({ ok: true, id: rows[0].id, total }, { status: 201 });
+    }
+
+    if (resource === "settings") {
+      const key = text(body.key);
+      if (!key) return NextResponse.json({ error: "Setting key is required." }, { status: 400 });
+      const value = body.value ?? null;
+      await db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value, updatedAt: new Date() } });
+      return NextResponse.json({ ok: true });
     }
 
     return NextResponse.json({ error: "Unknown resource." }, { status: 404 });
