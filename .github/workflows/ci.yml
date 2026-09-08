@@ -1,0 +1,50 @@
+name: NexiMail CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: neximail
+          POSTGRES_USER: neximail
+          POSTGRES_PASSWORD: neximail
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U neximail -d neximail"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: postgres://neximail:neximail@localhost:5432/neximail
+      REDIS_URL: redis://localhost:6379
+      AUTH_SECRET: ci-only-secret-value-that-is-at-least-32-characters
+      APP_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - run: npm run db:migrate
+      - run: npm run typecheck
+      - run: npm run build
