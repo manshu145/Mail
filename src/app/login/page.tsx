@@ -22,21 +22,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
           {params.error ? <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">Invalid credentials or this account is disabled.</div> : null}
           <form method="post" action="/api/auth/login" className="space-y-4">
-            <label className="block">
-              <span className="mb-2 block text-sm font-bold text-zinc-700 dark:text-zinc-200">Email address</span>
-              <div className="flex items-center rounded-xl border border-black/[0.08] bg-[#faf9f7] px-3 transition focus-within:border-violet-500/50 focus-within:ring-4 focus-within:ring-violet-500/[0.08] dark:border-white/[0.08] dark:bg-white/[0.035]">
-                <Mail className="h-4 w-4 text-zinc-400" />
-                <input name="email" type="email" autoComplete="email" required placeholder="owner@example.com" className="w-full bg-transparent px-3 py-3 text-sm text-zinc-950 outline-none placeholder:text-zinc-400 dark:text-white" />
-              </div>
-            </label>
-            <label className="block">
-              <span className="mb-2 block text-sm font-bold text-zinc-700 dark:text-zinc-200">Password</span>
-              <div className="flex items-center rounded-xl border border-black/[0.08] bg-[#faf9f7] px-3 transition focus-within:border-violet-500/50 focus-within:ring-4 focus-within:ring-violet-500/[0.08] dark:border-white/[0.08] dark:bg-white/[0.035]">
-                <LockKeyhole className="h-4 w-4 text-zinc-400" />
-                <input name="password" type="password" autoComplete="current-password" required placeholder="••••••••••••" className="w-full bg-transparent px-3 py-3 text-sm text-zinc-950 outline-none placeholder:text-zinc-400 dark:text-white" />
-              </div>
-            </label>
-            <button type="submit" className="mt-2 w-full rounded-xl bg-zinc-950 px-4 py-3 text-sm font-extrabold text-white shadow-[0_10px_30px_rgba(0,0,0,.14)] transition hover:bg-zinc-800 focus:outline-none focus:ring-4 focus:ring-zinc-900/10 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white">Sign in</button>
+            <label className="block"><span className="mb-2 block text-sm font-bold text-zinc-700 dark:text-zinc-200">Email address</span><div className="flex items-center rounded-xl border border-black/[0.08] bg-[#faf9f7] px-3 transition focus-within:border-violet-500/50 focus-within:ring-4 focus-within:ring-violet-500/[0.08] dark:border-white/[0.08] dark:bg-white/[0.035]"><Mail className="h-4 w-4 text-zinc-400" /><input name="email" type="email" autoComplete="email" required placeholder="owner@example.com" className="w-full bg-transparent px-3 py-3 text-sm text-zinc-950 outline-none placeholder:text-zinc-400 dark:text-white" /></div></label>
+            <label className="block"><span className="mb-2 block text-sm font-bold text-zinc-700 dark:text-zinc-200">Password</span><div className="flex items-center rounded-xl border border-black/[0.08] bg-[#faf9f7] px-3 transition focus-within:border-violet-500/50 focus-within:ring-4 focus-within:ring-violet-500/[0.08] dark:border-white/[0.08] dark:bg-white/[0.035]"><LockKeyhole className="h-4 w-4 text-zinc-400" /><input name="password" type="password" autoComplete="current-password" required placeholder="••••••••••••" className="w-full bg-transparent px-3 py-3 text-sm text-zinc-950 outline-none placeholder:text-zinc-400 dark:text-white" /></div></label>
+            <button type="submit" className="btn-primary mt-2 w-full">Sign in</button>
           </form>
         </section>
         <p className="mt-5 text-center text-xs font-medium text-zinc-400">Self-hosted control plane · Your data stays under your infrastructure.</p>
