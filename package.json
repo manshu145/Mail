@@ -1,41 +1,6 @@
 {
-  "name": "neximail",
-  "version": "0.3.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "typecheck": "tsc --noEmit",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
-    "bootstrap:owner": "tsx scripts/bootstrap-owner.ts",
-    "worker:campaign": "tsx scripts/workers/campaign-worker.ts",
-    "worker:policy": "tsx scripts/workers/policy-worker.ts",
-    "worker:transport": "tsx scripts/workers/transport-worker.ts"
-  },
-  "dependencies": {
-    "@node-rs/argon2": "^2.0.2",
-    "drizzle-orm": "^0.44.5",
-    "ioredis": "^5.7.0",
-    "jose": "^6.1.0",
-    "lucide-react": "^0.468.0",
-    "next": "^16.0.0",
-    "pg": "^8.16.3",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "zod": "^4.1.5"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.14",
-    "@types/node": "^24.3.0",
-    "@types/pg": "^8.15.5",
-    "@types/react": "^19.1.12",
-    "@types/react-dom": "^19.1.9",
-    "drizzle-kit": "^0.31.4",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
-  }
+  "name":"neximail","version":"0.4.0","private":true,
+  "scripts":{"dev":"next dev","build":"next build","start":"next start","typecheck":"tsc --noEmit","db:generate":"drizzle-kit generate","db:migrate":"drizzle-kit migrate","db:push":"drizzle-kit push","bootstrap:owner":"tsx scripts/bootstrap-owner.ts","worker:campaign":"tsx scripts/workers/campaign-worker.ts","worker:policy":"tsx scripts/workers/policy-worker.ts","worker:transport":"tsx scripts/workers/transport-worker.ts","worker:validation":"tsx scripts/workers/validation-worker.ts","worker:domain-health":"tsx scripts/workers/domain-health-worker.ts","worker:reputation":"tsx scripts/workers/reputation-worker.ts"},
+  "dependencies":{"@node-rs/argon2":"^2.0.2","dotenv":"^16.6.1","drizzle-orm":"^0.44.5","ioredis":"^5.7.0","jose":"^6.1.0","lucide-react":"^0.468.0","next":"^16.0.0","pg":"^8.16.3","react":"^19.2.0","react-dom":"^19.2.0","zod":"^4.1.5"},
+  "devDependencies":{"@tailwindcss/postcss":"^4.1.14","@types/node":"^24.3.0","@types/pg":"^8.15.5","@types/react":"^19.1.12","@types/react-dom":"^19.1.9","drizzle-kit":"^0.31.4","tailwindcss":"^4.1.14","tsx":"^4.20.5","typescript":"^5.9.2"}
 }
