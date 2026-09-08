@@ -24,9 +24,9 @@
   --surface: #151516;
   --surface-muted: #1b1b1d;
   --border: rgba(255, 255, 255, 0.08);
-  --button-primary: #f4f4f5;
-  --button-primary-hover: #e4e4e7;
-  --button-primary-fg: #18181b;
+  --button-primary: #27272a;
+  --button-primary-hover: #3f3f46;
+  --button-primary-fg: #ffffff;
   --button-secondary: #18181b;
   --button-secondary-hover: #27272a;
   --button-secondary-fg: #f4f4f5;
