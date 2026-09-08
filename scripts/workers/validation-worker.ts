@@ -37,8 +37,8 @@ async function smtpProbe(email: string): Promise<{ status: "valid" | "invalid" |
         if (stage === 1 && code >= 200 && code < 400) { stage=2; socket.write("MAIL FROM:<>\r\n"); continue; }
         if (stage === 2 && code >= 200 && code < 400) { stage=3; socket.write(`RCPT TO:<${email}>\r\n`); continue; }
         if (stage === 3) {
-          if (code === 250 || code === 251) return finish({ status: "valid", detail: `gmail_rcpt_${code}` });
           if (code === 550 && /5\.1\.1|user unknown|no such user|does not exist/i.test(line)) return finish({ status: "invalid", detail: "gmail_rcpt_550_5.1.1" });
+          if (code === 250 || code === 251) return finish({ status: "unknown", detail: `gmail_rcpt_${code}_accepted_not_proof` });
           return finish({ status: "unknown", detail: `gmail_rcpt_${code || "ambiguous"}` });
         }
         if (code >= 400) return finish({ status: "unknown", detail: `smtp_${code}` });
@@ -69,7 +69,7 @@ async function runJob() {
 }
 
 async function main() {
-  console.log("[validation-worker] started; unknown is never upgraded to valid");
+  console.log("[validation-worker] started; SMTP acceptance is not treated as mailbox proof");
   while (true) { try { await runJob(); } catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); } await new Promise(r=>setTimeout(r, intervalMs)); }
 }
 main().catch(console.error);
