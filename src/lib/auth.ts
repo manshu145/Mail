@@ -11,13 +11,21 @@ export type SessionPayload = {
 };
 
 const COOKIE_NAME = "neximail_session";
+const PREVIEW_SECRET = "neximail-preview-session-secret-2026-change-later";
 
 function getSecret() {
   const value = process.env.AUTH_SECRET;
-  if (!value || value.length < 32) {
-    throw new Error("AUTH_SECRET must be at least 32 characters");
+
+  if (value && value.length >= 32) {
+    return new TextEncoder().encode(value);
   }
-  return new TextEncoder().encode(value);
+
+  // Temporary preview fallback only while no real database is configured.
+  if (!process.env.DATABASE_URL) {
+    return new TextEncoder().encode(PREVIEW_SECRET);
+  }
+
+  throw new Error("AUTH_SECRET must be at least 32 characters");
 }
 
 export async function createSession(payload: SessionPayload) {
