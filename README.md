@@ -12,7 +12,7 @@ NexiMail now contains the full control-plane path for:
 - Contacts, CSV import, normalization, deduplication, custom attributes and tags
 - Static lists and persisted dynamic segments
 - Global suppression for unsubscribe, hard bounce, invalid, complaint, manual and policy blocks
-- Gmail-focused validation jobs with persisted `valid / invalid / unknown / error` results
+- Gmail-focused validation jobs with persisted `valid / invalid / unknown / error` results; SMTP acceptance is never treated as proof of mailbox existence
 - Templates with HTML/plain-text editing and sandboxed preview
 - Campaign creation, audience/template/sending-account selection, scheduling and cancellation
 - SPF / DKIM / DMARC sending-domain readiness checks
@@ -50,21 +50,9 @@ npm run bootstrap:owner
 
 Vercel is used only as a UI/control-plane preview. It does not run Postfix or long-lived workers.
 
-Final production is intended for a VPS. `docker-compose.prod.yml` keeps PostgreSQL and Redis private and binds the web application to `127.0.0.1:3000` for a reverse proxy. Postfix and transport workers run on the VPS where the local MTA is available.
+Final production is intended for a VPS. `docker-compose.prod.yml` keeps PostgreSQL and Redis private, binds the web application to `127.0.0.1:3000`, and runs all non-MTA workers. Postfix, the Transport worker and the Postfix-event worker stay on the VPS host so they can access the local MTA safely.
 
-Worker commands:
-
-```bash
-npm run worker:campaign
-npm run worker:policy
-npm run worker:transport
-npm run worker:event
-npm run worker:validation
-npm run worker:domain-health
-npm run worker:reputation
-```
-
-A systemd template is available at `deploy/systemd/neximail-worker@.service`.
+See `deploy/VPS.md` for the runtime split.
 
 ## Production readiness check
 
@@ -80,8 +68,9 @@ The final VPS rollout must additionally verify DNS, STARTTLS, reverse DNS/PTR, M
 
 - Web requests never bulk-send campaigns directly.
 - Suppressions are checked before transport.
-- Invalid validation results are suppressed.
+- Explicit invalid validation results are suppressed.
 - Unknown validation is never treated as valid.
+- SMTP `250/251` during Gmail probing is recorded as `unknown`, not mailbox proof.
 - Queueing requires a ready sending domain and a visible `{{unsubscribe_url}}` in the selected template.
 - Complaint and hard-bounce events create global suppression records.
 - Reputation thresholds can automatically pause a sending account.
