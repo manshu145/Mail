@@ -1,26 +1,40 @@
 import { NextResponse } from "next/server";
-import { pool } from "@/db";
-import { redis } from "@/lib/redis";
+import { databaseConfigured, pool } from "@/db";
+import { getRedis, isRedisConfigured } from "@/lib/redis";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const checks: Record<string, string> = { app: "ok" };
   let healthy = true;
 
-  try {
-    await pool.query("select 1");
-    checks.postgresql = "ok";
-  } catch {
+  if (!databaseConfigured) {
     healthy = false;
-    checks.postgresql = "error";
+    checks.postgresql = "not_configured";
+  } else {
+    try {
+      await pool.query("select 1");
+      checks.postgresql = "ok";
+    } catch {
+      healthy = false;
+      checks.postgresql = "error";
+    }
   }
 
-  try {
-    const pong = await redis.ping();
-    checks.redis = pong === "PONG" ? "ok" : "error";
-    if (pong !== "PONG") healthy = false;
-  } catch {
+  if (!isRedisConfigured()) {
     healthy = false;
-    checks.redis = "error";
+    checks.redis = "not_configured";
+  } else {
+    try {
+      const redis = getRedis();
+      if (redis.status === "wait") await redis.connect();
+      const pong = await redis.ping();
+      checks.redis = pong === "PONG" ? "ok" : "error";
+      if (pong !== "PONG") healthy = false;
+    } catch {
+      healthy = false;
+      checks.redis = "error";
+    }
   }
 
   return NextResponse.json(
