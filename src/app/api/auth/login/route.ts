@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { verify } from "@node-rs/argon2";
-import { db } from "@/db";
+import { db, databaseConfigured } from "@/db";
 import { users } from "@/db/schema";
 import { createSession } from "@/lib/auth";
+
+const PREVIEW_EMAIL = "admin@neximail.local";
+const PREVIEW_PASSWORD = "NexiMail@2026!";
 
 export async function POST(request: NextRequest) {
   const form = await request.formData();
@@ -12,6 +15,21 @@ export async function POST(request: NextRequest) {
 
   if (!email || !password) {
     return NextResponse.redirect(new URL("/login?error=1", request.url), 303);
+  }
+
+  if (!databaseConfigured) {
+    if (email !== PREVIEW_EMAIL || password !== PREVIEW_PASSWORD) {
+      return NextResponse.redirect(new URL("/login?error=1", request.url), 303);
+    }
+
+    await createSession({
+      userId: "preview-owner",
+      email: PREVIEW_EMAIL,
+      name: "NexiMail Owner",
+      role: "owner",
+    });
+
+    return NextResponse.redirect(new URL("/dashboard", request.url), 303);
   }
 
   const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
