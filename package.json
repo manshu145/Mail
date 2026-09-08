@@ -1,6 +1,6 @@
 {
   "name": "neximail",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17,6 +17,7 @@
     "drizzle-orm": "^0.44.5",
     "ioredis": "^5.7.0",
     "jose": "^6.1.0",
+    "lucide-react": "^0.468.0",
     "next": "^16.0.0",
     "pg": "^8.16.3",
     "react": "^19.2.0",
@@ -24,11 +25,13 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.14",
     "@types/node": "^24.3.0",
     "@types/pg": "^8.15.5",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "drizzle-kit": "^0.31.4",
+    "tailwindcss": "^4.1.14",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }
