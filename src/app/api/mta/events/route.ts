@@ -1,0 +1,34 @@
+import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { db, databaseConfigured } from "@/db";
+import { messageEvents, messages, suppressions } from "@/db/schema";
+import { normalizeEmail } from "@/lib/contact-utils";
+
+const allowed = new Set(["delivered", "deferred", "bounced", "failed"]);
+
+export async function POST(request: NextRequest) {
+  if (!databaseConfigured) return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+  const expected = process.env.MTA_EVENT_SECRET;
+  const provided = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
+  if (!expected || provided !== expected) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await request.json().catch(() => null) as { messageId?: string; status?: string; detail?: string; remoteCode?: string } | null;
+  if (!body?.messageId || !body.status || !allowed.has(body.status)) return NextResponse.json({ error: "Invalid event" }, { status: 400 });
+  const [message] = await db.select().from(messages).where(eq(messages.id, body.messageId)).limit(1);
+  if (!message) return NextResponse.json({ error: "Message not found" }, { status: 404 });
+
+  const status = body.status as "delivered" | "deferred" | "bounced" | "failed";
+  await db.update(messages).set({
+    status,
+    lastError: status === "delivered" ? null : (body.detail || body.remoteCode || status).slice(0, 1000),
+    deliveredAt: status === "delivered" ? new Date() : message.deliveredAt,
+    bouncedAt: status === "bounced" ? new Date() : message.bouncedAt,
+  }).where(eq(messages.id, message.id));
+  await db.insert(messageEvents).values({ messageId: message.id, type: `mta_${status}`, payload: { detail: body.detail || null, remoteCode: body.remoteCode || null } });
+
+  if (status === "bounced") {
+    await db.insert(suppressions).values({ email: message.recipientEmail, normalizedEmail: normalizeEmail(message.recipientEmail), reason: "hard_bounce", source: "mta_event" }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "hard_bounce", source: "mta_event" } });
+  }
+
+  return NextResponse.json({ ok: true });
+}
