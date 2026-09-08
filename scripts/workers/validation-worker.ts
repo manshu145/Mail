@@ -5,6 +5,7 @@ import { db, pool } from "../../src/db";
 import { contacts, suppressions, validationJobs, validationResults } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
+import { classifyGmailRcptResponse, type ValidationVerdict } from "../../src/lib/validation-policy";
 
 const intervalMs = Math.max(15000, Number(process.env.VALIDATION_INTERVAL_MS || "30000"));
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_SMTP_TIMEOUT_MS || "8000"));
@@ -14,7 +15,7 @@ async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "validation", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
 }
 
-async function smtpProbe(email: string): Promise<{ status: "valid" | "invalid" | "unknown" | "error"; detail: string }> {
+async function smtpProbe(email: string): Promise<ValidationVerdict> {
   const domain = email.split("@")[1]?.toLowerCase();
   if (!domain || !["gmail.com", "googlemail.com"].includes(domain)) return { status: "unknown", detail: "gmail_scope_only" };
   let mx;
@@ -24,7 +25,7 @@ async function smtpProbe(email: string): Promise<{ status: "valid" | "invalid" |
   return new Promise((resolve) => {
     const socket = net.createConnection({ host: mx.exchange, port: 25 });
     let buffer = ""; let stage = 0; let settled = false;
-    const finish = (value: { status: "valid" | "invalid" | "unknown" | "error"; detail: string }) => { if (settled) return; settled = true; socket.destroy(); resolve(value); };
+    const finish = (value: ValidationVerdict) => { if (settled) return; settled = true; socket.destroy(); resolve(value); };
     socket.setTimeout(timeoutMs, () => finish({ status: "unknown", detail: "smtp_timeout" }));
     socket.on("error", () => finish({ status: "unknown", detail: "smtp_unreachable" }));
     socket.on("data", (chunk) => {
@@ -36,11 +37,7 @@ async function smtpProbe(email: string): Promise<{ status: "valid" | "invalid" |
         if (stage === 0 && code === 220) { stage=1; socket.write(`EHLO ${helo}\r\n`); continue; }
         if (stage === 1 && code >= 200 && code < 400) { stage=2; socket.write("MAIL FROM:<>\r\n"); continue; }
         if (stage === 2 && code >= 200 && code < 400) { stage=3; socket.write(`RCPT TO:<${email}>\r\n`); continue; }
-        if (stage === 3) {
-          if (code === 550 && /5\.1\.1|user unknown|no such user|does not exist/i.test(line)) return finish({ status: "invalid", detail: "gmail_rcpt_550_5.1.1" });
-          if (code === 250 || code === 251) return finish({ status: "unknown", detail: `gmail_rcpt_${code}_accepted_not_proof` });
-          return finish({ status: "unknown", detail: `gmail_rcpt_${code || "ambiguous"}` });
-        }
+        if (stage === 3) return finish(classifyGmailRcptResponse(code, line));
         if (code >= 400) return finish({ status: "unknown", detail: `smtp_${code}` });
       }
     });
