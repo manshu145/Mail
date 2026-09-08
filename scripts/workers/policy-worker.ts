@@ -1,30 +1,5 @@
-import { eq } from "drizzle-orm";
-import { db, pool } from "../../src/db";
-import { contacts, messages, suppressions } from "../../src/db/schema";
-
-async function runOnce() {
-  const queued = await db.select().from(messages).where(eq(messages.status, "queued")).limit(500);
-  for (const message of queued) {
-    const [contact] = await db.select().from(contacts).where(eq(contacts.id, message.contactId)).limit(1);
-    if (!contact || contact.status !== "active") {
-      await db.update(messages).set({ status: "cancelled", lastError: "contact_not_active" }).where(eq(messages.id, message.id));
-      continue;
-    }
-
-    const [suppressed] = await db.select({ id: suppressions.id, reason: suppressions.reason }).from(suppressions).where(eq(suppressions.normalizedEmail, contact.normalizedEmail)).limit(1);
-    if (suppressed) {
-      await db.update(messages).set({ status: "cancelled", lastError: `suppressed:${suppressed.reason}` }).where(eq(messages.id, message.id));
-      continue;
-    }
-
-    if (contact.validationStatus === "invalid") {
-      await db.update(messages).set({ status: "cancelled", lastError: "validation_invalid" }).where(eq(messages.id, message.id));
-      continue;
-    }
-
-    await db.update(messages).set({ status: "ready_for_transport", lastError: null }).where(eq(messages.id, message.id));
-  }
-  console.log(`[policy-worker] evaluated ${queued.length} messages`);
-}
-
-runOnce().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => pool.end());
+import { eq } from "drizzle-orm";import { db,pool } from "../../src/db";import { contacts,messages,suppressions } from "../../src/db/schema";import { workerHeartbeats } from "../../src/db/operations-schema";
+const intervalMs=Math.max(1000,Number(process.env.POLICY_WORKER_INTERVAL_MS||"3000"));async function heartbeat(meta:Record<string,unknown>={}){await db.insert(workerHeartbeats).values({workerName:"policy",metadata:meta}).onConflictDoUpdate({target:workerHeartbeats.workerName,set:{lastSeenAt:new Date(),metadata:meta}})}
+async function runOnce(){const queued=await db.select().from(messages).where(eq(messages.status,"queued")).limit(500);let ready=0,cancelled=0;for(const message of queued){const [contact]=await db.select().from(contacts).where(eq(contacts.id,message.contactId)).limit(1);if(!contact||contact.status!=="active"){await db.update(messages).set({status:"cancelled",lastError:"contact_not_active"}).where(eq(messages.id,message.id));cancelled++;continue}const [suppressed]=await db.select({id:suppressions.id,reason:suppressions.reason}).from(suppressions).where(eq(suppressions.normalizedEmail,contact.normalizedEmail)).limit(1);if(suppressed){await db.update(messages).set({status:"cancelled",lastError:`suppressed:${suppressed.reason}`}).where(eq(messages.id,message.id));cancelled++;continue}if(contact.validationStatus==="invalid"){await db.update(messages).set({status:"cancelled",lastError:"validation_invalid"}).where(eq(messages.id,message.id));cancelled++;continue}await db.update(messages).set({status:"ready_for_transport",lastError:null}).where(eq(messages.id,message.id));ready++}await heartbeat({state:"online",evaluated:queued.length,ready,cancelled})}
+async function main(){console.log("[policy-worker] started");while(true){try{await runOnce()}catch(e){console.error("[policy-worker]",e);await heartbeat({state:"error"}).catch(()=>{})}await new Promise(r=>setTimeout(r,intervalMs))}}
+main().catch(console.error);process.on("SIGTERM",async()=>{await pool.end();process.exit(0)});
