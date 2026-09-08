@@ -1,0 +1,4 @@
+import { NextRequest,NextResponse } from "next/server";
+const bearerRoutes=["/api/mta/events","/api/inbox-placement/results"];
+export function proxy(request:NextRequest){if(["GET","HEAD","OPTIONS"].includes(request.method))return NextResponse.next();if(bearerRoutes.some(p=>request.nextUrl.pathname.startsWith(p)))return NextResponse.next();const origin=request.headers.get("origin"),host=request.headers.get("x-forwarded-host")||request.headers.get("host");if(origin){try{if(new URL(origin).host!==host)return NextResponse.json({error:"Cross-origin mutation blocked"},{status:403})}catch{return NextResponse.json({error:"Invalid origin"},{status:403})}}else{const site=request.headers.get("sec-fetch-site");if(site&&site!=="same-origin"&&site!=="same-site")return NextResponse.json({error:"Cross-site mutation blocked"},{status:403})}return NextResponse.next()}
+export const config={matcher:"/api/:path*"};
