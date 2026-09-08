@@ -20,63 +20,51 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-neximail}
       POSTGRES_USER: ${POSTGRES_USER:-neximail}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-    ports:
-      - "127.0.0.1:5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-neximail} -d ${POSTGRES_DB:-neximail}"]
       interval: 10s
       timeout: 5s
       retries: 10
-
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: ["redis_data:/data"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
-
   app:
     <<: *runtime
-    ports:
-      - "127.0.0.1:3000:3000"
-
+    ports: ["127.0.0.1:3000:3000"]
+  import-worker:
+    <<: *runtime
+    command: ["npm", "run", "worker:import"]
   campaign-worker:
     <<: *runtime
     command: ["npm", "run", "worker:campaign"]
-
   policy-worker:
     <<: *runtime
     command: ["npm", "run", "worker:policy"]
-
   event-worker:
     <<: *runtime
     command: ["npm", "run", "worker:event"]
-
   validation-worker:
     <<: *runtime
     command: ["npm", "run", "worker:validation"]
-
   domain-health-worker:
     <<: *runtime
     command: ["npm", "run", "worker:domain-health"]
-
   reputation-worker:
     <<: *runtime
     command: ["npm", "run", "worker:reputation"]
 
-# transport-worker and postfix-event-worker intentionally run on the VPS host
-# using deploy/systemd/neximail-worker@.service so they can access the local
-# Postfix sendmail binary and mail logs without exposing the MTA to containers.
-
+# Transport and Postfix-event workers run on the VPS host via systemd so they
+# can access the local Postfix sendmail binary and mail logs.
 volumes:
   postgres_data:
   redis_data:
