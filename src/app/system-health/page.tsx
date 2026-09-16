@@ -1,2 +1,71 @@
-import { existsSync } from "node:fs";import { Activity,CheckCircle2,CircleAlert,ServerCog } from "lucide-react";import { redirect } from "next/navigation";import { desc } from "drizzle-orm";import { AppShell } from "@/components/app-shell";import { databaseConfigured,db,pool } from "@/db";import { workerHeartbeats } from "@/db/operations-schema";import { getSession } from "@/lib/auth";import { getRedis,isRedisConfigured } from "@/lib/redis";export const dynamic="force-dynamic";
-export default async function SystemHealthPage(){const session=await getSession();if(!session)redirect("/login");let postgres:"online"|"offline"|"not_configured"=databaseConfigured?"offline":"not_configured",redis:"online"|"offline"|"not_configured"=isRedisConfigured()?"offline":"not_configured";if(databaseConfigured)try{await pool.query("select 1");postgres="online"}catch{}if(isRedisConfigured())try{const c=getRedis();if(c.status==="wait")await c.connect();redis=(await c.ping())==="PONG"?"online":"offline"}catch{}let beats:typeof workerHeartbeats.$inferSelect[]=[];if(databaseConfigured)try{beats=await db.select().from(workerHeartbeats).orderBy(desc(workerHeartbeats.lastSeenAt))}catch{}const beat=new Map(beats.map(b=>[b.workerName,b]));const workerState=(name:string)=>{const b=beat.get(name);if(!b)return "not_configured";return Date.now()-b.lastSeenAt.getTime()<12*60*1000?"online":"offline"};const postfix=existsSync(process.env.POSTFIX_SENDMAIL_PATH||"/usr/sbin/sendmail")?"online":"not_configured";const items=[{name:"Application",status:"online",detail:"Next.js control plane",icon:Activity},{name:"PostgreSQL",status:postgres,detail:"Persistent application data",icon:ServerCog},{name:"Redis",status:redis,detail:"Rate limits and queue coordination",icon:ServerCog},...(["campaign","policy","transport","event","validation","reputation","domain-health","postfix-events"].map(name=>({name:`${name.replaceAll("-"," ")} worker`,status:workerState(name),detail:beat.get(name)?`Last heartbeat ${new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short"}).format(beat.get(name)!.lastSeenAt)}`:"No heartbeat recorded",icon:ServerCog}))),{name:"Postfix sendmail",status:postfix,detail:postfix==="online"?"Local sendmail binary available":"Expected on final VPS",icon:ServerCog}];return <AppShell session={session}><div className="mb-7"><p className="mb-2 text-xs font-extrabold uppercase tracking-[.18em] text-zinc-400">Operations</p><h1 className="text-3xl font-black tracking-[-.035em] sm:text-4xl">System health</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Live runtime checks and persisted worker heartbeats. Stale workers are shown offline—not silently reported healthy.</p></div><section className="grid gap-4 lg:grid-cols-2">{items.map(({name,status,detail,icon:Icon})=>{const online=status==="online",bad=status==="offline";return <article key={name} className="premium-panel p-5"><div className="flex items-start justify-between gap-4"><div className="flex items-center gap-4"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"><Icon className="h-5 w-5"/></div><div><h2 className="font-black capitalize">{name}</h2><p className="mt-1 text-sm text-zinc-500">{detail}</p></div></div><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold ${online?"bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300":bad?"bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300":"bg-zinc-100 text-zinc-500 dark:bg-zinc-900"}`}>{online?<CheckCircle2 className="h-3.5 w-3.5"/>:<CircleAlert className="h-3.5 w-3.5"/>}{status.replaceAll("_"," ")}</span></div></article>})}</section></AppShell>}
+import { existsSync } from "node:fs";
+import { Activity, CheckCircle2, CircleAlert, ServerCog } from "lucide-react";
+import { redirect } from "next/navigation";
+import { desc } from "drizzle-orm";
+import { AppShell } from "@/components/app-shell";
+import { databaseConfigured, db, pool } from "@/db";
+import { workerHeartbeats } from "@/db/operations-schema";
+import { getSession } from "@/lib/auth";
+import { getRedis, isRedisConfigured } from "@/lib/redis";
+
+export const dynamic = "force-dynamic";
+
+export default async function SystemHealthPage() {
+  const session = await getSession();
+  if (!session) redirect("/login");
+
+  let postgres: "online" | "offline" | "not_configured" = databaseConfigured ? "offline" : "not_configured";
+  let redis: "online" | "offline" | "not_configured" = isRedisConfigured() ? "offline" : "not_configured";
+
+  if (databaseConfigured) {
+    try { await pool.query("select 1"); postgres = "online"; } catch {}
+  }
+  if (isRedisConfigured()) {
+    try {
+      const client = getRedis();
+      if (client.status === "wait") await client.connect();
+      redis = (await client.ping()) === "PONG" ? "online" : "offline";
+    } catch {}
+  }
+
+  let beats: typeof workerHeartbeats.$inferSelect[] = [];
+  if (databaseConfigured) {
+    try { beats = await db.select().from(workerHeartbeats).orderBy(desc(workerHeartbeats.lastSeenAt)); } catch {}
+  }
+  const beat = new Map(beats.map((item) => [item.workerName, item]));
+  const workerState = (name: string) => {
+    const item = beat.get(name);
+    if (!item) return "not_configured" as const;
+    return Date.now() - item.lastSeenAt.getTime() < 12 * 60 * 1000 ? "online" as const : "offline" as const;
+  };
+
+  const postfix = process.env.VERCEL === "1"
+    ? "not_configured"
+    : existsSync(/* turbopackIgnore: true */ process.env.POSTFIX_SENDMAIL_PATH || "/usr/sbin/sendmail") ? "online" : "not_configured";
+
+  const items = [
+    { name: "Application", status: "online", detail: "Next.js control plane", icon: Activity },
+    { name: "PostgreSQL", status: postgres, detail: "Persistent application data", icon: ServerCog },
+    { name: "Redis", status: redis, detail: "Rate limits and queue coordination", icon: ServerCog },
+    ...["campaign", "policy", "transport", "event", "validation", "reputation", "domain-health", "postfix-events"].map((name) => ({
+      name: `${name.replaceAll("-", " ")} worker`,
+      status: workerState(name),
+      detail: beat.get(name) ? `Last heartbeat ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(beat.get(name)!.lastSeenAt)}` : "No heartbeat recorded",
+      icon: ServerCog,
+    })),
+    { name: "Postfix sendmail", status: postfix, detail: postfix === "online" ? "Local sendmail binary available" : "Expected on VPS runtime", icon: ServerCog },
+  ];
+
+  return (
+    <AppShell session={session}>
+      <div className="mb-7"><p className="page-eyebrow mb-2">Operations</p><h1 className="page-title">System health</h1><p className="page-description">Live runtime checks and persisted worker heartbeats. Stale workers are shown offline instead of being silently reported healthy.</p></div>
+      <section className="grid gap-4 lg:grid-cols-2">
+        {items.map(({ name, status, detail, icon: Icon }) => {
+          const online = status === "online";
+          const bad = status === "offline";
+          return <article key={name} className="premium-panel p-5"><div className="flex items-start justify-between gap-4"><div className="flex items-center gap-4"><div className="grid h-11 w-11 place-items-center rounded-xl bg-[var(--surface-soft)] text-[var(--muted)]"><Icon className="h-5 w-5" /></div><div><h2 className="font-black capitalize">{name}</h2><p className="mt-1 text-sm text-[var(--muted)]">{detail}</p></div></div><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold ${online ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : bad ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-[var(--surface-soft)] text-[var(--muted)]"}`}>{online ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CircleAlert className="h-3.5 w-3.5" />}{status.replaceAll("_", " ")}</span></div></article>;
+        })}
+      </section>
+    </AppShell>
+  );
+}
