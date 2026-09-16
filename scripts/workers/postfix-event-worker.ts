@@ -16,7 +16,7 @@ async function webhook(type: string, payload: Record<string, unknown>) {
 }
 
 async function handle(line: string) {
-  const queueId = line.match(/postfix\/smtp\[[^\]]+\]:\s+([A-F0-9]+):/i)?.[1];
+  const queueId = line.match(/postfix\/smtp\[[^\]]+\]:\s+([A-Z0-9]+):/i)?.[1];
   if (!queueId) return false;
   const [message] = await db.select().from(messages).where(eq(messages.providerMessageId, queueId)).limit(1);
   if (!message) return false;
