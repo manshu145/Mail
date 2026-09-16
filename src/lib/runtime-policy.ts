@@ -16,13 +16,13 @@ function parsePositiveInteger(value: string | undefined, fallback: number) {
 }
 
 export function getRuntimePolicy(env: RuntimeEnv = process.env): RuntimePolicy {
-  const mode = env.NEXIMAIL_RUNTIME_MODE === "production" ? "production" : "staging";
+  const mode = env.NEXIMAIL_RUNTIME_MODE === "staging" ? "staging" : "production";
 
   if (mode === "production") {
     return {
       mode,
       isolated: false,
-      sendingEnabled: true,
+      sendingEnabled: env.NEXIMAIL_SEND_ENABLED !== "false",
       maxRecipientsPerCampaign: null,
     };
   }
