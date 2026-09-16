@@ -2,6 +2,7 @@ import { LockKeyhole, Mail } from "lucide-react";
 import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 import { getSession } from "@/lib/auth";
+import { getLoginErrorMessage } from "@/lib/auth-policy";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const session = await getSession();
@@ -20,7 +21,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <h1 className="text-3xl font-black tracking-[-0.045em] text-zinc-950 dark:text-white">Sign in to NexiMail</h1>
             <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">Use your owner, admin or operator account to continue.</p>
           </div>
-          {params.error ? <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">Invalid credentials or this account is disabled.</div> : null}
+          {params.error ? <div role="alert" className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">{getLoginErrorMessage(params.error)}</div> : null}
           <form method="post" action="/api/auth/login" className="space-y-4">
             <label className="block"><span className="mb-2 block text-sm font-bold text-zinc-700 dark:text-zinc-200">Email address</span><div className="flex items-center rounded-xl border border-black/[0.08] bg-[#faf9f7] px-3 transition focus-within:border-violet-500/50 focus-within:ring-4 focus-within:ring-violet-500/[0.08] dark:border-white/[0.08] dark:bg-white/[0.035]"><Mail className="h-4 w-4 text-zinc-400" /><input name="email" type="email" autoComplete="email" required placeholder="owner@example.com" className="w-full bg-transparent px-3 py-3 text-sm text-zinc-950 outline-none placeholder:text-zinc-400 dark:text-white" /></div></label>
             <label className="block"><span className="mb-2 block text-sm font-bold text-zinc-700 dark:text-zinc-200">Password</span><div className="flex items-center rounded-xl border border-black/[0.08] bg-[#faf9f7] px-3 transition focus-within:border-violet-500/50 focus-within:ring-4 focus-within:ring-violet-500/[0.08] dark:border-white/[0.08] dark:bg-white/[0.035]"><LockKeyhole className="h-4 w-4 text-zinc-400" /><input name="password" type="password" autoComplete="current-password" required placeholder="••••••••••••" className="w-full bg-transparent px-3 py-3 text-sm text-zinc-950 outline-none placeholder:text-zinc-400 dark:text-white" /></div></label>

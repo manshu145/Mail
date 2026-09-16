@@ -50,6 +50,8 @@ npm run bootstrap:owner
 
 Vercel is used only as a UI/control-plane preview. It does not run Postfix or long-lived workers.
 
+Database-free demo login requires `NEXIMAIL_DEMO_MODE=true`, no `DATABASE_URL`, and either local `NODE_ENV=development` or Vercel's explicit `VERCEL_ENV=preview`. Demo credentials are public and this mode must contain no real data. VPS and Vercel production deployments never allow demo login. Every environment, including previews, requires its own randomly generated `AUTH_SECRET` of at least 32 characters; there is no shared fallback signing key. Existing preview sessions must sign in again after configuring the secret.
+
 Final production is intended for a VPS. `docker-compose.prod.yml` keeps PostgreSQL and Redis private, binds the web application to `127.0.0.1:3000`, and runs all non-MTA workers. Postfix, the Transport worker and the Postfix-event worker stay on the VPS host so they can access the local MTA safely.
 
 See `deploy/VPS.md` for the runtime split.

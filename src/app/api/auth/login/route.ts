@@ -4,6 +4,7 @@ import { verify } from "@node-rs/argon2";
 import { db, databaseConfigured } from "@/db";
 import { users } from "@/db/schema";
 import { createSession } from "@/lib/auth";
+import { isDemoAuthEnabled } from "@/lib/auth-policy";
 import { audit } from "@/lib/audit";
 import { getRedis, isRedisConfigured } from "@/lib/redis";
 
@@ -17,6 +18,7 @@ export async function POST(request:NextRequest){
   if(!email||!password)return loginRedirect(request,"1");
   if(await limited(request,email)){await audit("auth.login_rate_limited",null,"user",undefined,{email});return loginRedirect(request,"rate")}
   if(!databaseConfigured){
+   if(!isDemoAuthEnabled())return loginRedirect(request,"config");
    if(email!==PREVIEW_EMAIL||password!==PREVIEW_PASSWORD)return loginRedirect(request,"1");
    await createSession({userId:"preview-owner",email:PREVIEW_EMAIL,name:"NexiMail Owner",role:"owner"});return NextResponse.redirect(new URL("/dashboard",request.url),303);
   }
