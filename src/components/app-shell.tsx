@@ -17,7 +17,10 @@ type NavItem = { href: string; label: string; icon: React.ComponentType<{ classN
 type NavGroup = { label: string; items: NavItem[] };
 
 const navGroups: NavGroup[] = [
-  { label: "Overview", items: [{ href: "/dashboard", label: "Dashboard", icon: Gauge }] },
+  { label: "Overview", items: [
+    { href: "/dashboard", label: "Dashboard", icon: Gauge },
+    { href: "/test-center", label: "Test center", icon: CircleGauge },
+  ]},
   { label: "Audience", items: [
     { href: "/contacts", label: "Contacts", icon: ContactRound }, { href: "/lists", label: "Lists", icon: Layers3 },
     { href: "/segments", label: "Segments", icon: Blocks }, { href: "/imports", label: "Imports", icon: FileUp },
