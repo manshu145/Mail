@@ -1,25 +1,53 @@
-# NexiMail VPS runtime split
+# NexiMail isolated VPS deployment
 
-Production keeps the web control plane and non-MTA workers in Docker. Postfix stays on the VPS host.
+The new NexiMail stack must run independently from the existing production panel until it is fully validated.
 
-## Docker services
+## Isolation rules
 
-`docker compose -f docker-compose.prod.yml up -d --build` starts PostgreSQL, Redis, the Next.js app, Campaign, Policy, Event, Validation, Domain Health and Reputation workers.
+- Install under `/opt/neximail-next` by default.
+- Use Docker Compose project name `neximail-next` so networks and volumes are separate.
+- PostgreSQL and Redis are not published to host ports.
+- The web app binds only to `127.0.0.1:3100` by default (`APP_BIND_PORT`).
+- Postfix/OpenDKIM run inside the new stack's MTA container.
+- Do not reuse the existing NexiMail database, Redis instance, Postfix configuration, volumes or compose project.
 
-PostgreSQL, Redis and the app bind only to loopback. Put Caddy or Nginx in front of `127.0.0.1:3000` for HTTPS.
-
-## Host workers
-
-Install Node.js 20+, Postfix and the repository at `/opt/neximail`. Copy `deploy/systemd/neximail-worker@.service` to `/etc/systemd/system/` and enable only the workers that need host MTA access:
+## First install
 
 ```bash
-systemctl daemon-reload
-systemctl enable --now neximail-worker@transport
-systemctl enable --now neximail-worker@postfix-events
+sudo APP_DIR=/opt/neximail-next PROJECT_NAME=neximail-next bash deploy/install-isolated.sh
 ```
 
-Do not enable duplicate Docker/systemd instances of the same worker.
+The first run creates `/opt/neximail-next/.env` and stops. Edit that file and replace every placeholder password/secret. Set the future app URL and mail hostname, but do not point the primary NexiMail domain at this stack yet.
 
-## Before real traffic
+Run the installer again after the environment is complete:
 
-Run `bash scripts/production-audit.sh`, then verify reverse DNS/PTR, SPF, DKIM, DMARC, STARTTLS, firewall rules, Postfix relay restrictions and a low-volume opted-in end-to-end test. Local `mta_accepted` must never be interpreted as remote delivery.
+```bash
+sudo APP_DIR=/opt/neximail-next PROJECT_NAME=neximail-next bash deploy/install-isolated.sh
+```
+
+It validates the environment, builds the images, applies migrations, bootstraps the owner, starts the stack and checks `/api/health`.
+
+## Runtime
+
+```bash
+cd /opt/neximail-next
+docker compose -p neximail-next -f docker-compose.prod.yml ps
+docker compose -p neximail-next -f docker-compose.prod.yml logs -f --tail=200
+```
+
+The control panel is available locally at `http://127.0.0.1:3100` unless `APP_BIND_PORT` is changed.
+
+## Reverse proxy
+
+During validation, use a temporary hostname/subdomain and proxy it only to the isolated app port. Do not change the current primary NexiMail virtual host until the new stack has passed end-to-end mail testing.
+
+## Before mail testing
+
+Run:
+
+```bash
+cd /opt/neximail-next
+bash scripts/production-audit.sh
+```
+
+Then verify PTR/rDNS for the sending IP, SPF, generated DKIM, DMARC, outbound port 25 reachability, TLS, bounce/event processing, suppression behavior and unsubscribe handling. `mta_accepted` means the local MTA accepted the message; it is not the same as confirmed remote delivery.
