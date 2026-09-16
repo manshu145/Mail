@@ -1,4 +1,19 @@
-import { Activity, ArrowUpRight, CircleGauge, MailCheck, Send, UsersRound } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  ArrowUpRight,
+  CircleGauge,
+  Database,
+  FileUp,
+  Globe2,
+  MailCheck,
+  Network,
+  Plus,
+  Send,
+  ServerCog,
+  ShieldCheck,
+  UsersRound,
+} from "lucide-react";
 import { redirect } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { AppShell } from "@/components/app-shell";
@@ -16,6 +31,7 @@ export default async function DashboardPage() {
   let delivered = 0;
   let queued = 0;
   let dbHealthy = false;
+
   if (databaseConfigured) {
     try {
       const [contactsRows, sentRows, deliveredRows, queuedRows] = await Promise.all([
@@ -29,26 +45,151 @@ export default async function DashboardPage() {
       delivered = deliveredRows[0]?.value ?? 0;
       queued = queuedRows[0]?.value ?? 0;
       dbHealthy = true;
-    } catch { dbHealthy = false; }
+    } catch {
+      dbHealthy = false;
+    }
   }
 
+  const redisReady = isRedisConfigured();
   const metrics = [
-    { label: "Total contacts", value: totalContacts.toLocaleString(), note: databaseConfigured ? "Persisted recipients" : "Database not connected", icon: UsersRound, accent: "emerald" },
-    { label: "Messages today", value: sentToday.toLocaleString(), note: "Created in message pipeline", icon: Send, accent: "violet" },
-    { label: "Delivered", value: delivered.toLocaleString(), note: "Remote delivery state", icon: MailCheck, accent: "amber" },
-    { label: "Queue", value: queued.toLocaleString(), note: "Queued, sending or deferred", icon: CircleGauge, accent: "rose" },
+    { label: "Total contacts", value: totalContacts.toLocaleString(), note: databaseConfigured ? "Persisted recipients" : "Connect PostgreSQL for live data", icon: UsersRound, tint: "emerald" },
+    { label: "Messages today", value: sentToday.toLocaleString(), note: "Entered the sending pipeline", icon: Send, tint: "violet" },
+    { label: "Delivered", value: delivered.toLocaleString(), note: "Confirmed remote delivery state", icon: MailCheck, tint: "blue" },
+    { label: "Active queue", value: queued.toLocaleString(), note: "Queued, sending or deferred", icon: CircleGauge, tint: "amber" },
   ];
 
-  const accentClass: Record<string, { icon: string; line: string; glow: string }> = {
-    emerald: { icon: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300", line: "bg-emerald-500", glow: "from-emerald-500/[0.07]" },
-    violet: { icon: "bg-violet-500/10 text-violet-700 dark:bg-violet-400/10 dark:text-violet-300", line: "bg-violet-500", glow: "from-violet-500/[0.07]" },
-    amber: { icon: "bg-amber-500/10 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300", line: "bg-amber-500", glow: "from-amber-500/[0.07]" },
-    rose: { icon: "bg-rose-500/10 text-rose-700 dark:bg-rose-400/10 dark:text-rose-300", line: "bg-rose-500", glow: "from-rose-500/[0.07]" },
+  const tint: Record<string, string> = {
+    emerald: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    violet: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+    blue: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
+    amber: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
   };
 
-  return <AppShell session={session}>
-    <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="mb-2 text-[11px] font-black uppercase tracking-[0.22em] text-zinc-400">Overview</p><h1 className="text-3xl font-black tracking-[-0.045em] text-zinc-950 sm:text-4xl dark:text-white">Dashboard</h1><p className="mt-2 text-sm text-zinc-500 sm:text-base dark:text-zinc-400">Contacts, campaign performance and infrastructure health in one place.</p></div><a href="/campaigns" className="btn-primary">Create campaign <ArrowUpRight className="h-4 w-4" /></a></div>
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metrics.map((metric)=>{const Icon=metric.icon;const accent=accentClass[metric.accent];return <article key={metric.label} className="group relative overflow-hidden rounded-[22px] border border-black/[0.065] bg-white p-5 shadow-[0_10px_30px_rgba(24,24,27,.045)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_42px_rgba(24,24,27,.075)] dark:border-white/[0.075] dark:bg-[#151516] dark:shadow-none"><div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${accent.glow} via-transparent to-transparent opacity-80`} /><div className={`absolute inset-x-0 top-0 h-[2px] ${accent.line}`} /><div className="relative flex items-start justify-between gap-4"><div><p className="text-[13px] font-bold text-zinc-500 dark:text-zinc-400">{metric.label}</p><p className="mt-4 text-[36px] font-black leading-none tracking-[-0.055em] text-zinc-950 dark:text-white">{metric.value}</p></div><div className={`rounded-xl p-2.5 ${accent.icon}`}><Icon className="h-5 w-5" strokeWidth={1.9} /></div></div><div className="relative mt-5 flex items-center gap-2 border-t border-black/[0.05] pt-3 dark:border-white/[0.06]"><span className="h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600" /><p className="text-xs font-medium text-zinc-400 dark:text-zinc-500">{metric.note}</p></div></article>})}</section>
-    <section className="mt-5 grid gap-5 xl:grid-cols-[1.5fr_1fr]"><article className="premium-panel p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Campaign activity</p><h2 className="mt-2 text-xl font-extrabold tracking-tight">Performance overview</h2></div><Activity className="h-5 w-5 text-zinc-400" /></div><div className="mt-8 grid min-h-56 place-items-center rounded-2xl border border-dashed border-black/[0.08] bg-[#faf9f7] p-8 text-center dark:border-white/[0.08] dark:bg-white/[0.025]"><div><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-violet-500/10 text-violet-700 dark:bg-violet-400/10 dark:text-violet-300"><Send className="h-5 w-5" /></div><p className="mt-4 text-sm font-bold">Campaign charts activate when real message events exist</p><p className="mt-1 text-xs leading-5 text-zinc-400">No fabricated delivery or engagement series.</p></div></div></article><article className="premium-panel p-6"><p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Infrastructure</p><h2 className="mt-2 text-xl font-extrabold tracking-tight">System readiness</h2><div className="mt-6 space-y-2.5">{[["Application","Online","bg-emerald-500"],["PostgreSQL",dbHealthy?"Online":databaseConfigured?"Offline":"Not configured",dbHealthy?"bg-emerald-500":"bg-amber-500"],["Redis",isRedisConfigured()?"Configured":"Not configured",isRedisConfigured()?"bg-emerald-500":"bg-zinc-400"],["Campaign workers","VPS stage","bg-zinc-400"],["Postfix","VPS stage","bg-zinc-400"]].map(([label,state,dot])=><div key={label} className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.055] bg-[#fcfbf9] px-4 py-3 dark:border-white/[0.065] dark:bg-white/[0.025]"><span className="flex items-center gap-2.5 text-sm font-semibold"><span className={`h-1.5 w-1.5 rounded-full ${dot}`} />{label}</span><span className="text-xs font-bold text-zinc-400">{state}</span></div>)}</div><a href="/system-health" className="mt-5 inline-flex items-center gap-2 text-sm font-extrabold text-zinc-800 hover:text-black dark:text-zinc-300 dark:hover:text-white">View system health <ArrowUpRight className="h-4 w-4" /></a></article></section>
-  </AppShell>;
+  const system = [
+    { label: "Application", state: "Online", good: true },
+    { label: "PostgreSQL", state: dbHealthy ? "Online" : databaseConfigured ? "Unavailable" : "Not configured", good: dbHealthy },
+    { label: "Redis", state: redisReady ? "Configured" : "Not configured", good: redisReady },
+    { label: "Campaign workers", state: "VPS runtime", good: true },
+    { label: "Postfix transport", state: "VPS runtime", good: true },
+  ];
+
+  return (
+    <AppShell session={session}>
+      <div className="mb-8 grid gap-6 xl:grid-cols-[1fr_auto] xl:items-end">
+        <div>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <p className="page-eyebrow">Command center</p>
+            <span className="status-pill"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Control plane online</span>
+          </div>
+          <h1 className="page-title">Good to see you, {session.name.split(" ")[0]}.</h1>
+          <p className="page-description">Your audience, delivery pipeline, reputation signals and infrastructure state — without fake demo analytics.</p>
+        </div>
+        <div className="flex flex-wrap gap-2.5">
+          <a href="/imports" className="btn-secondary"><FileUp className="h-4 w-4" /> Import contacts</a>
+          <a href="/campaigns" className="btn-primary"><Plus className="h-4 w-4" /> New campaign</a>
+        </div>
+      </div>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {metrics.map((metric) => {
+          const Icon = metric.icon;
+          return (
+            <article key={metric.label} className="metric-card p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[12px] font-extrabold text-[var(--muted)]">{metric.label}</p>
+                  <p className="mt-4 text-[38px] font-black leading-none tracking-[-0.055em]">{metric.value}</p>
+                </div>
+                <div className={`grid h-11 w-11 place-items-center rounded-[14px] ${tint[metric.tint]}`}>
+                  <Icon className="h-5 w-5" strokeWidth={1.9} />
+                </div>
+              </div>
+              <div className="mt-5 border-t border-[var(--border)] pt-3">
+                <p className="text-[11px] font-semibold leading-5 text-[var(--muted)]">{metric.note}</p>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+
+      <section className="mt-5 grid gap-5 xl:grid-cols-[1.45fr_.75fr]">
+        <article className="premium-panel overflow-hidden">
+          <div className="flex flex-col gap-4 border-b border-[var(--border)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--muted)]">Sending flow</p>
+              <h2 className="mt-1 text-xl font-black tracking-[-0.025em]">Mail pipeline</h2>
+            </div>
+            <a href="/infrastructure" className="inline-flex items-center gap-1.5 text-xs font-extrabold text-violet-700 dark:text-violet-300">Infrastructure <ArrowUpRight className="h-3.5 w-3.5" /></a>
+          </div>
+
+          <div className="grid gap-3 p-6 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              [UsersRound, "Audience", "Contacts & segments", "/contacts"],
+              [Send, "Campaign engine", "Scheduling & workers", "/campaigns"],
+              [Network, "Transport", "Accounts & Postfix", "/infrastructure"],
+              [MailCheck, "Delivery events", "Bounce & engagement", "/reports"],
+            ].map(([Icon, label, note, href], index) => {
+              const Component = Icon as typeof UsersRound;
+              return (
+                <a key={String(label)} href={String(href)} className="group relative panel-soft p-4 transition hover:-translate-y-0.5 hover:border-violet-500/20 hover:bg-violet-500/[0.035]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Component className="h-4.5 w-4.5" /></div>
+                    <span className="text-[10px] font-black text-[var(--muted)]">0{index + 1}</span>
+                  </div>
+                  <p className="mt-4 text-sm font-extrabold">{String(label)}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{String(note)}</p>
+                  <ArrowRight className="mt-4 h-4 w-4 text-[var(--muted)] transition group-hover:translate-x-1 group-hover:text-violet-600" />
+                </a>
+              );
+            })}
+          </div>
+
+          <div className="mx-6 mb-6 rounded-2xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-soft)] px-5 py-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-500/10 text-blue-700 dark:text-blue-300"><Activity className="h-5 w-5" /></div>
+                <div>
+                  <p className="text-sm font-extrabold">Performance charts will appear from real message events</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--muted)]">No generated open-rate, click-rate or delivery trends are shown in preview mode.</p>
+                </div>
+              </div>
+              <a href="/reports" className="btn-secondary shrink-0 !min-h-9 !py-2 text-xs">View analytics</a>
+            </div>
+          </div>
+        </article>
+
+        <article className="premium-panel p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--muted)]">Runtime</p>
+              <h2 className="mt-1 text-xl font-black tracking-[-0.025em]">System readiness</h2>
+            </div>
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"><ShieldCheck className="h-5 w-5" /></div>
+          </div>
+
+          <div className="mt-6 space-y-2.5">
+            {system.map((item) => (
+              <div key={item.label} className="flex items-center justify-between gap-4 rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-3.5 py-3">
+                <span className="flex min-w-0 items-center gap-2.5 text-[13px] font-bold">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${item.good ? "bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,.09)]" : "bg-amber-500 shadow-[0_0_0_4px_rgba(245,158,11,.09)]"}`} />
+                  <span className="truncate">{item.label}</span>
+                </span>
+                <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.1em] text-[var(--muted)]">{item.state}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-2.5">
+            <a href="/system-health" className="panel-soft flex items-center gap-2 p-3 text-xs font-extrabold transition hover:border-violet-500/20"><ServerCog className="h-4 w-4 text-violet-600" /> Health</a>
+            <a href="/domains" className="panel-soft flex items-center gap-2 p-3 text-xs font-extrabold transition hover:border-violet-500/20"><Globe2 className="h-4 w-4 text-violet-600" /> Domains</a>
+          </div>
+
+          <div className="mt-4 rounded-2xl bg-gradient-to-br from-[#171a21] to-[#242a36] p-4 text-white dark:from-[#1a1f29] dark:to-[#101318]">
+            <div className="flex items-center gap-2"><Database className="h-4 w-4 text-violet-300" /><p className="text-xs font-extrabold">VPS backend remains source of truth</p></div>
+            <p className="mt-2 text-[11px] leading-5 text-white/50">The preview UI maps to the real deployment architecture while keeping infrastructure secrets and production data off this frontend environment.</p>
+          </div>
+        </article>
+      </section>
+    </AppShell>
+  );
 }
