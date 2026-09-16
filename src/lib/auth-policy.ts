@@ -1,9 +1,17 @@
 type AuthEnvironment = Readonly<Record<string, string | undefined>>;
 
+const STABLE_PREVIEW_HOST = "neximail-preview.vercel.app";
+
 // Demo access is opt-in and is never available alongside a real database.
+// Vercel preview deployments are allowed, plus the dedicated stable NexiMail preview project URL.
 export function isDemoAuthEnabled(env: AuthEnvironment = process.env): boolean {
   if (env.NEXIMAIL_DEMO_MODE !== "true" || env.DATABASE_URL) return false;
-  if (env.VERCEL === "1") return env.VERCEL_ENV === "preview";
+
+  if (env.VERCEL === "1") {
+    if (env.VERCEL_ENV === "preview") return true;
+    return env.VERCEL_ENV === "production" && env.VERCEL_PROJECT_PRODUCTION_URL === STABLE_PREVIEW_HOST;
+  }
+
   return env.NODE_ENV === "development";
 }
 
