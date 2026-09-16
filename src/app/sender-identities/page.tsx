@@ -30,7 +30,7 @@ export default async function SenderIdentitiesPage() {
         <p className="page-description">Manage approved From identities, reply-to addresses, transport type and per-identity sending limits.</p>
       </div>
 
-      {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Sender configuration is unavailable in this preview.</b> Connect PostgreSQL to manage real sending identities.</div> : null}
+      {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Sender configuration is unavailable.</b> Check the database connection.</div> : null}
 
       <section className="mb-5 grid gap-3 sm:grid-cols-3">
         {[{label:"Active senders",value:active,icon:ShieldCheck},{label:"Paused",value:paused,icon:PauseCircle},{label:"Combined daily limit",value:totalDaily,icon:Send}].map(({label,value,icon:Icon}) => <article key={label} className="metric-card p-5"><div className="flex items-start justify-between"><div><p className="text-[12px] font-extrabold text-[var(--muted)]">{label}</p><p className="mt-3 text-3xl font-black tracking-[-0.04em]">{value.toLocaleString()}</p></div><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}
@@ -50,7 +50,7 @@ export default async function SenderIdentitiesPage() {
             </div>
             <SendingAccountActions id={row.id} status={row.status} hourly={row.hourlyLimit} daily={row.dailyLimit} />
           </article>
-        )) : <div className="premium-panel col-span-full grid min-h-64 place-items-center p-8 text-center"><div><MailCheck className="mx-auto h-8 w-8 text-[var(--muted)]" /><h3 className="mt-4 font-black">No sender identities</h3><p className="mt-1 text-sm text-[var(--muted)]">Verified sending accounts will appear here.</p></div></div>}
+        )) : <div className="premium-panel col-span-full grid min-h-64 place-items-center p-8 text-center"><div><MailCheck className="mx-auto h-8 w-8 text-[var(--muted)]" /><h3 className="mt-4 font-black">No sender identities</h3><p className="mt-1 text-sm text-[var(--muted)]">Add a sending account from Infrastructure.</p></div></div>}
       </section>
     </AppShell>
   );
