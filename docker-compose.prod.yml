@@ -108,6 +108,7 @@ services:
 
   dkim-worker:
     <<: *runtime
+    user: "0:0"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-neximail}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-neximail}
       REDIS_URL: redis://redis:6379
