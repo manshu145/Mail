@@ -96,7 +96,7 @@ async function submitToMta(raw: string, envelopeFrom: string, recipient: string)
         }
         if (stage === "body") {
           if (code < 200 || code >= 300) return failCode(code, line);
-          const queueId = line.match(/queued as\s+([A-F0-9]+)/i)?.[1] || line.match(/queue id[=:]?\s*([A-F0-9]+)/i)?.[1] || null;
+          const queueId = line.match(/queued as\s+([A-Z0-9]+)/i)?.[1] || line.match(/queue id[=:]?\s*([A-Z0-9]+)/i)?.[1] || null;
           stage = "done";
           command("QUIT");
           return finish(undefined, queueId);
