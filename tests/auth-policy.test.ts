@@ -3,8 +3,14 @@ import assert from "node:assert/strict";
 import { getAuthSecret, getLoginErrorMessage, isDemoAuthEnabled } from "../src/lib/auth-policy";
 
 const demo = { NEXIMAIL_DEMO_MODE: "true", NODE_ENV: "development" };
+const stablePreview = {
+  NODE_ENV: "production",
+  VERCEL: "1",
+  VERCEL_ENV: "production",
+  VERCEL_PROJECT_PRODUCTION_URL: "neximail-preview.vercel.app",
+};
 
-test("demo auth requires explicit opt-in and no database", () => {
+test("demo auth requires explicit opt-in and no database outside the dedicated preview", () => {
   assert.equal(isDemoAuthEnabled({ NODE_ENV: "development" }), false);
   assert.equal(isDemoAuthEnabled(demo), true);
   assert.equal(isDemoAuthEnabled({ ...demo, DATABASE_URL: "postgres://localhost/app" }), false);
@@ -35,21 +41,14 @@ test("Vercel preview permits opt-in demo even with a production Node build", () 
   assert.equal(isDemoAuthEnabled({ ...preview, NEXIMAIL_DEMO_MODE: "false" }), false);
 });
 
-test("dedicated stable NexiMail preview URL permits opt-in demo auth", () => {
-  const stablePreview = {
-    ...demo,
-    NODE_ENV: "production",
-    VERCEL: "1",
-    VERCEL_ENV: "production",
-    VERCEL_PROJECT_PRODUCTION_URL: "neximail-preview.vercel.app",
-  };
-
+test("dedicated stable NexiMail preview works without manually configured demo env vars", () => {
   assert.equal(isDemoAuthEnabled(stablePreview), true);
   assert.equal(isDemoAuthEnabled({ ...stablePreview, DATABASE_URL: "postgres://localhost/app" }), false);
-  assert.equal(isDemoAuthEnabled({ ...stablePreview, NEXIMAIL_DEMO_MODE: "false" }), false);
+  assert.doesNotThrow(() => getAuthSecret(stablePreview));
+  assert.ok(getAuthSecret(stablePreview).length >= 32);
 });
 
-test("every environment requires its own sufficiently long signing secret", () => {
+test("real environments require a sufficiently long signing secret", () => {
   for (const AUTH_SECRET of [undefined, "", "x".repeat(31)]) {
     assert.throws(() => getAuthSecret({ AUTH_SECRET }), /AUTH_SECRET/);
     assert.throws(() => getAuthSecret({ ...demo, VERCEL: "1", VERCEL_ENV: "preview", AUTH_SECRET }), /AUTH_SECRET/);
