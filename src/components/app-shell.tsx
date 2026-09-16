@@ -19,7 +19,6 @@ type NavGroup = { label: string; items: NavItem[] };
 const navGroups: NavGroup[] = [
   { label: "Overview", items: [
     { href: "/dashboard", label: "Dashboard", icon: Gauge },
-    { href: "/test-center", label: "Test center", icon: CircleGauge },
   ]},
   { label: "Audience", items: [
     { href: "/contacts", label: "Contacts", icon: ContactRound }, { href: "/lists", label: "Lists", icon: Layers3 },
@@ -53,7 +52,6 @@ export function AppShell({ session, children }: { session: SessionView; children
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const productionMode = process.env.NEXT_PUBLIC_NEXIMAIL_MODE === "production";
 
   const current = useMemo(() => {
     for (const group of navGroups) for (const item of group.items) if (pathname === item.href || pathname.startsWith(`${item.href}/`)) return item;
@@ -70,7 +68,6 @@ export function AppShell({ session, children }: { session: SessionView; children
         </div>)}
       </div>
       <div className="border-t border-[var(--sidebar-border)] p-3">
-        {!collapsed && <div className={`mb-2.5 flex items-center gap-2 rounded-[10px] border px-2.5 py-2 text-[10px] font-black uppercase tracking-[.12em] ${productionMode?"border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300":"border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}><span className={`h-1.5 w-1.5 rounded-full ${productionMode?"bg-emerald-500":"bg-amber-500"}`}/>{productionMode?"Production":"Staging · Isolated"}</div>}
         <div className={`flex items-center ${collapsed?"justify-center":"gap-2.5"}`}><div className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-gradient-to-br from-[#7c5cff] to-[#4b7cff] text-[10px] font-black text-white">{initials(session.name)}</div>{!collapsed&&<><div className="min-w-0 flex-1"><div className="truncate text-[12px] font-extrabold">{session.name}</div><div className="truncate text-[10px] capitalize text-[var(--sidebar-muted)]">{session.role}</div></div><ChevronDown className="h-3.5 w-3.5 text-[var(--sidebar-muted)]"/></>}</div>
         {!collapsed&&<form action="/api/auth/logout" method="post" className="mt-2.5"><button className="w-full rounded-[10px] border border-[var(--sidebar-border)] bg-[var(--sidebar-hover)] px-3 py-2 text-[11px] font-bold text-[var(--sidebar-muted)] transition hover:text-[var(--sidebar-fg)]">Sign out</button></form>}
       </div>
