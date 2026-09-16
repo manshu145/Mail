@@ -26,8 +26,11 @@ jobs:
     env:
       DATABASE_URL: postgres://neximail:neximail@localhost:5432/neximail
       REDIS_URL: redis://localhost:6379
+      POSTGRES_PASSWORD: neximail
       AUTH_SECRET: ci-only-auth-secret-value-that-is-at-least-32-characters
       PUBLIC_TOKEN_SECRET: ci-only-public-token-secret-that-is-at-least-32-characters
+      WEBHOOK_SECRET_KEY: ci-only-webhook-secret-value-that-is-at-least-32-characters
+      DKIM_SECRET_KEY: ci-only-dkim-secret-value-that-is-at-least-32-characters
       APP_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v4
@@ -39,3 +42,7 @@ jobs:
       - run: npm run test
       - run: npm run typecheck
       - run: npm run build
+      - name: Validate production compose
+        run: docker compose -f docker-compose.prod.yml config >/dev/null
+      - name: Build mail transport image
+        run: docker build -f Dockerfile.mta -t neximail-mta:ci .
