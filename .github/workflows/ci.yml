@@ -48,3 +48,20 @@ jobs:
         run: docker compose -f docker-compose.prod.yml config >/dev/null
       - name: Build mail transport image
         run: docker build -f Dockerfile.mta -t neximail-mta:ci .
+      - name: Smoke test mail transport runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -p neximail-ci -f docker-compose.prod.yml up -d mta
+          for i in $(seq 1 20); do
+            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$(docker compose -p neximail-ci -f docker-compose.prod.yml ps -q mta)")"
+            if [ "$status" = healthy ]; then break; fi
+            if [ "$status" = unhealthy ] || [ "$status" = exited ]; then
+              docker compose -p neximail-ci -f docker-compose.prod.yml logs mta
+              exit 1
+            fi
+            sleep 2
+          done
+          docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta postfix status
+          docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta sh -lc 'test -s /run/opendkim/opendkim.pid && kill -0 "$(cat /run/opendkim/opendkim.pid)"'
+          docker compose -p neximail-ci -f docker-compose.prod.yml down -v
