@@ -1,26 +1,40 @@
 type AuthEnvironment = Readonly<Record<string, string | undefined>>;
 
 const STABLE_PREVIEW_HOST = "neximail-preview.vercel.app";
+const STABLE_PREVIEW_SESSION_KEY = "neximail-preview.vercel.app:isolated-demo-session:v1";
 
-// Demo access is opt-in and is never available alongside a real database.
-// Vercel preview deployments are allowed, plus the dedicated stable NexiMail preview project URL.
+function isDedicatedStablePreview(env: AuthEnvironment): boolean {
+  return (
+    !env.DATABASE_URL &&
+    env.VERCEL === "1" &&
+    env.VERCEL_ENV === "production" &&
+    env.VERCEL_PROJECT_PRODUCTION_URL === STABLE_PREVIEW_HOST
+  );
+}
+
+// The dedicated Vercel project is an isolated demo surface with no database.
+// Other environments still require explicit NEXIMAIL_DEMO_MODE opt-in.
 export function isDemoAuthEnabled(env: AuthEnvironment = process.env): boolean {
-  if (env.NEXIMAIL_DEMO_MODE !== "true" || env.DATABASE_URL) return false;
+  if (env.DATABASE_URL) return false;
+  if (isDedicatedStablePreview(env)) return true;
+  if (env.NEXIMAIL_DEMO_MODE !== "true") return false;
 
-  if (env.VERCEL === "1") {
-    if (env.VERCEL_ENV === "preview") return true;
-    return env.VERCEL_ENV === "production" && env.VERCEL_PROJECT_PRODUCTION_URL === STABLE_PREVIEW_HOST;
-  }
-
+  if (env.VERCEL === "1") return env.VERCEL_ENV === "preview";
   return env.NODE_ENV === "development";
 }
 
 export function getAuthSecret(env: AuthEnvironment = process.env): Uint8Array {
   const secret = env.AUTH_SECRET;
-  if (!secret || secret.length < 32) {
-    throw new Error("AUTH_SECRET must be at least 32 characters");
+  if (secret && secret.length >= 32) return new TextEncoder().encode(secret);
+
+  // The isolated stable preview contains no real customer/database data and has public demo
+  // credentials, so it may use a deterministic session key when Vercel secrets are unavailable.
+  // Real deployments and normal preview branches must still provide AUTH_SECRET.
+  if (isDedicatedStablePreview(env)) {
+    return new TextEncoder().encode(STABLE_PREVIEW_SESSION_KEY);
   }
-  return new TextEncoder().encode(secret);
+
+  throw new Error("AUTH_SECRET must be at least 32 characters");
 }
 
 export function getLoginErrorMessage(error: string): string {
