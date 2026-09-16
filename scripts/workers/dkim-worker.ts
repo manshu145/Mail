@@ -34,7 +34,10 @@ async function sync() {
       const domainDir = path.join(root, "keys", row.domain);
       const keyFile = path.join(domainDir, `${selector}.private`);
       await fs.mkdir(domainDir, { recursive: true });
-      await atomicWrite(keyFile, privateKey, 0o640);
+      // The shared volume is mounted only into the DKIM sync worker and MTA container.
+      // 0644 avoids UID mismatches between those isolated containers while keeping the
+      // key outside the web filesystem and source tree.
+      await atomicWrite(keyFile, privateKey, 0o644);
       const identity = `${selector}._domainkey.${row.domain}`;
       keyTable.push(`${identity} ${row.domain}:${selector}:${keyFile}`);
       signingTable.push(`*@${row.domain} ${identity}`);
