@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { eq } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { sendingDomains, workerHeartbeats } from "../../src/db/operations-schema";
-import { decryptDkimPrivateKey } from "../../src/lib/dkim-keys";
+import { createDkimMaterial, decryptDkimPrivateKey } from "../../src/lib/dkim-keys";
 
 const intervalMs = Math.max(10000, Number(process.env.DKIM_SYNC_INTERVAL_MS || "60000"));
 const root = process.env.DKIM_KEY_DIR || "/var/lib/neximail/dkim";
@@ -24,19 +25,33 @@ async function sync() {
   const keyTable: string[] = [];
   const signingTable: string[] = [];
   let written = 0;
+  let generated = 0;
   let skipped = 0;
 
-  for (const row of domains) {
-    if (!row.dkimPrivateKeyCiphertext || !row.dkimPublicKey || row.status === "disabled") { skipped++; continue; }
+  for (const original of domains) {
+    if (original.status === "disabled") { skipped++; continue; }
+    let row = original;
     try {
+      if (!row.dkimPrivateKeyCiphertext || !row.dkimPublicKey) {
+        const material = createDkimMaterial(row.dkimSelector || "default");
+        const [updated] = await db.update(sendingDomains).set({
+          dkimSelector: material.selector,
+          dkimPublicKey: material.publicKey,
+          dkimPrivateKeyCiphertext: material.privateKeyCiphertext,
+          dkimOk: false,
+          status: "warning",
+          updatedAt: new Date(),
+        }).where(eq(sendingDomains.id, row.id)).returning();
+        row = updated;
+        generated++;
+      }
+
+      if (!row.dkimPrivateKeyCiphertext || !row.dkimPublicKey) { skipped++; continue; }
       const privateKey = decryptDkimPrivateKey(row.dkimPrivateKeyCiphertext);
       const selector = row.dkimSelector || "default";
       const domainDir = path.join(root, "keys", row.domain);
       const keyFile = path.join(domainDir, `${selector}.private`);
       await fs.mkdir(domainDir, { recursive: true });
-      // The shared volume is mounted only into the DKIM sync worker and MTA container.
-      // 0644 avoids UID mismatches between those isolated containers while keeping the
-      // key outside the web filesystem and source tree.
       await atomicWrite(keyFile, privateKey, 0o644);
       const identity = `${selector}._domainkey.${row.domain}`;
       keyTable.push(`${identity} ${row.domain}:${selector}:${keyFile}`);
@@ -50,7 +65,7 @@ async function sync() {
 
   await atomicWrite(path.join(root, "KeyTable"), `${keyTable.join("\n")}\n`);
   await atomicWrite(path.join(root, "SigningTable"), `${signingTable.join("\n")}\n`);
-  await heartbeat({ state: "online", domains: domains.length, written, skipped });
+  await heartbeat({ state: "online", domains: domains.length, written, generated, skipped });
 }
 
 async function main() {
