@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
-import { campaigns, contactLists, contacts, lists, sendingAccounts, templates } from "@/db/schema";
+import { campaigns, lists, sendingAccounts, templates } from "@/db/schema";
 import { sendingDomains } from "@/db/operations-schema";
+import { resolveAudienceRecipients } from "@/lib/audience";
 import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
 import { isValidEmail } from "@/lib/contact-utils";
@@ -43,6 +44,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (scheduledAt && Number.isNaN(scheduledAt.getTime())) return NextResponse.json({ error: "Invalid schedule time." }, { status: 400 });
 
   const policy = getRuntimePolicy();
+  let audienceSize: number | null = null;
+
   if (action === "queue") {
     if (!list || !template || !account) return NextResponse.json({ error: "Select a list, template and sending account before queueing." }, { status: 400 });
     if (!policy.sendingEnabled) return NextResponse.json({ error: "Sending is disabled by runtime configuration." }, { status: 423 });
@@ -56,10 +59,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const [domainRow] = await db.select().from(sendingDomains).where(eq(sendingDomains.domain, domain)).limit(1);
     if (!domainRow || domainRow.status !== "ready") return NextResponse.json({ error: `Sending domain ${domain} must pass SPF, DKIM and DMARC checks before queueing.` }, { status: 409 });
 
-    const [audience] = await db.select({ value: sql<number>`count(*)::int` }).from(contactLists).innerJoin(contacts, eq(contactLists.contactId, contacts.id)).where(and(eq(contactLists.listId, list.id), eq(contacts.status, "active")));
-    const audienceSize = audience?.value ?? 0;
-    if (audienceSize === 0 && !list.isDynamic) return NextResponse.json({ error: "Selected audience has no active contacts." }, { status: 409 });
-    if (policy.maxRecipientsPerCampaign !== null && audienceSize > policy.maxRecipientsPerCampaign) return NextResponse.json({ error: `This runtime allows up to ${policy.maxRecipientsPerCampaign.toLocaleString()} active recipients per campaign. This list currently has ${audienceSize.toLocaleString()}.` }, { status: 409 });
+    const recipients = await resolveAudienceRecipients(list);
+    audienceSize = recipients.length;
+    if (audienceSize === 0) return NextResponse.json({ error: "Selected audience has no active contacts." }, { status: 409 });
+    if (policy.maxRecipientsPerCampaign !== null && audienceSize > policy.maxRecipientsPerCampaign) return NextResponse.json({ error: `This runtime allows up to ${policy.maxRecipientsPerCampaign.toLocaleString()} active recipients per campaign. This audience currently has ${audienceSize.toLocaleString()}.` }, { status: 409 });
   }
 
   const nextStatus = action === "queue" ? scheduledAt && scheduledAt.getTime() > Date.now() ? "scheduled" : "queued" : "draft";
@@ -77,6 +80,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     updatedAt: new Date(),
   }).where(eq(campaigns.id, id));
 
-  await audit(action === "queue" ? "campaign.queued" : "campaign.updated", session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, runtimeMode: policy.mode });
-  return NextResponse.json({ ok: true, status: nextStatus });
+  await audit(action === "queue" ? "campaign.queued" : "campaign.updated", session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, audienceSize, runtimeMode: policy.mode });
+  return NextResponse.json({ ok: true, status: nextStatus, audienceSize });
 }
