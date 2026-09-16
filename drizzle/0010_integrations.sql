@@ -1,5 +1,9 @@
 DO $$ BEGIN
-  CREATE TYPE "webhook_delivery_status" AS ENUM ('pending','delivered','failed');
+  CREATE TYPE "webhook_delivery_status" AS ENUM ('pending','processing','delivered','failed');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TYPE "webhook_delivery_status" ADD VALUE IF NOT EXISTS 'processing';
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
