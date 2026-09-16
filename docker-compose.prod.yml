@@ -22,7 +22,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-neximail}
       POSTGRES_USER: ${POSTGRES_USER:-neximail}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-    ports: ["127.0.0.1:5432:5432"]
     volumes: ["postgres_data:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-neximail} -d ${POSTGRES_DB:-neximail}"]
@@ -34,7 +33,6 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
-    ports: ["127.0.0.1:6379:6379"]
     volumes: ["redis_data:/data"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -64,7 +62,7 @@ services:
 
   app:
     <<: *runtime
-    ports: ["127.0.0.1:3000:3000"]
+    ports: ["127.0.0.1:${APP_BIND_PORT:-3100}:3000"]
 
   import-worker:
     <<: *runtime
