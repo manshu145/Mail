@@ -3,6 +3,7 @@ import { db, databaseConfigured } from "@/db";
 import { suppressions } from "@/db/schema";
 import { normalizeEmail } from "@/lib/contact-utils";
 import { verifyPublicToken } from "@/lib/public-tokens";
+import { emitWebhookEvent } from "@/lib/webhooks";
 
 function page(token: string, message = "Confirm that you want to stop receiving marketing emails from this sender.") {
   const escaped = token.replace(/[^A-Za-z0-9._-]/g, "");
@@ -12,8 +13,9 @@ function page(token: string, message = "Confirm that you want to stop receiving 
 async function decode(token: string) {
   const payload = await verifyPublicToken(token);
   const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+  const messageId = typeof payload.messageId === "string" ? payload.messageId : null;
   if (!email || !email.includes("@")) throw new Error("Invalid token");
-  return email;
+  return { email, messageId };
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ token: string }> }) {
@@ -25,9 +27,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
 export async function POST(_request: Request, { params }: { params: Promise<{ token: string }> }) {
   try {
     const { token } = await params;
-    const email = await decode(token);
+    const { email, messageId } = await decode(token);
     if (!databaseConfigured) return new NextResponse("Unsubscribe service is temporarily unavailable.", { status: 503 });
     await db.insert(suppressions).values({ email, normalizedEmail: normalizeEmail(email), reason: "unsubscribe", source: "unsubscribe_link" }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "unsubscribe", source: "unsubscribe_link" } });
+    await emitWebhookEvent("contact.unsubscribed", { email, messageId }).catch((error) => console.error("[unsubscribe.webhook]", error));
     return new Response(page(token, "You have been unsubscribed. This address is now in the global suppression list."), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
   } catch { return new NextResponse("Invalid or expired unsubscribe link.", { status: 400 }); }
 }
