@@ -52,10 +52,12 @@ services:
       MTA_HOSTNAME: ${MTA_HOSTNAME:-mail.localhost}
       MTA_NETWORKS: ${MTA_NETWORKS:-127.0.0.0/8 172.16.0.0/12 192.168.0.0/16}
       MTA_MESSAGE_SIZE_LIMIT: ${MTA_MESSAGE_SIZE_LIMIT:-26214400}
+      DKIM_KEY_DIR: /var/lib/neximail/dkim
     volumes:
       - mta_logs:/var/log/mta
+      - dkim_keys:/var/lib/neximail/dkim
     healthcheck:
-      test: ["CMD-SHELL", "postfix status"]
+      test: ["CMD-SHELL", "postfix status && test -f /run/opendkim/opendkim.pid && kill -0 $(cat /run/opendkim/opendkim.pid)"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -104,6 +106,16 @@ services:
       mta:
         condition: service_healthy
 
+  dkim-worker:
+    <<: *runtime
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-neximail}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-neximail}
+      REDIS_URL: redis://redis:6379
+      DKIM_KEY_DIR: /var/lib/neximail/dkim
+    volumes:
+      - dkim_keys:/var/lib/neximail/dkim
+    command: ["npm", "run", "worker:dkim"]
+
   validation-worker:
     <<: *runtime
     command: ["npm", "run", "worker:validation"]
@@ -124,3 +136,4 @@ volumes:
   postgres_data:
   redis_data:
   mta_logs:
+  dkim_keys:
