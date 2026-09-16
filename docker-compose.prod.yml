@@ -62,9 +62,12 @@ services:
   reputation-worker:
     <<: *runtime
     command: ["npm", "run", "worker:reputation"]
+  webhook-worker:
+    <<: *runtime
+    command: ["npm", "run", "worker:webhook"]
 
-# Transport and Postfix-event workers run on the VPS host via systemd so they
-# can access the local Postfix sendmail binary and mail logs.
+# Transport and Postfix-event workers run on the isolated staging/production VPS
+# host via systemd so they can access the local Postfix sendmail binary and mail logs.
 volumes:
   postgres_data:
   redis_data:
