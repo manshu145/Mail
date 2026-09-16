@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { Activity, CheckCircle2, CircleAlert, ServerCog } from "lucide-react";
 import { redirect } from "next/navigation";
 import { desc } from "drizzle-orm";
@@ -24,14 +23,12 @@ export default async function SystemHealthPage() {
   const beat = new Map(beats.map((item) => [item.workerName, item]));
   const workerState = (name: string) => { const item = beat.get(name); if (!item) return "not_configured" as const; return Date.now() - item.lastSeenAt.getTime() < 12 * 60 * 1000 ? "online" as const : "offline" as const; };
 
-  const postfix = process.env.VERCEL === "1" ? "not_configured" : existsSync(/* turbopackIgnore: true */ process.env.POSTFIX_SENDMAIL_PATH || "/usr/sbin/sendmail") ? "online" : "not_configured";
-  const workerNames = ["import", "campaign", "policy", "transport", "event", "validation", "reputation", "domain-health", "webhook", "postfix-events"];
+  const workerNames = ["import", "campaign", "policy", "transport", "event", "validation", "reputation", "domain-health", "dkim", "webhook", "postfix-events"];
   const items = [
-    { name: "Application", status: "online", detail: "Next.js control plane", icon: Activity },
+    { name: "Application", status: "online", detail: "NexiMail control plane", icon: Activity },
     { name: "PostgreSQL", status: postgres, detail: "Persistent application data", icon: ServerCog },
     { name: "Redis", status: redis, detail: "Rate limits and queue coordination", icon: ServerCog },
     ...workerNames.map((name) => ({ name: `${name.replaceAll("-", " ")} worker`, status: workerState(name), detail: beat.get(name) ? `Last heartbeat ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(beat.get(name)!.lastSeenAt)}` : "No heartbeat recorded", icon: ServerCog })),
-    { name: "Postfix sendmail", status: postfix, detail: postfix === "online" ? "Local sendmail binary available" : "Expected on VPS runtime", icon: ServerCog },
   ];
 
   return <AppShell session={session}><div className="mb-7"><p className="page-eyebrow mb-2">Operations</p><h1 className="page-title">System health</h1><p className="page-description">Live runtime checks and persisted worker heartbeats. Stale workers are shown offline instead of being silently reported healthy.</p></div><section className="grid gap-4 lg:grid-cols-2">{items.map(({ name, status, detail, icon: Icon }) => { const online = status === "online"; const bad = status === "offline"; return <article key={name} className="premium-panel p-5"><div className="flex items-start justify-between gap-4"><div className="flex items-center gap-4"><div className="grid h-11 w-11 place-items-center rounded-xl bg-[var(--surface-soft)] text-[var(--muted)]"><Icon className="h-5 w-5" /></div><div><h2 className="font-black capitalize">{name}</h2><p className="mt-1 text-sm text-[var(--muted)]">{detail}</p></div></div><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold ${online ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : bad ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-[var(--surface-soft)] text-[var(--muted)]"}`}>{online ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CircleAlert className="h-3.5 w-3.5" />}{status.replaceAll("_", " ")}</span></div></article>; })}</section></AppShell>;
