@@ -1,6 +1,6 @@
 import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
-export const webhookDeliveryStatus = pgEnum("webhook_delivery_status", ["pending", "delivered", "failed"]);
+export const webhookDeliveryStatus = pgEnum("webhook_delivery_status", ["pending", "processing", "delivered", "failed"]);
 
 export const apiKeys = pgTable(
   "api_keys",
