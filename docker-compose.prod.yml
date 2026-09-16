@@ -5,6 +5,8 @@ x-runtime: &runtime
   environment:
     DATABASE_URL: postgres://${POSTGRES_USER:-neximail}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-neximail}
     REDIS_URL: redis://redis:6379
+    MTA_HOST: mta
+    MTA_PORT: "10025"
   depends_on:
     postgres:
       condition: service_healthy
@@ -27,6 +29,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -38,36 +41,86 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  mta:
+    build:
+      context: .
+      dockerfile: Dockerfile.mta
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MTA_HOSTNAME: ${MTA_HOSTNAME:-mail.localhost}
+      MTA_NETWORKS: ${MTA_NETWORKS:-127.0.0.0/8 172.16.0.0/12 192.168.0.0/16}
+      MTA_MESSAGE_SIZE_LIMIT: ${MTA_MESSAGE_SIZE_LIMIT:-26214400}
+    volumes:
+      - mta_logs:/var/log/mta
+    healthcheck:
+      test: ["CMD-SHELL", "postfix status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   app:
     <<: *runtime
     ports: ["127.0.0.1:3000:3000"]
+
   import-worker:
     <<: *runtime
     command: ["npm", "run", "worker:import"]
+
   campaign-worker:
     <<: *runtime
     command: ["npm", "run", "worker:campaign"]
+
   policy-worker:
     <<: *runtime
     command: ["npm", "run", "worker:policy"]
+
+  transport-worker:
+    <<: *runtime
+    command: ["npm", "run", "worker:transport"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mta:
+        condition: service_healthy
+
   event-worker:
     <<: *runtime
     command: ["npm", "run", "worker:event"]
+
+  postfix-event-worker:
+    <<: *runtime
+    volumes:
+      - mta_logs:/var/log/mta:ro
+    command: ["sh", "-c", "while [ ! -f /var/log/mta/mail.log ]; do sleep 1; done; tail -n 0 -F /var/log/mta/mail.log | npm run worker:postfix-events"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mta:
+        condition: service_healthy
+
   validation-worker:
     <<: *runtime
     command: ["npm", "run", "worker:validation"]
+
   domain-health-worker:
     <<: *runtime
     command: ["npm", "run", "worker:domain-health"]
+
   reputation-worker:
     <<: *runtime
     command: ["npm", "run", "worker:reputation"]
+
   webhook-worker:
     <<: *runtime
     command: ["npm", "run", "worker:webhook"]
 
-# Transport and Postfix-event workers run on the isolated staging/production VPS
-# host via systemd so they can access the local Postfix sendmail binary and mail logs.
 volumes:
   postgres_data:
   redis_data:
+  mta_logs:
