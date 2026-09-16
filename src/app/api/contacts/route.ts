@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!databaseConfigured) return NextResponse.json({ error: "Database is not configured for this preview." }, { status: 503 });
+  if (!databaseConfigured) return NextResponse.json({ error: "Contact storage is unavailable." }, { status: 503 });
 
   const body = (await request.json().catch(() => null)) as {
     mode?: string;
