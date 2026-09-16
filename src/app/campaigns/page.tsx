@@ -29,12 +29,12 @@ export default async function CampaignsPage() {
         <div>
           <p className="page-eyebrow mb-2">Messaging</p>
           <h1 className="page-title">Campaigns</h1>
-          <p className="page-description">Draft, schedule and monitor campaigns while keeping queue, policy and transport stages explicit.</p>
+          <p className="page-description">Create, schedule and monitor campaigns from draft through delivery.</p>
         </div>
         <ResourceCreate
           disabled={!usable}
           endpoint="/api/resources/campaigns"
-          title="Create campaign draft"
+          title="Create campaign"
           buttonLabel="Create campaign"
           fields={[
             { name: "name", label: "Internal campaign name", required: true, placeholder: "September customers" },
@@ -47,15 +47,15 @@ export default async function CampaignsPage() {
       {!usable ? (
         <div className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/[0.07] px-4 py-3.5 text-sm text-amber-900 dark:text-amber-200">
           <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-          <div><b>Database not connected.</b> Draft creation is disabled and no campaign state is simulated.</div>
+          <div><b>Campaigns are temporarily unavailable.</b> Please check the system status and try again.</div>
         </div>
       ) : null}
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         {[
-          ["Draft-first", "Every campaign begins as an explicit draft."],
-          ["Worker queued", "Web requests do not perform bulk delivery."],
-          ["Traceable", "Recipient and transport state remain observable."],
+          ["Build", "Create campaigns with subject, preheader, audience and content."],
+          ["Schedule", "Send immediately or choose the exact delivery time."],
+          ["Monitor", "Track campaign and recipient delivery status in one place."],
         ].map(([title, copy]) => (
           <div key={title} className="panel-soft px-4 py-3.5">
             <p className="text-xs font-extrabold">{title}</p>
@@ -68,9 +68,9 @@ export default async function CampaignsPage() {
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
           <div>
             <p className="text-sm font-extrabold">Campaign workspace</p>
-            <p className="mt-1 text-xs text-[var(--muted)]">{rows.length ? `${rows.length} recent campaign${rows.length === 1 ? "" : "s"}` : "No campaign records yet"}</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">{rows.length ? `${rows.length} recent campaign${rows.length === 1 ? "" : "s"}` : "No campaigns yet"}</p>
           </div>
-          <span className="status-pill"><TimerReset className="h-3.5 w-3.5" /> Worker pipeline</span>
+          <span className="status-pill"><TimerReset className="h-3.5 w-3.5" /> Delivery status</span>
         </div>
 
         {rows.length ? (
@@ -98,7 +98,7 @@ export default async function CampaignsPage() {
             <div className="max-w-sm">
               <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-violet-500/10 text-violet-700 dark:text-violet-300"><Send className="h-6 w-6" /></div>
               <h2 className="mt-4 text-lg font-black">No campaigns yet</h2>
-              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Create the first draft when the database is connected. Sending remains isolated behind queue and transport workers.</p>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Create your first campaign, choose an audience and sender, then schedule or send it.</p>
             </div>
           </div>
         )}
