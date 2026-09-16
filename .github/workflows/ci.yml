@@ -42,6 +42,8 @@ jobs:
       - run: npm run test
       - run: npm run typecheck
       - run: npm run build
+      - name: Prepare compose environment
+        run: cp .env.example .env
       - name: Validate production compose
         run: docker compose -f docker-compose.prod.yml config >/dev/null
       - name: Build mail transport image
