@@ -1,12 +1,14 @@
-import { spawn } from "node:child_process";
+import net from "node:net";
 import { eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { campaigns, contacts, messages, sendingAccounts, templates } from "../../src/db/schema";
 import { sendingAccountWarmups, workerHeartbeats } from "../../src/db/operations-schema";
 import { signPublicToken } from "../../src/lib/public-tokens";
 
-const sendmailPath = process.env.POSTFIX_SENDMAIL_PATH || "/usr/sbin/sendmail";
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+const mtaHost = process.env.MTA_HOST || "mta";
+const mtaPort = Math.max(1, Number(process.env.MTA_PORT || "10025"));
+const smtpTimeoutMs = Math.max(3000, Number(process.env.MTA_SMTP_TIMEOUT_MS || "15000"));
 const perSecond = Math.max(1, Number(process.env.TRANSPORT_RATE_PER_SECOND || "1"));
 const delayMs = Math.ceil(1000 / perSecond);
 const intervalMs = Math.max(1000, Number(process.env.TRANSPORT_WORKER_INTERVAL_MS || "3000"));
@@ -17,6 +19,7 @@ function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve,
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return value.replaceAll("{{first_name}}", contact.firstName || "").replaceAll("{{last_name}}", contact.lastName || "").replaceAll("{{email}}", contact.email); }
 function headerValue(value: string) { return value.replace(/[\r\n]+/g, " ").trim(); }
 function retryDelaySeconds(attempt: number) { return Math.min(3600, Math.max(30, 30 * 2 ** Math.max(0, attempt - 1))); }
+function dotStuff(raw: string) { return raw.replace(/\r?\n/g, "\r\n").split("\r\n").map((line) => line.startsWith(".") ? `.${line}` : line).join("\r\n"); }
 
 async function heartbeat(meta: Record<string, unknown> = {}) { await db.insert(workerHeartbeats).values({ workerName: "transport", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } }); }
 
@@ -32,18 +35,74 @@ async function rewriteLinks(html: string, messageId: string) {
   return output;
 }
 
-async function sendRaw(raw: string) {
+async function submitToMta(raw: string, envelopeFrom: string, recipient: string) {
   return new Promise<{ queueId: string | null }>((resolve, reject) => {
-    const child = spawn(sendmailPath, ["-v", "-i", "-t"], { stdio: ["pipe", "pipe", "pipe"] });
-    let output = "";
-    child.stdout.on("data", (chunk) => (output += String(chunk)));
-    child.stderr.on("data", (chunk) => (output += String(chunk)));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) return reject(new Error(output || `sendmail exited ${code}`));
-      resolve({ queueId: output.match(/(?:queued as|queue id[=:]?)[\s]*([A-F0-9]{6,})/i)?.[1] || null });
+    const socket = net.createConnection({ host: mtaHost, port: mtaPort });
+    socket.setTimeout(smtpTimeoutMs);
+    let buffer = "";
+    let stage: "banner" | "ehlo" | "mail" | "rcpt" | "data" | "body" | "done" = "banner";
+    let settled = false;
+
+    const finish = (error?: Error, queueId: string | null = null) => {
+      if (settled) return;
+      settled = true;
+      socket.end();
+      socket.destroy();
+      if (error) reject(error); else resolve({ queueId });
+    };
+    const command = (value: string) => socket.write(`${value}\r\n`);
+    const failCode = (code: number, line: string) => finish(new Error(`MTA SMTP ${code}: ${line.slice(0, 800)}`));
+
+    socket.on("timeout", () => finish(new Error("MTA SMTP timeout")));
+    socket.on("error", (error) => finish(error));
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const match = line.match(/^(\d{3})([ -])(.*)$/);
+        if (!match || match[2] === "-") continue;
+        const code = Number(match[1]);
+
+        if (stage === "banner") {
+          if (code !== 220) return failCode(code, line);
+          stage = "ehlo";
+          command("EHLO neximail-app");
+          continue;
+        }
+        if (stage === "ehlo") {
+          if (code < 200 || code >= 300) return failCode(code, line);
+          stage = "mail";
+          command(`MAIL FROM:<${envelopeFrom}>`);
+          continue;
+        }
+        if (stage === "mail") {
+          if (code < 200 || code >= 300) return failCode(code, line);
+          stage = "rcpt";
+          command(`RCPT TO:<${recipient}>`);
+          continue;
+        }
+        if (stage === "rcpt") {
+          if (code < 200 || code >= 300) return failCode(code, line);
+          stage = "data";
+          command("DATA");
+          continue;
+        }
+        if (stage === "data") {
+          if (code !== 354) return failCode(code, line);
+          stage = "body";
+          socket.write(`${dotStuff(raw)}\r\n.\r\n`);
+          continue;
+        }
+        if (stage === "body") {
+          if (code < 200 || code >= 300) return failCode(code, line);
+          const queueId = line.match(/queued as\s+([A-F0-9]+)/i)?.[1] || line.match(/queue id[=:]?\s*([A-F0-9]+)/i)?.[1] || null;
+          stage = "done";
+          command("QUIT");
+          return finish(undefined, queueId);
+        }
+      }
     });
-    child.stdin.end(raw);
   });
 }
 
@@ -88,7 +147,7 @@ async function claimMessages(): Promise<Claimed[]> {
 }
 
 async function markDeferred(id: string, attempt: number, error: unknown) {
-  const detail = error instanceof Error ? error.message.slice(0, 1000) : "sendmail_error";
+  const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error";
   if (attempt >= maxAttempts) {
     await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [id, detail]);
     return "failed" as const;
@@ -153,7 +212,8 @@ async function runOnce() {
     ].join("\r\n");
 
     try {
-      const result = await sendRaw(raw);
+      const result = await submitToMta(raw, fromEmail, recipient);
+      if (!result.queueId) throw new Error("MTA accepted message without returning a queue id");
       await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]);
       accepted++;
     } catch (error) {
@@ -163,9 +223,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  // Campaign completion is intentionally owned by event-worker. A message that is
-  // merely mta_accepted is still awaiting a remote delivery/bounce/failure result.
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, perSecond, maxAttempts });
+  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, perSecond, maxAttempts, mtaHost, mtaPort });
 }
 
 async function main() {
@@ -173,7 +231,7 @@ async function main() {
   await recoverStaleClaims();
   while (true) {
     try { await runOnce(); }
-    catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); }
+    catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort }).catch(() => {}); }
     await sleep(intervalMs);
   }
 }
