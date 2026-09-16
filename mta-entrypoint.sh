@@ -4,11 +4,35 @@ set -eu
 MTA_HOSTNAME="${MTA_HOSTNAME:-mail.localhost}"
 MTA_NETWORKS="${MTA_NETWORKS:-127.0.0.0/8 172.16.0.0/12 192.168.0.0/16}"
 MTA_MESSAGE_SIZE_LIMIT="${MTA_MESSAGE_SIZE_LIMIT:-26214400}"
+DKIM_DIR="${DKIM_KEY_DIR:-/var/lib/neximail/dkim}"
 
-mkdir -p /var/log/mta /var/spool/postfix /etc/postfix
-chmod 0755 /var/log/mta
+mkdir -p /var/log/mta /var/spool/postfix /etc/postfix /run/opendkim "$DKIM_DIR"
+chmod 0755 /var/log/mta "$DKIM_DIR"
+touch /var/log/mta/mail.log "$DKIM_DIR/KeyTable" "$DKIM_DIR/SigningTable"
 
-touch /var/log/mta/mail.log
+cat > /etc/opendkim.conf <<EOF
+Syslog                  yes
+SyslogSuccess           yes
+LogWhy                   no
+Canonicalization        relaxed/simple
+Mode                    sv
+SubDomains              no
+OversignHeaders         From
+Socket                  inet:8891@127.0.0.1
+PidFile                 /run/opendkim/opendkim.pid
+KeyTable                refile:${DKIM_DIR}/KeyTable
+SigningTable            refile:${DKIM_DIR}/SigningTable
+ExternalIgnoreList      refile:/etc/opendkim/TrustedHosts
+InternalHosts           refile:/etc/opendkim/TrustedHosts
+EOF
+
+mkdir -p /etc/opendkim
+cat > /etc/opendkim/TrustedHosts <<EOF
+127.0.0.1
+localhost
+172.16.0.0/12
+192.168.0.0/16
+EOF
 
 postconf -e "myhostname = ${MTA_HOSTNAME}"
 postconf -e "myorigin = \$myhostname"
@@ -31,8 +55,11 @@ postconf -e "maximal_queue_lifetime = 5d"
 postconf -e "bounce_queue_lifetime = 5d"
 postconf -e "minimal_backoff_time = 60s"
 postconf -e "maximal_backoff_time = 3600s"
+postconf -e "smtpd_milters = inet:127.0.0.1:8891"
+postconf -e "non_smtpd_milters = inet:127.0.0.1:8891"
+postconf -e "milter_protocol = 6"
+postconf -e "milter_default_action = tempfail"
 
-# Internal submission listener used only by the NexiMail transport worker.
 if ! grep -q '^10025[[:space:]]' /etc/postfix/master.cf; then
   cat >> /etc/postfix/master.cf <<'EOF'
 10025 inet n - n - - smtpd
@@ -44,16 +71,21 @@ if ! grep -q '^10025[[:space:]]' /etc/postfix/master.cf; then
 EOF
 fi
 
+opendkim -x /etc/opendkim.conf
 postfix check
 postfix start
 
 cleanup() {
   postfix stop >/dev/null 2>&1 || true
+  if [ -f /run/opendkim/opendkim.pid ]; then kill "$(cat /run/opendkim/opendkim.pid)" >/dev/null 2>&1 || true; fi
 }
 trap cleanup INT TERM EXIT
 
-# Keep PID 1 alive while Postfix master runs.
 while postfix status >/dev/null 2>&1; do
+  if [ -f /run/opendkim/opendkim.pid ] && ! kill -0 "$(cat /run/opendkim/opendkim.pid)" 2>/dev/null; then
+    echo "OpenDKIM stopped unexpectedly" >&2
+    exit 1
+  fi
   sleep 5
 done
 
