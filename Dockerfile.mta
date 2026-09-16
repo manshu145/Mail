@@ -1,10 +1,9 @@
 FROM alpine:3.20
 
-RUN apk add --no-cache postfix ca-certificates python3
+RUN apk add --no-cache postfix ca-certificates
 
 COPY mta-entrypoint.sh /usr/local/bin/mta-entrypoint.sh
-COPY mta-event-forwarder.py /usr/local/bin/mta-event-forwarder.py
-RUN chmod +x /usr/local/bin/mta-entrypoint.sh /usr/local/bin/mta-event-forwarder.py
+RUN chmod +x /usr/local/bin/mta-entrypoint.sh
 
-EXPOSE 25 10025
+EXPOSE 10025
 ENTRYPOINT ["/usr/local/bin/mta-entrypoint.sh"]
