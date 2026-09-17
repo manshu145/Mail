@@ -147,10 +147,20 @@ async function markDeferred(id: string, attempt: number, error: unknown, setting
   return "deferred" as const;
 }
 async function releaseThrottled(id: string) { await pool.query(`update messages set status='ready_for_transport',next_attempt_at=now()+interval '60 seconds',last_error='sending_account_rate_limited',attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'`, [id]); await event(id,"transport_throttled",{retryInSeconds:60}); }
-async function recoverStaleClaims() { const result=await pool.query<{id:string}>(`update messages set status='failed',next_attempt_at=null,last_error='transport_state_uncertain_after_worker_restart' where status='sending' and accepted_at is null and last_attempt_at is not null and last_attempt_at < now()-interval '10 minutes' returning id`); for(const row of result.rows)await event(row.id,"transport_recovery_failed",{reason:"stale_sending_claim"}); }
+async function recoverStaleClaims() {
+  const result=await pool.query<{id:string}>(`update messages set status='failed',next_attempt_at=null,last_error='transport_state_uncertain_after_worker_restart' where status='sending' and accepted_at is null and last_attempt_at is not null and last_attempt_at < now()-interval '10 minutes' returning id`);
+  for(const row of result.rows) await event(row.id,"transport_recovery_failed",{reason:"stale_sending_claim"});
+  return result.rowCount || 0;
+}
 
 async function runOnce() {
   if (!appUrl) throw new Error("APP_URL is required");
+  // A worker can survive a transient exception while one or more DB claims remain
+  // in `sending`. Recover them every cycle so they never stay stranded forever.
+  // We fail uncertain claims instead of retrying automatically because the local
+  // MTA may already have accepted them before the worker lost state; retrying
+  // could create duplicate mail.
+  const recoveredStale = await recoverStaleClaims();
   const settings = await readDeliverySettings();
   const delayMs = Math.ceil(1000 / settings.maxPerSecond);
   const claimed = await claimMessages();
@@ -237,7 +247,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, mtaHost, mtaPort, bounceTracking: bounceEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, mtaHost, mtaPort, bounceTracking: bounceEnabled, source: "database_control_plane" });
 }
 
 async function main() {
