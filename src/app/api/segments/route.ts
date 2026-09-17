@@ -7,6 +7,7 @@ import { getSession } from "@/lib/auth";
 
 const fields = ["email_domain", "validation_status", "contact_status"] as const;
 const operators = ["equals", "not_equals"] as const;
+const validationStates = ["pending", "accepted", "valid", "invalid", "unknown", "error"] as const;
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
   if (!name || !field || !operator || !value) return NextResponse.json({ error: "Name, field, operator and value are required." }, { status: 400 });
 
   if (field === "email_domain") value = value.replace(/^@/, "");
-  if (field === "validation_status" && !["pending", "valid", "invalid", "unknown", "error"].includes(value)) return NextResponse.json({ error: "Invalid validation status." }, { status: 400 });
+  if (field === "validation_status" && !validationStates.includes(value as typeof validationStates[number])) return NextResponse.json({ error: "Invalid validation status." }, { status: 400 });
   if (field === "contact_status" && !["active", "archived"].includes(value)) return NextResponse.json({ error: "Invalid contact status." }, { status: 400 });
 
   try {
