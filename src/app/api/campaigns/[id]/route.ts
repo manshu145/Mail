@@ -8,6 +8,7 @@ import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
 import { isValidEmail } from "@/lib/contact-utils";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
+import { getCampaignPreflight } from "@/lib/campaign-preflight";
 
 function value(input: unknown) {
   const v = String(input ?? "").trim();
@@ -52,6 +53,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (wantsDelivery) {
     if (!list || !template || !account) return NextResponse.json({ error: "Select a list, template and sending account first." }, { status: 400 });
     if (!policy.sendingEnabled) return NextResponse.json({ error: "Sending is disabled by runtime configuration." }, { status: 423 });
+    const preflight = await getCampaignPreflight();
+    if (!preflight.ok) return NextResponse.json({ error: `Sending pipeline is not healthy: ${preflight.issues.join("; ")}`, preflight }, { status: 503 });
     if (account.status !== "active") return NextResponse.json({ error: "Selected sending account is not active." }, { status: 409 });
     if (!template.htmlBody && !template.textBody) return NextResponse.json({ error: "Template has no email body." }, { status: 409 });
 
@@ -59,7 +62,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!isValidEmail(fromEmail)) return NextResponse.json({ error: "Sender email is invalid." }, { status: 400 });
     const domain = fromEmail.split("@")[1];
     const [domainRow] = await db.select().from(sendingDomains).where(eq(sendingDomains.domain, domain)).limit(1);
-    if (!domainRow || domainRow.status !== "ready") return NextResponse.json({ error: `Sending domain ${domain} must pass SPF, DKIM and DMARC checks before sending.` }, { status: 409 });
+    if (!domainRow || domainRow.status !== "ready" || !domainRow.spfOk || !domainRow.dkimOk || !domainRow.dmarcOk) return NextResponse.json({ error: `Sending domain ${domain} must pass SPF, DKIM and DMARC checks before sending.` }, { status: 409 });
 
     const recipients = await resolveAudienceRecipients(list);
     audienceSize = recipients.length;
