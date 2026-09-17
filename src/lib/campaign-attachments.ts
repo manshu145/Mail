@@ -3,6 +3,7 @@ import { pool } from "@/db";
 export const MAX_CAMPAIGN_ATTACHMENTS = 5;
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_CAMPAIGN_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+export const MAX_COMBINED_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 
 export const ALLOWED_ATTACHMENT_TYPES = new Set([
   "application/pdf",
@@ -30,6 +31,16 @@ export type CampaignAttachment = CampaignAttachmentMeta & { content: Buffer };
 export function cleanAttachmentFilename(input: string) {
   const base = input.split(/[\\/]/).pop() || "attachment";
   return base.replace(/[\r\n\0"]/g, "_").slice(0, 180) || "attachment";
+}
+
+export function totalAttachmentBytes(attachments: Array<Pick<CampaignAttachmentMeta, "sizeBytes">>) {
+  return attachments.reduce((sum, attachment) => sum + Math.max(0, Number(attachment.sizeBytes || 0)), 0);
+}
+
+export function combinedAttachmentLimitError(attachments: Array<Pick<CampaignAttachmentMeta, "sizeBytes">>) {
+  const total = totalAttachmentBytes(attachments);
+  if (total <= MAX_COMBINED_ATTACHMENT_BYTES) return null;
+  return `Combined template + campaign attachments are ${(total / 1024 / 1024).toFixed(1)} MB; maximum allowed is ${(MAX_COMBINED_ATTACHMENT_BYTES / 1024 / 1024).toFixed(0)} MB.`;
 }
 
 export async function listCampaignAttachments(campaignId: string): Promise<CampaignAttachmentMeta[]> {
