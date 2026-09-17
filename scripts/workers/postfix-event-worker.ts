@@ -10,6 +10,7 @@ import { classifyBounce } from "../../src/lib/bounce-classification";
 import { isProviderPressureResponse, providerForDelivery } from "../../src/lib/provider";
 
 const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN_MINUTES || "15"));
+const terminalStatuses = new Set(["delivered", "bounced", "failed", "cancelled"]);
 
 async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "postfix-events", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
@@ -61,11 +62,12 @@ async function handle(line: string) {
   if (!status) return false;
 
   // Compose deliberately replays a bounded tail of the durable Postfix log after
-  // worker restarts so final provider outcomes are not lost. Terminal events must
-  // therefore be idempotent and must not emit duplicate webhooks/timeline rows.
+  // worker restarts. Terminal state must be monotonic and terminal events must be
+  // idempotent so replay cannot regress or duplicate message truth.
   if ((status === "sent" && message.status === "delivered") ||
       (status === "bounced" && message.status === "bounced") ||
       (status === "expired" && message.status === "failed")) return true;
+  if (status === "deferred" && terminalStatuses.has(message.status)) return true;
 
   const dsn = line.match(/dsn=([0-9.]+)/i)?.[1] || null;
   const detail = line.slice(-1000);
@@ -100,7 +102,7 @@ async function handle(line: string) {
     await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_bounced", payload: { queueId, dsn, provider, line: detail, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient, providerCooldown: Boolean(cooldown) } });
 
     if (classification.suppressRecipient) {
-      await db.insert(suppressions).values({ email: message.recipientEmail, normalizedEmail: normalizeEmail(message.recipientEmail), reason: "hard_bounce", source: "postfix_event", note: detail }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "hard_bounce", source: "postfix_event", note: detail } });
+      await db.insert(suppressions).values({ email: message.recipientEmail, normalizedEmail: normalizeEmail(message.recipientEmail), reason: "hard_bounce", source: "postfix_event", note: detail }).onConflictDoNothing({ target: suppressions.normalizedEmail });
     }
 
     await webhook("message.bounced", { ...base, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient, providerCooldown: Boolean(cooldown) });
