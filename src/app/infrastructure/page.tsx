@@ -1,2 +1,104 @@
-import { Gauge,Mail,ServerCog,ShieldCheck } from "lucide-react";import { redirect } from "next/navigation";import { desc,eq } from "drizzle-orm";import { AppShell } from "@/components/app-shell";import { ResourceCreate } from "@/components/resource-create";import { SendingAccountActions } from "@/components/sending-account-actions";import { WarmupControl } from "@/components/warmup-control";import { db,databaseConfigured } from "@/db";import { sendingAccounts } from "@/db/schema";import { reputationSnapshots,sendingAccountWarmups } from "@/db/operations-schema";import { getSession } from "@/lib/auth";
-export default async function InfrastructurePage(){const session=await getSession();if(!session)redirect("/login");let rows:typeof sendingAccounts.$inferSelect[]=[],warmups:typeof sendingAccountWarmups.$inferSelect[]=[],snapshots:typeof reputationSnapshots.$inferSelect[]=[];let dbError=false;if(databaseConfigured)try{[rows,warmups,snapshots]=await Promise.all([db.select().from(sendingAccounts),db.select().from(sendingAccountWarmups),db.select().from(reputationSnapshots).orderBy(desc(reputationSnapshots.createdAt)).limit(200)])}catch{dbError=true}const usable=databaseConfigured&&!dbError,warmMap=new Map(warmups.map(w=>[w.sendingAccountId,w])),repMap=new Map<string,typeof reputationSnapshots.$inferSelect>();for(const s of snapshots)if(s.sendingAccountId&&!repMap.has(s.sendingAccountId))repMap.set(s.sendingAccountId,s);return <AppShell session={session}><div className="mb-7 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="mb-2 text-xs font-extrabold uppercase tracking-[.18em] text-zinc-400">Sending</p><h1 className="text-3xl font-black tracking-[-.035em] sm:text-4xl">Infrastructure</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Account limits, warm-up ramps and real 24-hour reputation snapshots. Automatic thresholds can pause an account.</p></div><ResourceCreate disabled={!usable||session.role!=="owner"} endpoint="/api/resources/sending-accounts" title="Add sending account" buttonLabel="Add account" fields={[{name:"name",label:"Account name",required:true},{name:"fromName",label:"From name",required:true},{name:"fromEmail",label:"From email",type:"email",required:true},{name:"replyTo",label:"Reply-to",type:"email"}]}/></div><section className="grid gap-4 xl:grid-cols-[1.35fr_.65fr]"><div className="premium-panel overflow-hidden">{rows.length?<div className="divide-y divide-zinc-100 dark:divide-zinc-900">{rows.map(row=>{const rep=repMap.get(row.id),warm=warmMap.get(row.id);return <article key={row.id} className="p-5"><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-4"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-violet-50 text-violet-600 dark:bg-violet-950/30 dark:text-violet-300"><Mail className="h-5 w-5"/></div><div><h2 className="font-black">{row.name}</h2><p className="mt-1 text-sm text-zinc-500">{row.fromName} &lt;{row.fromEmail}&gt;</p></div></div><span className={`rounded-full px-2.5 py-1 text-xs font-bold capitalize ${row.status==="active"?"bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300":"bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"}`}>{row.status}</span></div><div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Hourly",row.hourlyLimit],["Daily",row.dailyLimit],["24h bounce",rep?`${(rep.bounceRate*100).toFixed(2)}%`:"—"],["24h complaint",rep?`${(rep.complaintRate*100).toFixed(3)}%`:"—"]].map(([l,v])=><div key={String(l)} className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900"><span className="text-[11px] font-bold text-zinc-400">{l}</span><div className="mt-1 text-sm font-black">{typeof v==="number"?v.toLocaleString():v}</div></div>)}</div>{session.role==="owner"?<><SendingAccountActions id={row.id} status={row.status} hourly={row.hourlyLimit} daily={row.dailyLimit}/><WarmupControl accountId={row.id} initial={warm?{enabled:warm.enabled,dayOneLimit:warm.dayOneLimit,growthPercent:warm.growthPercent,maxDailyLimit:warm.maxDailyLimit}:null}/></>:null}</article>})}</div>:<div className="grid min-h-72 place-items-center text-center"><div><ServerCog className="mx-auto h-8 w-8 text-zinc-400"/><h2 className="mt-4 font-black">No sending accounts</h2></div></div>}</div><aside className="premium-panel p-6"><p className="text-xs font-extrabold uppercase tracking-[.16em] text-zinc-400">Safety policy</p><h2 className="mt-2 text-xl font-black">Automatic protection</h2><div className="mt-5 space-y-3">{[["Web request","Never bulk sends"],["Local acceptance","Not delivery"],["Bounce stop",`${(Number(process.env.REPUTATION_BOUNCE_STOP_RATE||0.05)*100).toFixed(1)}%`],["Complaint stop",`${(Number(process.env.REPUTATION_COMPLAINT_STOP_RATE||0.003)*100).toFixed(2)}%`],["Minimum sample",process.env.REPUTATION_MIN_SAMPLE||"100"]].map(([a,b])=><div key={a} className="flex justify-between rounded-xl border border-zinc-100 px-4 py-3 dark:border-zinc-800"><span className="text-sm font-bold">{a}</span><span className="text-xs font-bold text-zinc-400">{b}</span></div>)}</div><div className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-zinc-400"><ShieldCheck className="h-4 w-4"/> Reputation worker pauses risky accounts</div><div className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-zinc-400"><Gauge className="h-4 w-4"/> Warm-up daily ceiling is enforced in transport</div></aside></section></AppShell>}
+import { Gauge, Mail, ServerCog, ShieldCheck, Activity } from "lucide-react";
+import { redirect } from "next/navigation";
+import { desc } from "drizzle-orm";
+import { AppShell } from "@/components/app-shell";
+import { ResourceCreate } from "@/components/resource-create";
+import { SendingAccountActions } from "@/components/sending-account-actions";
+import { WarmupControl } from "@/components/warmup-control";
+import { db, databaseConfigured } from "@/db";
+import { sendingAccounts } from "@/db/schema";
+import { reputationSnapshots, sendingAccountWarmups, workerHeartbeats } from "@/db/operations-schema";
+import { getSession } from "@/lib/auth";
+
+export default async function InfrastructurePage() {
+  const session = await getSession();
+  if (!session) redirect("/login");
+
+  let rows: typeof sendingAccounts.$inferSelect[] = [];
+  let warmups: typeof sendingAccountWarmups.$inferSelect[] = [];
+  let snapshots: typeof reputationSnapshots.$inferSelect[] = [];
+  let heartbeats: typeof workerHeartbeats.$inferSelect[] = [];
+  let dbError = false;
+
+  if (databaseConfigured) {
+    try {
+      [rows, warmups, snapshots, heartbeats] = await Promise.all([
+        db.select().from(sendingAccounts),
+        db.select().from(sendingAccountWarmups),
+        db.select().from(reputationSnapshots).orderBy(desc(reputationSnapshots.createdAt)).limit(200),
+        db.select().from(workerHeartbeats),
+      ]);
+    } catch {
+      dbError = true;
+    }
+  }
+
+  const usable = databaseConfigured && !dbError;
+  const warmMap = new Map(warmups.map((warmup) => [warmup.sendingAccountId, warmup]));
+  const repMap = new Map<string, typeof reputationSnapshots.$inferSelect>();
+  for (const snapshot of snapshots) if (snapshot.sendingAccountId && !repMap.has(snapshot.sendingAccountId)) repMap.set(snapshot.sendingAccountId, snapshot);
+
+  const expectedWorkers = ["campaign", "policy", "transport", "postfix-events", "bounce-receiver", "dkim", "domain-health", "reputation", "webhook", "validation", "import"];
+  const heartbeatMap = new Map(heartbeats.map((heartbeat) => [heartbeat.workerName, heartbeat]));
+  const now = Date.now();
+
+  return <AppShell session={session}>
+    <div className="mb-7 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p className="mb-2 text-xs font-extrabold uppercase tracking-[.18em] text-zinc-400">Sending</p>
+        <h1 className="text-3xl font-black tracking-[-.035em] sm:text-4xl">Infrastructure</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Account limits, warm-up ramps, worker health and real 24-hour reputation snapshots. Automatic thresholds can pause an account.</p>
+      </div>
+      <ResourceCreate disabled={!usable || session.role !== "owner"} endpoint="/api/resources/sending-accounts" title="Add sending account" buttonLabel="Add account" fields={[{ name: "name", label: "Account name", required: true }, { name: "fromName", label: "From name", required: true }, { name: "fromEmail", label: "From email", type: "email", required: true }, { name: "replyTo", label: "Reply-to", type: "email" }]} />
+    </div>
+
+    <section className="grid gap-4 xl:grid-cols-[1.35fr_.65fr]">
+      <div className="premium-panel overflow-hidden">
+        {rows.length ? <div className="divide-y divide-zinc-100 dark:divide-zinc-900">{rows.map((row) => {
+          const rep = repMap.get(row.id);
+          const warm = warmMap.get(row.id);
+          return <article key={row.id} className="p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-violet-50 text-violet-600 dark:bg-violet-950/30 dark:text-violet-300"><Mail className="h-5 w-5"/></div><div><h2 className="font-black">{row.name}</h2><p className="mt-1 text-sm text-zinc-500">{row.fromName} &lt;{row.fromEmail}&gt;</p></div></div>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-bold capitalize ${row.status === "active" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" : "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"}`}>{row.status}</span>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Hourly", row.hourlyLimit], ["Daily", row.dailyLimit], ["24h bounce", rep ? `${(rep.bounceRate * 100).toFixed(2)}%` : "—"], ["24h complaint", rep ? `${(rep.complaintRate * 100).toFixed(3)}%` : "—"]].map(([label, value]) => <div key={String(label)} className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900"><span className="text-[11px] font-bold text-zinc-400">{label}</span><div className="mt-1 text-sm font-black">{typeof value === "number" ? value.toLocaleString() : value}</div></div>)}</div>
+            {session.role === "owner" ? <><SendingAccountActions id={row.id} status={row.status} hourly={row.hourlyLimit} daily={row.dailyLimit}/><WarmupControl accountId={row.id} initial={warm ? { enabled: warm.enabled, dayOneLimit: warm.dayOneLimit, growthPercent: warm.growthPercent, maxDailyLimit: warm.maxDailyLimit } : null}/></> : null}
+          </article>;
+        })}</div> : <div className="grid min-h-72 place-items-center text-center"><div><ServerCog className="mx-auto h-8 w-8 text-zinc-400"/><h2 className="mt-4 font-black">No sending accounts</h2></div></div>}
+      </div>
+
+      <aside className="premium-panel p-6">
+        <p className="text-xs font-extrabold uppercase tracking-[.16em] text-zinc-400">Safety policy</p>
+        <h2 className="mt-2 text-xl font-black">Automatic protection</h2>
+        <div className="mt-5 space-y-3">{[["Web request", "Never bulk sends"], ["Local acceptance", "Not delivery"], ["Bounce stop", `${(Number(process.env.REPUTATION_BOUNCE_STOP_RATE || 0.05) * 100).toFixed(1)}%`], ["Complaint stop", `${(Number(process.env.REPUTATION_COMPLAINT_STOP_RATE || 0.003) * 100).toFixed(2)}%`], ["Minimum sample", process.env.REPUTATION_MIN_SAMPLE || "100"]].map(([a, b]) => <div key={a} className="flex justify-between rounded-xl border border-zinc-100 px-4 py-3 dark:border-zinc-800"><span className="text-sm font-bold">{a}</span><span className="text-xs font-bold text-zinc-400">{b}</span></div>)}</div>
+        <div className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-zinc-400"><ShieldCheck className="h-4 w-4"/> Reputation worker pauses risky accounts</div>
+        <div className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-zinc-400"><Gauge className="h-4 w-4"/> Warm-up daily ceiling is enforced in transport</div>
+      </aside>
+    </section>
+
+    <section className="premium-panel mt-4 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-zinc-400">Runtime</p><h2 className="mt-1 text-xl font-black">Worker health</h2><p className="mt-1 text-sm text-zinc-500">A worker is marked healthy when its heartbeat is recent. Missing or stale workers need attention before a high-volume send.</p></div>
+        <div className="flex items-center gap-2 text-xs font-bold text-zinc-400"><Activity className="h-4 w-4"/> {heartbeats.length} heartbeats recorded</div>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {expectedWorkers.map((name) => {
+          const heartbeat = heartbeatMap.get(name);
+          const ageMs = heartbeat ? now - heartbeat.lastSeenAt.getTime() : Number.POSITIVE_INFINITY;
+          const healthy = ageMs <= 5 * 60 * 1000;
+          const age = heartbeat ? ageMs < 60000 ? `${Math.max(0, Math.floor(ageMs / 1000))}s ago` : `${Math.floor(ageMs / 60000)}m ago` : "No heartbeat";
+          return <div key={name} className="rounded-xl border border-zinc-100 p-3.5 dark:border-zinc-800">
+            <div className="flex items-center justify-between gap-3"><span className="text-sm font-black">{name}</span><span className={`h-2.5 w-2.5 rounded-full ${healthy ? "bg-emerald-500" : "bg-rose-500"}`}/></div>
+            <p className="mt-1 text-xs text-zinc-500">{age}</p>
+          </div>;
+        })}
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900"><p className="text-[11px] font-bold text-zinc-400">Bounce tracking</p><p className="mt-1 text-sm font-black">{process.env.BOUNCE_DOMAIN && process.env.BOUNCE_SECRET ? "Configured" : "Not configured"}</p></div>
+        <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900"><p className="text-[11px] font-bold text-zinc-400">Inbound SMTP bind</p><p className="mt-1 text-sm font-black">{process.env.MTA_SMTP_BIND || "127.0.0.1"}</p></div>
+        <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900"><p className="text-[11px] font-bold text-zinc-400">Complaint ingestion</p><p className="mt-1 text-sm font-black">{process.env.FEEDBACK_INGEST_SECRET ? "Configured" : "Not configured"}</p></div>
+      </div>
+    </section>
+  </AppShell>;
+}
