@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { ImportWizard } from "@/components/import-wizard";
 import { ImportJobActions } from "@/components/import-job-actions";
+import { ImportLiveRefresh } from "@/components/import-live-refresh";
 import { db, databaseConfigured } from "@/db";
 import { importJobs, lists } from "@/db/schema";
 import { getSession } from "@/lib/auth";
@@ -19,16 +20,16 @@ type ImportJobRow = typeof importJobs.$inferSelect & {
 };
 
 function speedAndEta(row: ImportJobRow) {
-  if (!row.startedAt) return { speed: "—", eta: "—" };
+  if (!row.startedAt) return { speed: "—", eta: "Queued" };
   const processed = row.importedRows + row.duplicateRows + row.invalidRows + Number(row.suppressedRows || 0);
   const elapsedMinutes = Math.max((Date.now() - new Date(row.startedAt).getTime()) / 60000, 1 / 60);
   const rpm = processed / elapsedMinutes;
-  if (!Number.isFinite(rpm) || rpm <= 0) return { speed: "—", eta: "—" };
+  if (!Number.isFinite(rpm) || rpm <= 0) return { speed: "Starting…", eta: "Calculating…" };
   const remaining = Math.max(0, row.totalRows - processed);
   const etaMinutes = remaining / rpm;
   return {
     speed: `${rpm >= 1000 ? `${(rpm / 1000).toFixed(1)}k` : Math.round(rpm).toLocaleString()}/min`,
-    eta: row.status === "completed" ? "—" : etaMinutes < 1 ? "<1m" : etaMinutes < 60 ? `${Math.ceil(etaMinutes)}m` : `${(etaMinutes / 60).toFixed(1)}h`,
+    eta: row.status === "completed" ? "Done" : etaMinutes < 1 ? "<1m" : etaMinutes < 60 ? `${Math.ceil(etaMinutes)}m` : `${(etaMinutes / 60).toFixed(1)}h`,
   };
 }
 
@@ -87,7 +88,8 @@ export default async function ImportsPage() {
   ];
 
   return <AppShell session={session}>
-    <div className="mb-7"><p className="page-eyebrow mb-2">Audience operations</p><h1 className="page-title">Imports</h1><p className="page-description">Upload large CSV databases with field mapping, source/tags/category assignment, custom fields, scoped background validation and live progress.</p></div>
+    <ImportLiveRefresh active={active > 0} />
+    <div className="mb-7"><p className="page-eyebrow mb-2">Audience operations</p><h1 className="page-title">Imports</h1><p className="page-description">Upload up to 1,000,000 contacts in one CSV job with field mapping, source/tags/category assignment, custom fields, scoped background validation and live progress.</p></div>
 
     {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Import engine unavailable.</b> Check the database connection.</div> : null}
 
@@ -99,7 +101,7 @@ export default async function ImportsPage() {
         <p><b>3</b> Select a consent source, optional list, default source/category and tags before queueing.</p>
         <p><b>4</b> Unmapped columns are preserved as custom fields for personalization.</p>
       </div>
-      <div className="mt-4 rounded-xl bg-[var(--surface-soft)] p-3 text-xs text-[var(--muted)]"><b>Recommended header:</b> email,name,first_name,last_name,phone,dob,gender,state,district,city,pincode,occupation,industry,audience_type,category,categories,tags,source</div>
+      <div className="mt-4 rounded-xl bg-[var(--surface-soft)] p-3 text-xs text-[var(--muted)]"><b>Capacity:</b> up to 1,000,000 data rows and 300 MB per CSV. Active jobs refresh every 4 seconds with progress, speed and ETA.</div>
     </section>
 
     {usable ? <ImportWizard lists={listRows} /> : null}
@@ -108,7 +110,7 @@ export default async function ImportsPage() {
 
     <section className="premium-panel overflow-hidden">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 sm:px-6"><div><p className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--muted)]">History</p><h2 className="mt-1 text-lg font-black">Import jobs</h2><p className="mt-1 text-xs text-[var(--muted)]">Completed/failed job metadata is retained for 30 days. Active jobs are never cleaned.</p></div><FileUp className="h-5 w-5 text-[var(--muted)]" /></div>
-      {rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1320px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[0.13em] text-[var(--muted)]"><tr><th className="px-5 py-3.5">File / consent</th><th>Status</th><th>Progress</th><th>Accepted</th><th>Risky</th><th>Invalid</th><th>Dup / Supp</th><th>Speed</th><th>ETA</th><th>Created</th><th>Actions</th></tr></thead><tbody>{rows.map((row) => { const suppressed = Number(row.suppressedRows || 0); const validationInvalid = Number(row.validationInvalidRows || 0); const accounted = row.importedRows + row.duplicateRows + row.invalidRows + suppressed; const done = row.status === "completed" ? row.totalRows : accounted; const progress = row.status === "completed" ? 100 : row.totalRows ? Math.min(100, Math.round((accounted / row.totalRows) * 100)) : 0; const perf=speedAndEta(row); return <tr key={row.id} className="border-t border-[var(--border)] align-top"><td className="px-5 py-4"><p className="font-extrabold">{row.filename}</p><p className="mt-1 text-xs text-[var(--muted)]">{row.sourceLabel || "—"}</p>{row.errorMessage ? <p className="mt-1 max-w-md truncate text-xs text-rose-500">{row.errorMessage}</p> : null}</td><td><span className={`rounded-full px-2.5 py-1 text-xs font-bold capitalize ${row.status === "completed" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : row.status === "failed" ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>{row.status}</span></td><td className="pr-6"><div className="h-1.5 w-32 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-violet-500" style={{ width: `${progress}%` }} /></div><p className="mt-1 text-[10px] font-bold text-[var(--muted)]">{progress}% · {done.toLocaleString()} / {row.totalRows.toLocaleString()}</p></td><td className="font-bold text-emerald-600">{Number(row.validRows || 0).toLocaleString()}</td><td className="font-bold text-amber-600">{Number(row.riskyRows || 0).toLocaleString()}</td><td>{(row.invalidRows + validationInvalid).toLocaleString()}</td><td>{row.duplicateRows.toLocaleString()} / {suppressed.toLocaleString()}</td><td className="text-xs font-bold text-[var(--muted)]">{perf.speed}</td><td className="text-xs font-bold text-[var(--muted)]">{perf.eta}</td><td className="text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(row.createdAt))}</td><td className="pr-5"><ImportJobActions id={row.id} deletable={(session.role === "owner" || session.role === "admin") && row.status !== "pending" && row.status !== "processing"} /></td></tr>; })}</tbody></table></div> : <div className="grid min-h-64 place-items-center p-8 text-center"><div><FileUp className="mx-auto h-8 w-8 text-[var(--muted)]" /><h3 className="mt-4 font-black">No import jobs yet</h3><p className="mt-1 text-sm text-[var(--muted)]">Upload a CSV to start a background import.</p></div></div>}
+      {rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1320px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[0.13em] text-[var(--muted)]"><tr><th className="px-5 py-3.5">File / consent</th><th>Status</th><th>Progress</th><th>Accepted</th><th>Risky</th><th>Invalid</th><th>Dup / Supp</th><th>Speed</th><th>ETA</th><th>Created</th><th>Actions</th></tr></thead><tbody>{rows.map((row) => { const suppressed = Number(row.suppressedRows || 0); const validationInvalid = Number(row.validationInvalidRows || 0); const accounted = row.importedRows + row.duplicateRows + row.invalidRows + suppressed; const done = row.status === "completed" ? row.totalRows : accounted; const progress = row.status === "completed" ? 100 : row.totalRows ? Math.min(100, Math.round((accounted / row.totalRows) * 100)) : 0; const perf=speedAndEta(row); return <tr key={row.id} className="border-t border-[var(--border)] align-top"><td className="px-5 py-4"><p className="font-extrabold">{row.filename}</p><p className="mt-1 text-xs text-[var(--muted)]">{row.sourceLabel || "—"}</p>{row.errorMessage ? <p className="mt-1 max-w-md truncate text-xs text-rose-500">{row.errorMessage}</p> : null}</td><td><span className={`rounded-full px-2.5 py-1 text-xs font-bold capitalize ${row.status === "completed" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : row.status === "failed" ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>{row.status}</span></td><td className="pr-6"><div className="h-2 w-40 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-violet-500 transition-[width] duration-500" style={{ width: `${progress}%` }} /></div><p className="mt-1 text-[10px] font-bold text-[var(--muted)]">{progress}% · {done.toLocaleString()} / {row.totalRows.toLocaleString()}</p></td><td className="font-bold text-emerald-600">{Number(row.validRows || 0).toLocaleString()}</td><td className="font-bold text-amber-600">{Number(row.riskyRows || 0).toLocaleString()}</td><td>{(row.invalidRows + validationInvalid).toLocaleString()}</td><td>{row.duplicateRows.toLocaleString()} / {suppressed.toLocaleString()}</td><td className="text-xs font-bold text-[var(--muted)]">{perf.speed}</td><td className="text-xs font-bold text-[var(--muted)]">{perf.eta}</td><td className="text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(row.createdAt))}</td><td className="pr-5"><ImportJobActions id={row.id} deletable={(session.role === "owner" || session.role === "admin") && row.status !== "pending" && row.status !== "processing"} /></td></tr>; })}</tbody></table></div> : <div className="grid min-h-64 place-items-center p-8 text-center"><div><FileUp className="mx-auto h-8 w-8 text-[var(--muted)]" /><h3 className="mt-4 font-black">No import jobs yet</h3><p className="mt-1 text-sm text-[var(--muted)]">Upload a CSV to start a background import.</p></div></div>}
     </section>
   </AppShell>;
 }
