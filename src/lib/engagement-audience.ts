@@ -28,6 +28,10 @@ export async function resolveEngagementAudience(campaignId: string, rule: Engage
     join contacts c on c.id=m.contact_id
     where m.campaign_id=$1
       and c.status='active'
+      and c.validation_status <> 'invalid'
+      and not exists (
+        select 1 from suppressions s where s.normalized_email=c.normalized_email
+      )
       ${messageWindow}
       and (${condition})
     order by c.id
