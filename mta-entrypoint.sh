@@ -4,6 +4,9 @@ set -eu
 MTA_HOSTNAME="${MTA_HOSTNAME:-mail.localhost}"
 MTA_NETWORKS="${MTA_NETWORKS:-127.0.0.0/8 172.16.0.0/12 192.168.0.0/16}"
 MTA_MESSAGE_SIZE_LIMIT="${MTA_MESSAGE_SIZE_LIMIT:-26214400}"
+BOUNCE_DOMAIN="${BOUNCE_DOMAIN:-}"
+BOUNCE_RECEIVER_HOST="${BOUNCE_RECEIVER_HOST:-bounce-receiver}"
+BOUNCE_RECEIVER_PORT="${BOUNCE_RECEIVER_PORT:-2526}"
 DKIM_DIR="${DKIM_KEY_DIR:-/var/lib/neximail/dkim}"
 
 mkdir -p /var/log/mta /var/spool/postfix /etc/postfix /run/opendkim "$DKIM_DIR"
@@ -41,6 +44,7 @@ postconf -e "inet_interfaces = all"
 postconf -e "inet_protocols = ipv4"
 postconf -e "mynetworks = ${MTA_NETWORKS}"
 postconf -e "relay_domains ="
+postconf -e "transport_maps ="
 postconf -e "smtpd_relay_restrictions = permit_mynetworks,reject_unauth_destination"
 postconf -e "smtpd_recipient_restrictions = permit_mynetworks,reject_unauth_destination"
 postconf -e "disable_vrfy_command = yes"
@@ -59,6 +63,18 @@ postconf -e "smtpd_milters = inet:127.0.0.1:8891"
 postconf -e "non_smtpd_milters = inet:127.0.0.1:8891"
 postconf -e "milter_protocol = 6"
 postconf -e "milter_default_action = tempfail"
+
+if [ -n "$BOUNCE_DOMAIN" ]; then
+  case "$BOUNCE_DOMAIN" in
+    *[!a-zA-Z0-9.-]*|'') echo "Invalid BOUNCE_DOMAIN" >&2; exit 1 ;;
+  esac
+  cat > /etc/postfix/transport <<EOF
+${BOUNCE_DOMAIN} smtp:[${BOUNCE_RECEIVER_HOST}]:${BOUNCE_RECEIVER_PORT}
+EOF
+  postmap /etc/postfix/transport
+  postconf -e "relay_domains = ${BOUNCE_DOMAIN}"
+  postconf -e "transport_maps = hash:/etc/postfix/transport"
+fi
 
 if ! grep -q '^10025[[:space:]]' /etc/postfix/master.cf; then
   cat >> /etc/postfix/master.cf <<'EOF'
