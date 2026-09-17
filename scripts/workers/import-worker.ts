@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
-import { contactLists, contactTags, contacts, importJobs, suppressions, tags } from "../../src/db/schema";
+import { contactLists, contactTags, contacts, importJobs, suppressions, tags, validationJobs } from "../../src/db/schema";
 import { importStagingRows, importUploads } from "../../src/db/import-schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { isValidEmail, normalizeEmail } from "../../src/lib/contact-utils";
@@ -8,6 +8,7 @@ import { buildImportRow, parseCsv } from "../../src/lib/csv-import";
 
 const intervalMs = Math.max(1000, Number(process.env.IMPORT_WORKER_INTERVAL_MS || "3000"));
 const batchSize = Math.min(500, Math.max(25, Number(process.env.IMPORT_WORKER_BATCH_SIZE || "250")));
+const retentionDays = Math.max(1, Number(process.env.IMPORT_HISTORY_RETENTION_DAYS || "30"));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function heartbeat(metadata: Record<string, unknown>) { await db.insert(workerHeartbeats).values({ workerName: "import", metadata }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata } }); }
@@ -38,9 +39,41 @@ async function stageStoredUpload(jobId: string) {
   await db.execute(sql`update import_jobs set total_rows=${values.length}, started_at=coalesce(started_at, now()) where id=${jobId}`);
 }
 
+async function queueScopedValidation(jobId: string) {
+  const state = await pool.query<{ validation_job_id: string | null; options: { queueValidation?: boolean } | null }>(`
+    select j.validation_job_id, u.options
+    from import_jobs j
+    left join import_uploads u on u.job_id=j.id
+    where j.id=$1
+  `, [jobId]);
+  const row = state.rows[0];
+  if (!row || row.validation_job_id || row.options?.queueValidation === false) return;
+
+  const count = await pool.query<{ total: number }>(`
+    select count(distinct c.id)::int as total
+    from import_staging_rows s
+    join contacts c on c.id=s.contact_id
+    where s.job_id=$1
+      and lower(c.normalized_email) ~ '@(gmail|googlemail)\\.com$'
+  `, [jobId]);
+  const total = Number(count.rows[0]?.total || 0);
+  const [validationJob] = await db.insert(validationJobs).values({ scope: `import:${jobId}`, totalRows: total }).returning({ id: validationJobs.id });
+  await pool.query(`update import_jobs set validation_job_id=$2 where id=$1 and validation_job_id is null`, [jobId, validationJob.id]);
+}
+
+async function cleanupHistory() {
+  const result = await pool.query<{ id: string }>(`
+    delete from import_jobs
+    where status in ('completed','failed')
+      and coalesce(completed_at, created_at) < now() - ($1::int * interval '1 day')
+    returning id
+  `, [retentionDays]);
+  return result.rowCount || 0;
+}
+
 async function runOnce() {
   const [job] = await db.select().from(importJobs).where(sql`${importJobs.status} in ('pending','processing')`).orderBy(importJobs.createdAt).limit(1);
-  if (!job) { await heartbeat({ state: "idle" }); return; }
+  if (!job) { const cleaned = await cleanupHistory(); await heartbeat({ state: "idle", cleaned }); return; }
   if (job.status === "pending") await db.update(importJobs).set({ status: "processing" }).where(eq(importJobs.id, job.id));
 
   await stageStoredUpload(job.id);
@@ -67,6 +100,7 @@ async function runOnce() {
     }
     if (contactId) { await attachToList(contactId, listId); await attachTags(contactId, item.tags); }
     await db.update(importStagingRows).set({ processed: true, result, detail: contactId ? null : "contact_lookup_failed" }).where(eq(importStagingRows.id, row.id));
+    if (contactId) await pool.query(`update import_staging_rows set contact_id=$2 where id=$1`, [row.id, contactId]);
   }
 
   const counts = await db.execute(sql`select count(*) filter(where result='imported')::int as imported,count(*) filter(where result='duplicate')::int as duplicates,count(*) filter(where result='invalid')::int as invalid,count(*) filter(where result='suppressed')::int as suppressed,count(*) filter(where processed=false)::int as remaining from import_staging_rows where job_id=${job.id}`);
@@ -74,9 +108,10 @@ async function runOnce() {
   const imported = Number(countRow.imported || 0), duplicates = Number(countRow.duplicates || 0), invalid = Number(countRow.invalid || 0), suppressed = Number(countRow.suppressed || 0), remaining = Number(countRow.remaining || 0);
   await db.update(importJobs).set({ importedRows: imported, duplicateRows: duplicates, invalidRows: invalid, errorMessage: null, ...(remaining === 0 ? { status: "completed" as const, completedAt: new Date() } : {}) }).where(eq(importJobs.id, job.id));
   await db.execute(sql`update import_jobs set suppressed_rows=${suppressed} where id=${job.id}`);
+  if (remaining === 0) await queueScopedValidation(job.id);
   await heartbeat({ state: remaining ? "processing" : "idle", jobId: job.id, listId, imported, duplicates, invalid, suppressed, remaining });
 }
 
-async function main() { console.log(`[import-worker] started, batch=${batchSize}`); while (true) { try { await runOnce(); } catch (error) { console.error("[import-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); } await sleep(intervalMs); } }
+async function main() { console.log(`[import-worker] started, batch=${batchSize}, retention=${retentionDays}d`); while (true) { try { await runOnce(); } catch (error) { console.error("[import-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); } await sleep(intervalMs); } }
 main().catch(console.error);
 process.on("SIGTERM", async () => { await pool.end(); process.exit(0); });
