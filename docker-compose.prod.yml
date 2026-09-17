@@ -50,7 +50,12 @@ services:
       MTA_HOSTNAME: ${MTA_HOSTNAME:-mail.localhost}
       MTA_NETWORKS: ${MTA_NETWORKS:-127.0.0.0/8 172.16.0.0/12 192.168.0.0/16}
       MTA_MESSAGE_SIZE_LIMIT: ${MTA_MESSAGE_SIZE_LIMIT:-26214400}
+      BOUNCE_DOMAIN: ${BOUNCE_DOMAIN:-}
+      BOUNCE_RECEIVER_HOST: bounce-receiver
+      BOUNCE_RECEIVER_PORT: "2526"
       DKIM_KEY_DIR: /var/lib/neximail/dkim
+    ports:
+      - "${MTA_SMTP_BIND:-127.0.0.1}:25:25"
     volumes:
       - mta_logs:/var/log/mta
       - dkim_keys:/var/lib/neximail/dkim
@@ -86,6 +91,17 @@ services:
         condition: service_healthy
       mta:
         condition: service_healthy
+
+  bounce-receiver:
+    <<: *runtime
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-neximail}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-neximail}
+      REDIS_URL: redis://redis:6379
+      BOUNCE_DOMAIN: ${BOUNCE_DOMAIN:-}
+      BOUNCE_SECRET: ${BOUNCE_SECRET:-}
+      BOUNCE_RECEIVER_HOST: 0.0.0.0
+      BOUNCE_RECEIVER_PORT: "2526"
+    command: ["npm", "run", "worker:bounce-receiver"]
 
   event-worker:
     <<: *runtime
