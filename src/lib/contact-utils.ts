@@ -13,4 +13,8 @@ export type ImportRow = {
   lastName?: string;
   consentStatus?: "confirmed" | "unconfirmed";
   consentSource?: string;
+  source?: string;
+  tags?: string[];
+  categories?: string[];
+  attributes?: Record<string, string | number | boolean | null>;
 };
