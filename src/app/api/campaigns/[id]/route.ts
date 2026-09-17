@@ -39,15 +39,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (sendingAccountId && !account) return NextResponse.json({ error: "Selected sending account does not exist." }, { status: 400 });
 
   const action = String(body.action || "save");
+  if (!["save", "send_now", "schedule", "queue"].includes(action)) return NextResponse.json({ error: "Unknown campaign action." }, { status: 400 });
+  const wantsDelivery = action === "send_now" || action === "schedule" || action === "queue";
   const scheduledRaw = value(body.scheduledAt);
-  const scheduledAt = scheduledRaw ? new Date(scheduledRaw) : null;
+  const scheduledAt = action === "send_now" ? null : scheduledRaw ? new Date(scheduledRaw) : null;
   if (scheduledAt && Number.isNaN(scheduledAt.getTime())) return NextResponse.json({ error: "Invalid schedule time." }, { status: 400 });
+  if (action === "schedule" && (!scheduledAt || scheduledAt.getTime() <= Date.now())) return NextResponse.json({ error: "Choose a future date and time before scheduling." }, { status: 400 });
 
   const policy = getRuntimePolicy();
   let audienceSize: number | null = null;
 
-  if (action === "queue") {
-    if (!list || !template || !account) return NextResponse.json({ error: "Select a list, template and sending account before queueing." }, { status: 400 });
+  if (wantsDelivery) {
+    if (!list || !template || !account) return NextResponse.json({ error: "Select a list, template and sending account first." }, { status: 400 });
     if (!policy.sendingEnabled) return NextResponse.json({ error: "Sending is disabled by runtime configuration." }, { status: 423 });
     if (account.status !== "active") return NextResponse.json({ error: "Selected sending account is not active." }, { status: 409 });
     if (!template.htmlBody && !template.textBody) return NextResponse.json({ error: "Template has no email body." }, { status: 409 });
@@ -56,7 +59,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!isValidEmail(fromEmail)) return NextResponse.json({ error: "Sender email is invalid." }, { status: 400 });
     const domain = fromEmail.split("@")[1];
     const [domainRow] = await db.select().from(sendingDomains).where(eq(sendingDomains.domain, domain)).limit(1);
-    if (!domainRow || domainRow.status !== "ready") return NextResponse.json({ error: `Sending domain ${domain} must pass SPF, DKIM and DMARC checks before queueing.` }, { status: 409 });
+    if (!domainRow || domainRow.status !== "ready") return NextResponse.json({ error: `Sending domain ${domain} must pass SPF, DKIM and DMARC checks before sending.` }, { status: 409 });
 
     const recipients = await resolveAudienceRecipients(list);
     audienceSize = recipients.length;
@@ -64,7 +67,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (policy.maxRecipientsPerCampaign !== null && audienceSize > policy.maxRecipientsPerCampaign) return NextResponse.json({ error: `This runtime allows up to ${policy.maxRecipientsPerCampaign.toLocaleString()} active recipients per campaign. This audience currently has ${audienceSize.toLocaleString()}.` }, { status: 409 });
   }
 
-  const nextStatus = action === "queue" ? scheduledAt && scheduledAt.getTime() > Date.now() ? "scheduled" : "queued" : "draft";
+  const nextStatus = wantsDelivery ? (action === "schedule" || (action === "queue" && scheduledAt && scheduledAt.getTime() > Date.now()) ? "scheduled" : "queued") : "draft";
   await db.update(campaigns).set({
     name: value(body.name) || campaign.name,
     subject: value(body.subject) || campaign.subject,
@@ -79,6 +82,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     updatedAt: new Date(),
   }).where(eq(campaigns.id, id));
 
-  await audit(action === "queue" ? "campaign.queued" : "campaign.updated", session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, audienceSize, runtimeMode: policy.mode });
+  const auditAction = action === "send_now" ? "campaign.send_now_queued" : action === "schedule" ? "campaign.scheduled" : action === "queue" ? "campaign.queued" : "campaign.updated";
+  await audit(auditAction, session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, audienceSize, runtimeMode: policy.mode });
   return NextResponse.json({ ok: true, status: nextStatus, audienceSize });
 }
