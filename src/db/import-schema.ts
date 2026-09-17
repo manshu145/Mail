@@ -1,4 +1,4 @@
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { contacts, importJobs } from "./schema";
 import type { ImportRow } from "../lib/contact-utils";
 
@@ -24,6 +24,7 @@ export const importStagingRows = pgTable("import_staging_rows", {
   detail: text("detail"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
+  uniqueIndex("import_staging_job_row_uidx").on(table.jobId, table.rowNumber),
   index("import_staging_job_processed_idx").on(table.jobId, table.processed),
   index("import_staging_result_idx").on(table.result),
   index("import_staging_job_contact_idx").on(table.jobId, table.contactId),
