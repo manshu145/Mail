@@ -37,6 +37,8 @@ export async function resolveEngagementAudience(campaignId: string, rule: Engage
     where m.campaign_id=$1
       and m.status='delivered'
       and c.status='active'
+      and c.consent_status='confirmed'
+      and length(trim(coalesce(c.consent_source,''))) > 0
       and c.validation_status <> 'invalid'
       and not exists (
         select 1 from suppressions s where s.normalized_email=c.normalized_email

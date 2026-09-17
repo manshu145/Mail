@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { db,pool } from "../../src/db";
 import { contacts,messages,suppressions } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
+import { hasConfirmedConsent } from "../../src/lib/consent-policy";
 import { readDeliverySettings } from "../../src/lib/delivery-settings";
 
 const intervalMs=Math.max(1000,Number(process.env.POLICY_WORKER_INTERVAL_MS||"3000"));
@@ -17,6 +18,7 @@ async function runOnce(){
  for(const message of queued){
   const [contact]=await db.select().from(contacts).where(eq(contacts.id,message.contactId)).limit(1);
   if(!contact||contact.status!=="active"){await db.update(messages).set({status:"cancelled",lastError:"contact_not_active"}).where(eq(messages.id,message.id));cancelled++;continue}
+  if(!hasConfirmedConsent(contact)){await db.update(messages).set({status:"cancelled",lastError:"marketing_consent_missing"}).where(eq(messages.id,message.id));cancelled++;continue}
   const [suppressed]=await db.select({id:suppressions.id,reason:suppressions.reason}).from(suppressions).where(eq(suppressions.normalizedEmail,contact.normalizedEmail)).limit(1);
   if(suppressed){await db.update(messages).set({status:"cancelled",lastError:`suppressed:${suppressed.reason}`}).where(eq(messages.id,message.id));cancelled++;continue}
   if(contact.validationStatus==="invalid"){await db.update(messages).set({status:"cancelled",lastError:"validation_invalid"}).where(eq(messages.id,message.id));cancelled++;continue}

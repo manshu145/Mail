@@ -11,10 +11,12 @@ export type AudienceRecipient = {
   validationStatus: "pending" | "accepted" | "valid" | "invalid" | "unknown" | "error";
 };
 
+const confirmedConsent = and(eq(contacts.consentStatus, "confirmed"), sql`length(trim(coalesce(${contacts.consentSource}, ''))) > 0`);
+
 const selection = { contactId: contacts.id, email: contacts.email, normalizedEmail: contacts.normalizedEmail, validationStatus: contacts.validationStatus };
 
 export async function resolveAudienceRecipients(list: typeof lists.$inferSelect): Promise<AudienceRecipient[]> {
-  if (!list.isDynamic) return db.select(selection).from(contactLists).innerJoin(contacts, eq(contactLists.contactId, contacts.id)).where(and(eq(contactLists.listId, list.id), eq(contacts.status, "active")));
+  if (!list.isDynamic) return db.select(selection).from(contactLists).innerJoin(contacts, eq(contactLists.contactId, contacts.id)).where(and(eq(contactLists.listId, list.id), eq(contacts.status, "active"), confirmedConsent));
 
   const [engagementRule] = await db.select().from(engagementSegmentDefinitions).where(eq(engagementSegmentDefinitions.listId, list.id)).limit(1);
   if (engagementRule) return resolveEngagementAudience(engagementRule.campaignId, engagementRule.ruleType as EngagementRule, engagementRule.windowDays ?? null);
@@ -38,5 +40,5 @@ export async function resolveAudienceRecipients(list: typeof lists.$inferSelect)
     const status = rule.value as "active" | "archived";
     condition = rule.operator === "equals" ? eq(contacts.status, status) : ne(contacts.status, status);
   }
-  return db.select(selection).from(contacts).where(and(eq(contacts.status, "active"), condition));
+  return db.select(selection).from(contacts).where(and(eq(contacts.status, "active"), confirmedConsent, condition));
 }
