@@ -68,9 +68,13 @@ services:
   app:
     <<: *runtime
     ports: ["127.0.0.1:${APP_BIND_PORT:-3100}:3000"]
+    volumes:
+      - import_uploads:/var/lib/neximail/imports
 
   import-worker:
     <<: *runtime
+    volumes:
+      - import_uploads:/var/lib/neximail/imports
     command: ["npm", "run", "worker:import"]
 
   campaign-worker:
@@ -155,3 +159,4 @@ volumes:
   redis_data:
   mta_logs:
   dkim_keys:
+  import_uploads:
