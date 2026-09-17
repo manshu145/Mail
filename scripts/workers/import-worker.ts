@@ -4,10 +4,11 @@ import { contactLists, contactTags, contacts, importJobs, suppressions, tags, va
 import { importStagingRows, importUploads } from "../../src/db/import-schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { isValidEmail, normalizeEmail } from "../../src/lib/contact-utils";
-import { buildImportRow, parseCsv } from "../../src/lib/csv-import";
+import { buildImportRow, iterateCsvRows } from "../../src/lib/csv-import";
 
 const intervalMs = Math.max(1000, Number(process.env.IMPORT_WORKER_INTERVAL_MS || "3000"));
-const batchSize = Math.min(500, Math.max(25, Number(process.env.IMPORT_WORKER_BATCH_SIZE || "250")));
+const batchSize = Math.min(1000, Math.max(50, Number(process.env.IMPORT_WORKER_BATCH_SIZE || "500")));
+const stageBatchSize = Math.min(2000, Math.max(250, Number(process.env.IMPORT_STAGE_BATCH_SIZE || "1000")));
 const retentionDays = Math.max(1, Number(process.env.IMPORT_HISTORY_RETENTION_DAYS || "30"));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -29,14 +30,26 @@ async function stageStoredUpload(jobId: string) {
   if (existing) return;
   const [upload] = await db.select().from(importUploads).where(eq(importUploads.jobId, jobId)).limit(1);
   if (!upload) return;
-  const matrix = parseCsv(upload.content);
-  const headers = upload.headers.length ? upload.headers : (matrix[0] || []);
-  const values = matrix.slice(1);
-  for (let offset = 0; offset < values.length; offset += 500) {
-    const chunk = values.slice(offset, offset + 500).map((row, index) => ({ jobId, rowNumber: offset + index + 2, payload: buildImportRow(headers, row, upload.mapping, upload.options) }));
-    if (chunk.length) await db.insert(importStagingRows).values(chunk);
+
+  let headers: string[] | null = upload.headers.length ? upload.headers : null;
+  let dataRow = 0;
+  let staged = 0;
+  let chunk: Array<{ jobId: string; rowNumber: number; payload: ReturnType<typeof buildImportRow> }> = [];
+
+  for (const row of iterateCsvRows(upload.content)) {
+    if (!headers) { headers = row.map((value) => value.trim()); continue; }
+    if (dataRow === 0 && row.map((value) => value.trim()).join("\u0001") === headers.join("\u0001")) { dataRow++; continue; }
+    dataRow++;
+    chunk.push({ jobId, rowNumber: dataRow + 1, payload: buildImportRow(headers, row, upload.mapping, upload.options) });
+    if (chunk.length >= stageBatchSize) {
+      await db.insert(importStagingRows).values(chunk);
+      staged += chunk.length;
+      chunk = [];
+      await heartbeat({ state: "staging", jobId, staged, total: dataRow });
+    }
   }
-  await db.execute(sql`update import_jobs set total_rows=${values.length}, started_at=coalesce(started_at, now()) where id=${jobId}`);
+  if (chunk.length) { await db.insert(importStagingRows).values(chunk); staged += chunk.length; }
+  await db.execute(sql`update import_jobs set total_rows=${staged}, started_at=coalesce(started_at, now()) where id=${jobId}`);
 }
 
 async function queueScopedValidation(jobId: string) {
@@ -112,6 +125,6 @@ async function runOnce() {
   await heartbeat({ state: remaining ? "processing" : "idle", jobId: job.id, listId, imported, duplicates, invalid, suppressed, remaining });
 }
 
-async function main() { console.log(`[import-worker] started, batch=${batchSize}, retention=${retentionDays}d`); while (true) { try { await runOnce(); } catch (error) { console.error("[import-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); } await sleep(intervalMs); } }
+async function main() { console.log(`[import-worker] started, batch=${batchSize}, stageBatch=${stageBatchSize}, retention=${retentionDays}d`); while (true) { try { await runOnce(); } catch (error) { console.error("[import-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); } await sleep(intervalMs); } }
 main().catch(console.error);
 process.on("SIGTERM", async () => { await pool.end(); process.exit(0); });
