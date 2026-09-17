@@ -1,4 +1,4 @@
-import { submitToMta, SmtpSubmissionUncertainError } from "../../src/lib/smtp-submit";
+import { submitToMta, SmtpSubmissionUncertainError, SmtpResponseError } from "../../src/lib/smtp-submit";
 import { and, eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { campaigns, contacts, messageEvents, messages, sendingAccounts, templates } from "../../src/db/schema";
@@ -13,7 +13,7 @@ import { hasConfirmedConsent } from "../../src/lib/consent-policy";
 import { getRuntimePolicy } from "../../src/lib/runtime-policy";
 import { providerForEmail } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
-import { personalizeContactText } from "../../src/lib/personalization";
+import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -107,7 +107,7 @@ async function claimMessages(): Promise<Claimed[]> {
 }
 async function markDeferred(id: string, attempt: number, error: unknown, settings: DeliverySettings) {
   const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error";
-  if (attempt >= settings.retryMaxAttempts) {
+  if ((error instanceof SmtpResponseError && error.code >= 500) || attempt >= settings.retryMaxAttempts) {
     await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [id, detail]);
     await event(id,"transport_failed",{attempt,error:detail});
     return "failed" as const;
@@ -189,7 +189,7 @@ async function runOnce() {
 
     const unsubscribeToken = await signPublicToken({ email: contact.email, messageId: message.id }, "90d");
     const unsubscribeUrl = `${appUrl}/unsubscribe/${unsubscribeToken}`;
-    let html = personalize(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
+    let html = personalizeContactHtml(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
     let text = personalize(template.textBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
     const preheader = personalize(campaign.preheader || "", contact);
     html = injectPreheader(html, preheader);
@@ -260,9 +260,18 @@ async function runOnce() {
 
 async function main() {
   if (!appUrl) throw new Error("APP_URL is required");
-  await recoverStaleClaims();
   while (true) {
-    try { await runOnce(); }
+    try {
+      // Serialize transport across replicas so account quotas and provider probes
+      // cannot race. The dedicated session owns the lock until this batch settles.
+      const lock = await pool.connect();
+      try {
+        const result = await lock.query("select pg_try_advisory_lock(734201, 1) as acquired");
+        if (result.rows[0].acquired) {
+          try { await runOnce(); } finally { await lock.query("select pg_advisory_unlock(734201, 1)"); }
+        }
+      } finally { lock.release(); }
+    }
     catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort, bounceTracking: bounceEnabled }).catch(() => {}); }
     await sleep(intervalMs);
   }

@@ -64,4 +64,7 @@ jobs:
           done
           docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta postfix status
           docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta sh -lc 'test -s /run/opendkim/opendkim.pid && kill -0 "$(cat /run/opendkim/opendkim.pid)"'
+          docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta sh -c 'echo persisted > /var/spool/postfix/.neximail-ci'
+          docker compose -p neximail-ci -f docker-compose.prod.yml up -d --no-deps --force-recreate --wait --wait-timeout 60 mta
+          docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta sh -c 'test "$(cat /var/spool/postfix/.neximail-ci)" = persisted && rm /var/spool/postfix/.neximail-ci'
           docker compose -p neximail-ci -f docker-compose.prod.yml down -v

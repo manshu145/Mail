@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
-import { submitToMta, SmtpSubmissionUncertainError } from "../src/lib/smtp-submit";
+import { submitToMta, SmtpResponseError, SmtpSubmissionUncertainError } from "../src/lib/smtp-submit";
 
-async function withServer(mode: "accept" | "close-before" | "close-after" | "reject" | "no-id", run: (port: number) => Promise<void>) {
+async function withServer(mode: "accept" | "close-before" | "close-after" | "reject" | "reject-permanent" | "no-id", run: (port: number) => Promise<void>) {
   const sockets = new Set<net.Socket>();
   const server = net.createServer((socket) => {
     sockets.add(socket);
@@ -17,7 +17,7 @@ async function withServer(mode: "accept" | "close-before" | "close-after" | "rej
       if (body) {
         if (!buffer.includes("\r\n.\r\n")) return;
         if (mode === "close-after") socket.end();
-        else socket.write(mode === "reject" ? "451 temporary rejection\r\n" : mode === "no-id" ? "250 accepted\r\n" : "250 queued as ABC123\r\n");
+        else socket.write(mode === "reject-permanent" ? "550 permanent rejection\r\n" : mode === "reject" ? "451 temporary rejection\r\n" : mode === "no-id" ? "250 accepted\r\n" : "250 queued as ABC123\r\n");
         buffer = "";
         return;
       }
@@ -48,4 +48,8 @@ test("SMTP explicit DATA rejection remains safe to retry", async () => {
 });
 test("SMTP acceptance without queue id is still acceptance", async () => {
   await withServer("no-id", async (port) => assert.equal((await submit(port)).queueId, null));
+});
+
+test("SMTP permanent rejection exposes its code without uncertain delivery", async () => {
+  await withServer("reject-permanent", async (port) => assert.rejects(submit(port), (error: Error) => error instanceof SmtpResponseError && error.code === 550));
 });

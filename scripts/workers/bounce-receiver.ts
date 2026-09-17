@@ -30,7 +30,8 @@ async function heartbeat(meta: Record<string, unknown>) {
 }
 
 async function processDsn(messageId: string, raw: string) {
-  const [message] = await db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
+  return db.transaction(async tx => {
+  const [message] = await tx.select().from(messages).where(eq(messages.id, messageId)).limit(1).for("update");
   if (!message) throw new Error("Unknown NexiMail message id");
   const dsn = parseDsn(raw);
   const classification = classifyBounce(dsn.status, dsn.diagnostic || raw.slice(-1000));
@@ -40,14 +41,14 @@ async function processDsn(messageId: string, raw: string) {
   if (failed) {
     const wasAlreadyBounced = message.status === "bounced";
     if (!wasAlreadyBounced) {
-      await db.update(messages).set({ status: "bounced", bouncedAt: new Date(), lastError: dsn.diagnostic || `DSN ${dsn.status || "failed"}` }).where(eq(messages.id, message.id));
+      await tx.update(messages).set({ status: "bounced", bouncedAt: new Date(), lastError: dsn.diagnostic || `DSN ${dsn.status || "failed"}` }).where(eq(messages.id, message.id));
     }
     // Preserve DSN evidence even when Postfix already observed the same terminal
     // outcome, but emit the external message.bounced webhook only once.
-    await db.insert(messageEvents).values({ messageId: message.id, type: "dsn_bounced", payload: { ...payload, duplicateTerminalObservation: wasAlreadyBounced } });
+    await tx.insert(messageEvents).values({ messageId: message.id, type: "dsn_bounced", payload: { ...payload, duplicateTerminalObservation: wasAlreadyBounced } });
 
     if (classification.suppressRecipient) {
-      await db.insert(suppressions).values({
+      await tx.insert(suppressions).values({
         email: message.recipientEmail,
         normalizedEmail: normalizeEmail(message.recipientEmail),
         reason: "hard_bounce",
@@ -57,16 +58,17 @@ async function processDsn(messageId: string, raw: string) {
     }
 
     if (!wasAlreadyBounced) {
-      await emitWebhookEvent("message.bounced", { messageId: message.id, campaignId: message.campaignId, recipientEmail: message.recipientEmail, dsn: dsn.status, diagnostic: dsn.diagnostic, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient }).catch(() => {});
+      await emitWebhookEvent("message.bounced", { messageId: message.id, campaignId: message.campaignId, recipientEmail: message.recipientEmail, dsn: dsn.status, diagnostic: dsn.diagnostic, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient }, tx);
     }
     return "bounced";
   }
 
-  await db.insert(messageEvents).values({ messageId: message.id, type: dsn.delayed ? "dsn_delayed" : "dsn_received", payload });
+  await tx.insert(messageEvents).values({ messageId: message.id, type: dsn.delayed ? "dsn_delayed" : "dsn_received", payload });
   if (dsn.delayed && !["delivered", "bounced", "failed", "cancelled"].includes(message.status)) {
-    await db.update(messages).set({ lastError: dsn.diagnostic || `DSN ${dsn.status || "delayed"}` }).where(eq(messages.id, message.id));
+    await tx.update(messages).set({ lastError: dsn.diagnostic || `DSN ${dsn.status || "delayed"}` }).where(eq(messages.id, message.id));
   }
   return dsn.delayed ? "delayed" : "received";
+  });
 }
 
 function session(socket: net.Socket) {

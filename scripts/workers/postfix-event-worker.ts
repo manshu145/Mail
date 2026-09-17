@@ -1,129 +1,98 @@
-import readline from "node:readline";
-import { and, eq } from "drizzle-orm";
+import { open, readdir, stat } from "node:fs/promises";
+import path from "node:path";
+import { sql } from "drizzle-orm";
+import { completeLogLines, parsePostfixLog } from "../../src/lib/postfix-log";
+import { handlePostfixEvent } from "../../src/lib/postfix-events";
 import { db, pool } from "../../src/db";
-import { campaigns, messageEvents, messages, suppressions } from "../../src/db/schema";
-import { providerCooldowns, workerHeartbeats } from "../../src/db/operations-schema";
-import { providerCooldownEvents } from "../../src/db/provider-cooldown-event-schema";
-import { normalizeEmail } from "../../src/lib/contact-utils";
-import { emitWebhookEvent } from "../../src/lib/webhooks";
-import { classifyBounce } from "../../src/lib/bounce-classification";
-import { isProviderPressureResponse, providerForDelivery } from "../../src/lib/provider";
-
-const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN_MINUTES || "15"));
-const terminalStatuses = new Set(["delivered", "bounced", "failed", "cancelled"]);
-
+import { workerHeartbeats } from "../../src/db/operations-schema";
 async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "postfix-events", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
 }
+const logDirectory = process.env.POSTFIX_LOG_DIRECTORY || "/var/log/mta";
+let stopping = false;
 
-async function webhook(type: string, payload: Record<string, unknown>) {
-  try { await emitWebhookEvent(type, payload); }
-  catch (error) { console.error("[postfix-event-webhook]", error); }
-}
-
-async function sendingAccountForMessage(campaignId: string) {
-  const [campaign] = await db.select({ sendingAccountId: campaigns.sendingAccountId }).from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
-  return campaign?.sendingAccountId || null;
-}
-
-async function activateProviderCooldown(params: { campaignId: string; recipientEmail: string; response: string; dsn: string | null }) {
-  const sendingAccountId = await sendingAccountForMessage(params.campaignId);
-  if (!sendingAccountId) return null;
-  const provider = providerForDelivery(params.recipientEmail, params.response);
-  const nextProbeAt = new Date(Date.now() + providerCooldownMinutes * 60_000);
-  const reason = params.dsn ? `SMTP ${params.dsn}` : "provider_pressure";
-  const response = params.response.slice(0, 1000);
-  const now = new Date();
-  const [cooldown] = await db.insert(providerCooldowns).values({ sendingAccountId, provider, active: true, reason, lastResponse: response, detectedAt: now, nextProbeAt, updatedAt: now })
-    .onConflictDoUpdate({ target: [providerCooldowns.sendingAccountId, providerCooldowns.provider], set: { active: true, reason, lastResponse: response, detectedAt: now, nextProbeAt, clearedAt: null, updatedAt: now } })
-    .returning({ id: providerCooldowns.id });
-  if (cooldown) await db.insert(providerCooldownEvents).values({ cooldownId: cooldown.id, sendingAccountId, provider, eventType: "detected", reason, response, metadata: { dsn: params.dsn, nextProbeAt: nextProbeAt.toISOString(), campaignId: params.campaignId } });
-  return { id: cooldown?.id || null, provider, nextProbeAt, sendingAccountId };
-}
-
-async function clearProviderCooldown(campaignId: string, recipientEmail: string, response: string) {
-  const sendingAccountId = await sendingAccountForMessage(campaignId);
-  if (!sendingAccountId) return;
-  const provider = providerForDelivery(recipientEmail, response);
-  const [cooldown] = await db.select().from(providerCooldowns).where(and(eq(providerCooldowns.sendingAccountId, sendingAccountId), eq(providerCooldowns.provider, provider), eq(providerCooldowns.active, true))).limit(1);
-  if (!cooldown) return;
-  const now = new Date();
-  const clipped = response.slice(0, 1000);
-  await db.update(providerCooldowns).set({ active: false, lastResponse: clipped, clearedAt: now, nextProbeAt: null, updatedAt: now }).where(eq(providerCooldowns.id, cooldown.id));
-  await db.insert(providerCooldownEvents).values({ cooldownId: cooldown.id, sendingAccountId, provider, eventType: "cleared_delivery", reason: cooldown.reason, response: clipped, metadata: { campaignId } });
-}
-
-async function handle(line: string) {
-  const queueId = line.match(/postfix\/smtp\[[^\]]+\]:\s+([A-Z0-9]+):/i)?.[1];
-  if (!queueId) return false;
-  const [message] = await db.select().from(messages).where(eq(messages.providerMessageId, queueId)).limit(1);
-  if (!message) return false;
-  const status = line.match(/status=(sent|deferred|bounced|expired)/i)?.[1]?.toLowerCase();
-  if (!status) return false;
-
-  // Compose deliberately replays a bounded tail of the durable Postfix log after
-  // worker restarts. Terminal state must be monotonic and terminal events must be
-  // idempotent so replay cannot regress or duplicate message truth.
-  if ((status === "sent" && message.status === "delivered") ||
-      (status === "bounced" && message.status === "bounced") ||
-      (status === "expired" && message.status === "failed")) return true;
-  if (status === "deferred" && terminalStatuses.has(message.status)) return true;
-
-  const dsn = line.match(/dsn=([0-9.]+)/i)?.[1] || null;
-  const detail = line.slice(-1000);
-  const provider = providerForDelivery(message.recipientEmail, detail);
-  const base = { messageId: message.id, campaignId: message.campaignId, recipientEmail: message.recipientEmail, queueId, dsn, provider };
-
-  if (status === "deferred") {
-    await db.update(messages).set({ status: "mta_accepted", lastError: detail }).where(eq(messages.id, message.id));
-    let cooldown: Awaited<ReturnType<typeof activateProviderCooldown>> = null;
-    if (isProviderPressureResponse(detail, dsn)) cooldown = await activateProviderCooldown({ campaignId: message.campaignId, recipientEmail: message.recipientEmail, response: detail, dsn });
-    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_deferred", payload: { queueId, dsn, provider, line: detail, providerCooldown: Boolean(cooldown), nextProbeAt: cooldown?.nextProbeAt?.toISOString() } });
-    await webhook("message.deferred", { ...base, providerCooldown: Boolean(cooldown) });
-    return true;
-  }
-
-  if (status === "sent") {
-    await clearProviderCooldown(message.campaignId, message.recipientEmail, detail);
-    await db.update(messages).set({ status: "delivered", lastError: null, deliveredAt: new Date() }).where(eq(messages.id, message.id));
-    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_delivered", payload: { queueId, dsn, provider, line: detail } });
-    await webhook("message.delivered", base);
-    return true;
-  }
-
-  if (status === "bounced") {
-    const classification = classifyBounce(dsn, detail);
-    let cooldown: Awaited<ReturnType<typeof activateProviderCooldown>> = null;
-    if (classification.providerPressure) {
-      cooldown = await activateProviderCooldown({ campaignId: message.campaignId, recipientEmail: message.recipientEmail, response: detail, dsn });
+async function ingestFile(filename: string) {
+  const file = await open(filename, "r");
+  try {
+    const info = await file.stat();
+    const fileKey = `${info.dev}:${info.ino}`;
+    for (let chunk = 0; chunk < 16; chunk++) {
+      const saved = await pool.query("select byte_offset from postfix_log_checkpoints where file_key=$1", [fileKey]);
+      let offset = Number(saved.rows[0]?.byte_offset || 0);
+      if ((await file.stat()).size < offset) offset = 0;
+      const bytes = Buffer.alloc(512 * 1024);
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, offset);
+      if (!bytesRead) return true;
+      const batch = completeLogLines(bytes.subarray(0, bytesRead), offset);
+      if (!batch.lines.length) {
+        if (bytesRead === bytes.length) throw new Error("Postfix log line exceeds 512 KiB; checkpoint retained");
+        return true;
+      }
+      // Do not advance the checkpoint until every relevant line is durable.
+      await db.transaction(async tx => {
+        for (const item of batch.lines) {
+          const parsed = parsePostfixLog(item.line);
+          if (!parsed) continue;
+          await tx.execute(sql`insert into postfix_log_inbox(file_key,line_key,queue_id,message_id,outcome,raw_line)
+            values(${fileKey},${item.key},${parsed.queueId},${parsed.messageId}::uuid,${parsed.outcome},${item.line})
+            on conflict(file_key,line_key) do nothing`);
+        }
+        await tx.execute(sql`insert into postfix_log_checkpoints(file_key,byte_offset) values(${fileKey},${batch.nextOffset})
+          on conflict(file_key) do update set byte_offset=excluded.byte_offset,updated_at=now()`);
+      });
+      if (bytesRead < bytes.length) return true;
     }
+    return false;
+  } finally { await file.close(); }
+}
 
-    await db.update(messages).set({ status: "bounced", lastError: detail, bouncedAt: new Date() }).where(eq(messages.id, message.id));
-    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_bounced", payload: { queueId, dsn, provider, line: detail, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient, providerCooldown: Boolean(cooldown) } });
-
-    if (classification.suppressRecipient) {
-      await db.insert(suppressions).values({ email: message.recipientEmail, normalizedEmail: normalizeEmail(message.recipientEmail), reason: "hard_bounce", source: "postfix_event", note: detail }).onConflictDoNothing({ target: suppressions.normalizedEmail });
-    }
-
-    await webhook("message.bounced", { ...base, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient, providerCooldown: Boolean(cooldown) });
-    return true;
+async function runOnce() {
+  // All retained plain-text rotations are read, oldest first, including the initial deployment.
+  const files = await readdir(logDirectory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
+  const logs = await Promise.all(files.filter(name => /^mail\.log(?:\.\d+)?$/.test(name)).map(async name => {
+    const filename = path.join(logDirectory, name);
+    return { filename, modified: (await stat(filename)).mtimeMs };
+  }));
+  for (const log of logs.sort((a, b) => a.modified - b.modified)) {
+    if (!await ingestFile(log.filename)) break;
   }
-
-  await db.update(messages).set({ status: "failed", lastError: detail }).where(eq(messages.id, message.id));
-  await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_expired", payload: { queueId, dsn, provider, line: detail } });
-  await webhook("message.failed", base);
-  return true;
+  const pending = await pool.query<{ id: string }>("select id from postfix_log_inbox where outcome is not null and processed_at is null and next_attempt_at<=now() order by id limit 500");
+  let matched = 0;
+  for (const item of pending.rows) {
+    await db.transaction(async tx => {
+      const result = await tx.execute(sql`select * from postfix_log_inbox where id=${item.id}::bigint and processed_at is null for update`);
+      const row = result.rows[0];
+      if (!row) return;
+      const mapping = await tx.execute(sql`select message_id from postfix_log_inbox where queue_id=${row.queue_id} and message_id is not null and id<${item.id}::bigint order by id desc limit 1`);
+      const messageId = mapping.rows[0]?.message_id as string | undefined;
+      if (await handlePostfixEvent(tx, String(row.raw_line), messageId || null)) {
+        await tx.execute(sql`update postfix_log_inbox set processed_at=now() where id=${item.id}::bigint`);
+        matched++;
+      } else {
+        // Queue acceptance may not yet be committed; retain the event and retry.
+        await tx.execute(sql`update postfix_log_inbox set next_attempt_at=now()+interval '30 seconds' where id=${item.id}::bigint`);
+      }
+    });
+  }
+  await heartbeat({ state: "online", matched, pendingBatch: pending.rows.length, files: logs.length });
 }
 
 async function main() {
-  console.log("[postfix-event-worker] reading Postfix log lines from stdin");
-  const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-  let processed = 0, matched = 0;
-  for await (const line of rl) {
-    try { if (await handle(line)) matched++; processed++; if (processed % 25 === 0) await heartbeat({ state: "online", processed, matched, providerCooldownMinutes }); }
-    catch (error) { console.error("[postfix-event-worker]", error); }
+  while (!stopping) {
+    const lock = await pool.connect();
+    try {
+      const result = await lock.query("select pg_try_advisory_lock(734201,2) as acquired");
+      if (result.rows[0].acquired) await runOnce();
+    } catch (error) {
+      console.error("[postfix-event-worker]", error);
+      await heartbeat({ state: "error" }).catch(() => {});
+    } finally {
+      await lock.query("select pg_advisory_unlock(734201,2)").catch(() => {});
+      lock.release();
+    }
+    if (!stopping) await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  await heartbeat({ state: "stopped", processed, matched, providerCooldownMinutes });
 }
-
+process.on("SIGTERM", () => { stopping = true; });
+process.on("SIGINT", () => { stopping = true; });
 main().catch(console.error).finally(() => pool.end());

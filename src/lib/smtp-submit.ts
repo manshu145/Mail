@@ -1,6 +1,10 @@
 import net from "node:net";
 
 // Once DATA has been written, a lost reply cannot distinguish rejection from acceptance.
+export class SmtpResponseError extends Error {
+  constructor(readonly code: number, response: string) { super(`MTA SMTP ${code}: ${response.slice(0, 800)}`); this.name = "SmtpResponseError"; }
+}
+
 export class SmtpSubmissionUncertainError extends Error {
   constructor(message: string) { super(message); this.name = "SmtpSubmissionUncertainError"; }
 }
@@ -15,7 +19,7 @@ export async function submitToMta(raw: string, envelopeFrom: string, recipient: 
     let settled = false;
     const finish = (error?: Error, queueId: string | null = null) => { if (settled) return; settled = true; socket.end(); socket.destroy(); if (error) reject(stage === "body" ? new SmtpSubmissionUncertainError(error.message) : error); else resolve({ queueId }); };
     const command = (value: string) => socket.write(`${value}\r\n`);
-    const failCode = (code: number, line: string) => { stage = "done"; finish(new Error(`MTA SMTP ${code}: ${line.slice(0, 800)}`)); };
+    const failCode = (code: number, line: string) => { stage = "done"; finish(new SmtpResponseError(code, line)); };
     socket.on("timeout", () => finish(new Error("MTA SMTP timeout")));
     socket.on("error", (error) => finish(error));
     socket.on("close", () => finish(new Error("MTA SMTP connection closed before confirmation")));

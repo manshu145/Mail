@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db,pool } from "../../src/db";
 import { contacts,messages,suppressions } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
@@ -17,12 +17,12 @@ async function runOnce(){
  let ready=0,cancelled=0;
  for(const message of queued){
   const [contact]=await db.select().from(contacts).where(eq(contacts.id,message.contactId)).limit(1);
-  if(!contact||contact.status!=="active"){await db.update(messages).set({status:"cancelled",lastError:"contact_not_active"}).where(eq(messages.id,message.id));cancelled++;continue}
-  if(!hasConfirmedConsent(contact)){await db.update(messages).set({status:"cancelled",lastError:"marketing_consent_missing"}).where(eq(messages.id,message.id));cancelled++;continue}
+  if(!contact||contact.status!=="active"){await db.update(messages).set({status:"cancelled",lastError:"contact_not_active"}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
+  if(!hasConfirmedConsent(contact)){await db.update(messages).set({status:"cancelled",lastError:"marketing_consent_missing"}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
   const [suppressed]=await db.select({id:suppressions.id,reason:suppressions.reason}).from(suppressions).where(eq(suppressions.normalizedEmail,contact.normalizedEmail)).limit(1);
-  if(suppressed){await db.update(messages).set({status:"cancelled",lastError:`suppressed:${suppressed.reason}`}).where(eq(messages.id,message.id));cancelled++;continue}
-  if(contact.validationStatus==="invalid"){await db.update(messages).set({status:"cancelled",lastError:"validation_invalid"}).where(eq(messages.id,message.id));cancelled++;continue}
-  await db.update(messages).set({status:"ready_for_transport",lastError:null}).where(eq(messages.id,message.id));ready++
+  if(suppressed){await db.update(messages).set({status:"cancelled",lastError:`suppressed:${suppressed.reason}`}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
+  if(contact.validationStatus==="invalid"){await db.update(messages).set({status:"cancelled",lastError:"validation_invalid"}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
+  await db.update(messages).set({status:"ready_for_transport",lastError:null}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));ready++
  }
  await heartbeat({state:"online",evaluated:queued.length,ready,cancelled,activeBefore:active,maxActiveQueued:settings.maxActiveQueued,source:"database_control_plane"})
 }

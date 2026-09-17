@@ -11,16 +11,22 @@ async function run() {
   const active = await db.select().from(campaigns).where(eq(campaigns.status, "sending"));
   let completed = 0;
   for (const campaign of active) {
-    const result = await db.execute(sql`select count(*)::int as total,count(*) filter(where status in ('queued','ready_for_transport','sending','mta_accepted','deferred'))::int as active from messages where campaign_id=${campaign.id}`);
-    const row = (result.rows[0] || {}) as Record<string, unknown>;
-    const total = Number(row.total || 0);
-    const inFlight = Number(row.active || 0);
-    if (total > 0 && inFlight === 0) {
+    const result = await db.transaction(async tx => {
+      const [current] = await tx.select().from(campaigns).where(eq(campaigns.id, campaign.id)).for("update");
+      if (current?.status !== "sending") return false;
+      // Read after taking the same campaign lock used by retries and controls.
+      const counts = await tx.execute(sql`select count(*)::int total,
+        count(*) filter(where status in ('queued','ready_for_transport','sending','mta_accepted','deferred'))::int active
+        from messages where campaign_id=${campaign.id}`);
+      const row = counts.rows[0];
+      if (!Number(row?.total) || Number(row?.active)) return false;
       const now = new Date();
-      await db.update(campaigns).set({ status: "completed", completedAt: now, messageCount: total, lastError: null, updatedAt: now }).where(eq(campaigns.id, campaign.id));
-      await emitWebhookEvent("campaign.completed", { campaignId: campaign.id, name: campaign.name, messageCount: total, completedAt: now.toISOString() }).catch((error) => console.error("[event-worker.webhook]", error));
-      completed++;
-    }
+      await tx.update(campaigns).set({ status: "completed", completedAt: now, messageCount: Number(row.total), lastError: null, updatedAt: now }).where(eq(campaigns.id, campaign.id));
+      await emitWebhookEvent("campaign.completed", { campaignId: campaign.id, name: campaign.name, messageCount: Number(row.total), completedAt: now.toISOString() }, tx);
+      return true;
+    });
+    if (result) completed++;
+
   }
   await heartbeat({ state: "online", campaigns: active.length, completed });
 }
