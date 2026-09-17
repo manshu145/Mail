@@ -1,3 +1,4 @@
+import { unlink } from "node:fs/promises";
 import { and, eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { contactLists, contactTags, contacts, importJobs, suppressions, tags, validationJobs } from "../../src/db/schema";
@@ -5,11 +6,13 @@ import { importStagingRows, importUploads } from "../../src/db/import-schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { isValidEmail, normalizeEmail } from "../../src/lib/contact-utils";
 import { buildImportRow, iterateCsvRows } from "../../src/lib/csv-import";
+import { iterateCsvFileRows } from "../../src/lib/csv-file";
 
 const intervalMs = Math.max(1000, Number(process.env.IMPORT_WORKER_INTERVAL_MS || "3000"));
 const batchSize = Math.min(1000, Math.max(50, Number(process.env.IMPORT_WORKER_BATCH_SIZE || "500")));
 const stageBatchSize = Math.min(2000, Math.max(250, Number(process.env.IMPORT_STAGE_BATCH_SIZE || "1000")));
 const retentionDays = Math.max(1, Number(process.env.IMPORT_HISTORY_RETENTION_DAYS || "30"));
+const maxImportRows = Math.max(1, Number(process.env.IMPORT_MAX_ROWS || "1000000"));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function heartbeat(metadata: Record<string, unknown>) { await db.insert(workerHeartbeats).values({ workerName: "import", metadata }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata } }); }
@@ -25,12 +28,20 @@ async function attachTags(contactId: string, names: string[] = []) {
   }
 }
 
+async function* uploadRows(upload: typeof importUploads.$inferSelect) {
+  if (upload.storagePath) {
+    for await (const row of iterateCsvFileRows(upload.storagePath)) yield row;
+    return;
+  }
+  for (const row of iterateCsvRows(upload.content)) yield row;
+}
+
 async function stageStoredUpload(jobId: string) {
   const [upload] = await db.select().from(importUploads).where(eq(importUploads.jobId, jobId)).limit(1);
   const existingResult = await db.execute(sql`select count(*)::int as count from import_staging_rows where job_id=${jobId}`);
   const existingCount = Number((existingResult.rows[0] as Record<string, unknown> | undefined)?.count || 0);
 
-  if (!upload) {
+  if (!upload || (!upload.storagePath && !upload.content)) {
     if (existingCount > 0) return existingCount;
     await db.update(importJobs).set({ status: "failed", errorMessage: "Stored CSV payload is missing.", completedAt: new Date() }).where(eq(importJobs.id, jobId));
     await heartbeat({ state: "failed", jobId, error: "import_upload_missing" });
@@ -43,33 +54,47 @@ async function stageStoredUpload(jobId: string) {
   let newlyStaged = 0;
   let chunk: Array<{ jobId: string; rowNumber: number; payload: ReturnType<typeof buildImportRow> }> = [];
 
-  for (const row of iterateCsvRows(upload.content)) {
-    if (!headers) {
-      headers = row.map((value) => value.trim());
+  try {
+    for await (const row of uploadRows(upload)) {
+      if (!headers) {
+        headers = row.map((value) => value.trim());
+        headerConsumed = true;
+        continue;
+      }
+      if (!headerConsumed && row.map((value) => value.trim()).join("\u0001") === headers.join("\u0001")) {
+        headerConsumed = true;
+        continue;
+      }
       headerConsumed = true;
-      continue;
-    }
-    if (!headerConsumed && row.map((value) => value.trim()).join("\u0001") === headers.join("\u0001")) {
-      headerConsumed = true;
-      continue;
-    }
-    headerConsumed = true;
-    if (!row.some((value) => value.trim())) continue;
-    dataRow++;
+      if (!row.some((value) => value.trim())) continue;
+      dataRow++;
+      if (dataRow > maxImportRows) {
+        await db.update(importJobs).set({ status: "failed", errorMessage: `A single import can contain up to ${maxImportRows.toLocaleString()} data rows.`, completedAt: new Date() }).where(eq(importJobs.id, jobId));
+        await heartbeat({ state: "failed", jobId, error: "row_limit_exceeded", rows: dataRow, maxImportRows });
+        return 0;
+      }
 
-    // Existing staging rows are a durable checkpoint. On restart we replay the
-    // CSV parser from the beginning and skip exactly the rows already committed.
-    if (dataRow <= existingCount) continue;
+      // Existing staging rows are a durable checkpoint. On restart we replay the
+      // source from the beginning and skip exactly the rows already committed.
+      if (dataRow <= existingCount) continue;
 
-    // Keep the historical row-number convention stable for already-created jobs.
-    const rowNumber = dataRow + 2;
-    chunk.push({ jobId, rowNumber, payload: buildImportRow(headers, row, upload.mapping, upload.options) });
-    if (chunk.length >= stageBatchSize) {
-      await db.insert(importStagingRows).values(chunk).onConflictDoNothing({ target: [importStagingRows.jobId, importStagingRows.rowNumber] });
-      newlyStaged += chunk.length;
-      chunk = [];
-      await heartbeat({ state: "staging", jobId, staged: existingCount + newlyStaged, total: dataRow });
+      // Keep the existing row-number convention stable for jobs created by older releases.
+      const rowNumber = dataRow + 2;
+      chunk.push({ jobId, rowNumber, payload: buildImportRow(headers, row, upload.mapping, upload.options) });
+      if (chunk.length >= stageBatchSize) {
+        await db.insert(importStagingRows).values(chunk).onConflictDoNothing({ target: [importStagingRows.jobId, importStagingRows.rowNumber] });
+        newlyStaged += chunk.length;
+        chunk = [];
+        const staged = existingCount + newlyStaged;
+        await db.update(importJobs).set({ totalRows: staged }).where(eq(importJobs.id, jobId));
+        await heartbeat({ state: "staging", jobId, staged, sourceRowsSeen: dataRow, storage: upload.storagePath ? "disk_spool" : "legacy_database" });
+      }
     }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "csv_spool_read_failed";
+    await db.update(importJobs).set({ status: "failed", errorMessage: `Could not read stored CSV: ${detail}`.slice(0, 1000), completedAt: new Date() }).where(eq(importJobs.id, jobId));
+    await heartbeat({ state: "failed", jobId, error: "csv_spool_read_failed", detail });
+    return 0;
   }
 
   if (chunk.length) {
@@ -106,17 +131,38 @@ async function queueScopedValidation(jobId: string) {
 }
 
 async function cleanupHistory() {
-  const result = await pool.query<{ id: string }>(`
-    delete from import_jobs
-    where status in ('completed','failed')
-      and coalesce(completed_at, created_at) < now() - ($1::int * interval '1 day')
-    returning id
+  const old = await pool.query<{ id: string; storage_path: string | null }>(`
+    select j.id, u.storage_path
+    from import_jobs j
+    left join import_uploads u on u.job_id=j.id
+    where j.status in ('completed','failed')
+      and coalesce(j.completed_at, j.created_at) < now() - ($1::int * interval '1 day')
+    limit 100
   `, [retentionDays]);
-  return result.rowCount || 0;
+  for (const row of old.rows) {
+    if (row.storage_path) await unlink(row.storage_path).catch(() => {});
+    await pool.query(`delete from import_jobs where id=$1`, [row.id]);
+  }
+  return old.rowCount || 0;
+}
+
+async function nextJob() {
+  const result = await pool.query<{ id: string }>(`
+    select j.id
+    from import_jobs j
+    join import_uploads u on u.job_id=j.id
+    where j.status in ('pending','processing')
+      and (u.size_bytes > 0 or length(u.content) > 0)
+    order by j.created_at
+    limit 1
+  `);
+  if (!result.rows[0]?.id) return null;
+  const [job] = await db.select().from(importJobs).where(eq(importJobs.id, result.rows[0].id)).limit(1);
+  return job || null;
 }
 
 async function runOnce() {
-  const [job] = await db.select().from(importJobs).where(sql`${importJobs.status} in ('pending','processing')`).orderBy(importJobs.createdAt).limit(1);
+  const job = await nextJob();
   if (!job) { const cleaned = await cleanupHistory(); await heartbeat({ state: "idle", cleaned }); return; }
   if (job.status === "pending") await db.update(importJobs).set({ status: "processing" }).where(eq(importJobs.id, job.id));
 
@@ -192,6 +238,6 @@ async function runOnce() {
   await heartbeat({ state: remaining ? "processing" : "idle", jobId: job.id, listId, imported, duplicates, invalid, suppressed, remaining, stagedTotal });
 }
 
-async function main() { console.log(`[import-worker] started, batch=${batchSize}, stageBatch=${stageBatchSize}, retention=${retentionDays}d`); while (true) { try { await runOnce(); } catch (error) { console.error("[import-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); } await sleep(intervalMs); } }
+async function main() { console.log(`[import-worker] started, batch=${batchSize}, stageBatch=${stageBatchSize}, retention=${retentionDays}d, maxRows=${maxImportRows}`); while (true) { try { await runOnce(); } catch (error) { console.error("[import-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); } await sleep(intervalMs); } }
 main().catch(console.error);
 process.on("SIGTERM", async () => { await pool.end(); process.exit(0); });
