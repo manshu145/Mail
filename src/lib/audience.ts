@@ -1,4 +1,4 @@
-import { and, eq, ilike, ne, notIlike } from "drizzle-orm";
+import { and, eq, ilike, ne, notIlike, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { contactLists, contacts, lists } from "@/db/schema";
 import { engagementSegmentDefinitions, segmentDefinitions } from "@/db/segment-schema";
@@ -28,6 +28,12 @@ export async function resolveAudienceRecipients(list: typeof lists.$inferSelect)
   } else if (rule.field === "validation_status") {
     const status = rule.value as "pending" | "accepted" | "valid" | "invalid" | "unknown" | "error";
     condition = rule.operator === "equals" ? eq(contacts.validationStatus, status) : ne(contacts.validationStatus, status);
+  } else if (rule.field === "custom_attribute") {
+    const key = rule.attributeKey?.trim();
+    if (!key) return [];
+    const actual = sql`lower(coalesce(${contacts.attributes} ->> ${key}, ''))`;
+    const expected = rule.value.trim().toLowerCase();
+    condition = rule.operator === "equals" ? sql`${actual} = ${expected}` : sql`${actual} <> ${expected}`;
   } else {
     const status = rule.value as "active" | "archived";
     condition = rule.operator === "equals" ? eq(contacts.status, status) : ne(contacts.status, status);
