@@ -10,6 +10,26 @@ type Mapping = Record<string, string>;
 const fieldClass = "w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-3 text-sm outline-none focus:border-violet-400 dark:border-zinc-800 dark:bg-zinc-900";
 const MAX_FILE_BYTES = 300 * 1024 * 1024;
 
+function uploadFile(url: string, file: File, onProgress: (value: number) => void) {
+  return new Promise<{ bytes?: number }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", "text/csv");
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) onProgress(Math.min(100, Math.round(event.loaded / event.total * 100)));
+    };
+    xhr.onerror = () => reject(new Error("CSV upload failed."));
+    xhr.onload = () => {
+      let data: { error?: string; bytes?: number } = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch {}
+      if (xhr.status < 200 || xhr.status >= 300) { reject(new Error(data.error || "CSV upload failed.")); return; }
+      onProgress(100);
+      resolve(data);
+    };
+    xhr.send(file);
+  });
+}
+
 export function ImportWizard({ lists }: { lists: ListOption[] }) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -24,10 +44,11 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
   const [listId, setListId] = useState("");
   const [queueValidation, setQueueValidation] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [message, setMessage] = useState("");
 
   async function choose(next: File | null) {
-    setFile(next); setMessage("");
+    setFile(next); setMessage(""); setUploadProgress(null);
     if (!next) { setHeaders([]); setPreview([]); setMapping({}); return; }
     if (next.size > MAX_FILE_BYTES) { setFile(null); setMessage("CSV is larger than 300 MB."); return; }
     const sample = await next.slice(0, Math.min(next.size, 256 * 1024)).text();
@@ -42,32 +63,44 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
     if (!file) return setMessage("Choose a CSV first.");
     if (!mapping.email) return setMessage("Map the email column.");
     if (!consentSource.trim()) return setMessage("Consent source is required.");
-    setBusy(true); setMessage("");
+    setBusy(true); setMessage(""); setUploadProgress(0);
     try {
-      const body = new FormData();
-      body.set("file", file);
-      body.set("mapping", JSON.stringify(mapping));
-      body.set("consentSource", consentSource.trim());
-      body.set("consentStatus", consentStatus);
-      body.set("defaultSource", defaultSource.trim());
-      body.set("defaultCategory", defaultCategory.trim());
-      body.set("defaultTags", defaultTags.trim());
-      body.set("listId", listId);
-      body.set("queueValidation", String(queueValidation));
-      const response = await fetch("/api/imports", { method: "POST", body });
-      const data = await response.json() as { error?: string; total?: number };
-      if (!response.ok) throw new Error(data.error || "Import could not be queued.");
-      setMessage(`Queued ${(data.total || 0).toLocaleString()} rows. Processing continues in background with live progress, speed and ETA.`);
-      setFile(null); setHeaders([]); setPreview([]); setMapping({}); router.refresh();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Import failed."); }
-    finally { setBusy(false); }
+      const response = await fetch("/api/imports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          sizeBytes: file.size,
+          headers,
+          mapping,
+          consentSource: consentSource.trim(),
+          consentStatus,
+          defaultSource: defaultSource.trim(),
+          defaultCategory: defaultCategory.trim(),
+          defaultTags: defaultTags.trim(),
+          listId,
+          queueValidation,
+        }),
+      });
+      const data = await response.json() as { error?: string; jobId?: string; uploadUrl?: string };
+      if (!response.ok || !data.uploadUrl || !data.jobId) throw new Error(data.error || "Import could not be initialized.");
+
+      const uploaded = await uploadFile(data.uploadUrl, file, setUploadProgress);
+      setMessage(`Upload complete${uploaded.bytes ? ` · ${(uploaded.bytes / 1024 / 1024).toFixed(1)} MB` : ""}. Background processing now shows live rows, speed and ETA below.`);
+      setFile(null); setHeaders([]); setPreview([]); setMapping({});
+      router.refresh();
+    } catch (error) {
+      setUploadProgress(null);
+      setMessage(error instanceof Error ? error.message : "Import failed.");
+    } finally { setBusy(false); }
   }
 
   return <section className="premium-panel mb-5 overflow-hidden">
-    <div className="border-b border-[var(--border)] px-5 py-4 sm:px-6"><p className="text-[10px] font-black uppercase tracking-[.16em] text-[var(--muted)]">Start an import</p><h2 className="mt-1 text-lg font-black">Upload CSV audience</h2><p className="mt-1 text-xs text-[var(--muted)]">Up to 1,000,000 data rows in one job. The file is stored once, then a background worker processes it independently.</p></div>
+    <div className="border-b border-[var(--border)] px-5 py-4 sm:px-6"><p className="text-[10px] font-black uppercase tracking-[.16em] text-[var(--muted)]">Start an import</p><h2 className="mt-1 text-lg font-black">Upload CSV audience</h2><p className="mt-1 text-xs text-[var(--muted)]">Up to 1,000,000 data rows in one job. Large files stream to persistent disk instead of being loaded into app memory.</p></div>
     <div className="grid gap-5 p-5 lg:grid-cols-[1.1fr_.9fr] sm:p-6">
       <div className="space-y-4">
-        <label className="grid min-h-36 cursor-pointer place-items-center rounded-2xl border border-dashed border-violet-300 bg-violet-500/[.04] p-6 text-center"><div><UploadCloud className="mx-auto h-8 w-8 text-violet-500"/><p className="mt-3 font-black">{file ? file.name : "Choose CSV"}</p><p className="mt-1 text-xs text-[var(--muted)]">Up to 300 MB · up to 1,000,000 rows · safe background processing</p></div><input type="file" accept=".csv,text/csv" className="hidden" onChange={(e)=>void choose(e.target.files?.[0] || null)} /></label>
+        <label className="grid min-h-36 cursor-pointer place-items-center rounded-2xl border border-dashed border-violet-300 bg-violet-500/[.04] p-6 text-center"><div><UploadCloud className="mx-auto h-8 w-8 text-violet-500"/><p className="mt-3 font-black">{file ? file.name : "Choose CSV"}</p><p className="mt-1 text-xs text-[var(--muted)]">Up to 300 MB · up to 1,000,000 rows · streamed background processing</p></div><input type="file" accept=".csv,text/csv" className="hidden" onChange={(e)=>void choose(e.target.files?.[0] || null)} /></label>
+        {uploadProgress !== null ? <div className="rounded-2xl border border-[var(--border)] p-4"><div className="mb-2 flex items-center justify-between text-xs font-black"><span>Upload progress</span><span>{uploadProgress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-[var(--surface-soft)]"><div className="h-full rounded-full bg-violet-500 transition-[width] duration-200" style={{ width: `${uploadProgress}%` }}/></div></div> : null}
         {headers.length ? <div className="rounded-2xl border border-[var(--border)] p-4"><div className="mb-3 flex items-center justify-between"><h3 className="font-black">Column mapping</h3><span className="text-xs font-bold text-violet-500">{mappedCount} mapped</span></div><div className="grid gap-3 sm:grid-cols-2">{IMPORT_FIELDS.map((field)=><label key={field}><span className="mb-1 block text-xs font-bold capitalize">{field.replaceAll("_"," ")}{field === "email" ? " *" : ""}</span><select className={fieldClass} value={mapping[field] || ""} onChange={(e)=>setMapping((m)=>({...m,[field]:e.target.value}))}><option value="">Not mapped</option>{headers.map((h)=><option key={h} value={h}>{h}</option>)}</select></label>)}</div></div> : null}
       </div>
       <div className="space-y-3">
@@ -79,7 +112,7 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
         <label className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3 text-sm font-bold"><input type="checkbox" checked={queueValidation} onChange={(e)=>setQueueValidation(e.target.checked)} /> Queue background validation after import</label>
         {preview.length ? <div className="overflow-hidden rounded-xl border border-[var(--border)]"><div className="bg-[var(--surface-soft)] px-3 py-2 text-xs font-black">Preview · first {preview.length} rows</div><div className="max-h-36 overflow-auto text-[11px]">{preview.map((row,i)=><div key={i} className="border-t border-[var(--border)] px-3 py-2 text-[var(--muted)]">{row.slice(0,4).join(" · ")}</div>)}</div></div> : null}
         {message ? <p className="rounded-xl bg-violet-500/[.08] px-3 py-2 text-xs font-bold text-violet-600 dark:text-violet-300">{message}</p> : null}
-        <button disabled={busy || !file || !mapping.email || !consentSource.trim()} onClick={()=>void submit()} className="btn-primary w-full">{busy ? <><Loader2 className="h-4 w-4 animate-spin"/> Uploading…</> : <><FileUp className="h-4 w-4"/> Queue import</>}</button>
+        <button disabled={busy || !file || !mapping.email || !consentSource.trim()} onClick={()=>void submit()} className="btn-primary w-full">{busy ? <><Loader2 className="h-4 w-4 animate-spin"/> {uploadProgress && uploadProgress > 0 ? `Uploading ${uploadProgress}%` : "Preparing upload…"}</> : <><FileUp className="h-4 w-4"/> Queue import</>}</button>
       </div>
     </div>
   </section>;
