@@ -8,6 +8,7 @@ import { loadCampaignAttachments, type CampaignAttachment } from "../../src/lib/
 import { loadTemplateAttachments } from "../../src/lib/template-attachments";
 import { buildMimeContent } from "../../src/lib/mime-email";
 import { makeBounceAddress } from "../../src/lib/bounce-address";
+import { injectPreheader } from "../../src/lib/email-preheader";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -49,24 +50,48 @@ async function rewriteLinks(html: string, messageId: string) {
 
 async function submitToMta(raw: string, envelopeFrom: string, recipient: string) {
   return new Promise<{ queueId: string | null }>((resolve, reject) => {
-    const socket = net.createConnection({ host: mtaHost, port: mtaPort }); socket.setTimeout(smtpTimeoutMs);
-    let buffer = ""; let stage: "banner" | "ehlo" | "mail" | "rcpt" | "data" | "body" | "done" = "banner"; let settled = false;
+    const socket = net.createConnection({ host: mtaHost, port: mtaPort });
+    socket.setTimeout(smtpTimeoutMs);
+    let buffer = "";
+    let stage: "banner" | "ehlo" | "mail" | "rcpt" | "data" | "body" | "done" = "banner";
+    let settled = false;
     const finish = (error?: Error, queueId: string | null = null) => { if (settled) return; settled = true; socket.end(); socket.destroy(); if (error) reject(error); else resolve({ queueId }); };
-    const command = (value: string) => socket.write(`${value}\r\n`); const failCode = (code: number, line: string) => finish(new Error(`MTA SMTP ${code}: ${line.slice(0, 800)}`));
-    socket.on("timeout", () => finish(new Error("MTA SMTP timeout"))); socket.on("error", (error) => finish(error));
-    socket.on("data", (chunk) => { buffer += chunk.toString("utf8"); const lines = buffer.split(/\r?\n/); buffer = lines.pop() || ""; for (const line of lines) { const match = line.match(/^(\d{3})([ -])(.*)$/); if (!match || match[2] === "-") continue; const code = Number(match[1]);
-      if (stage === "banner") { if (code !== 220) return failCode(code, line); stage = "ehlo"; command("EHLO neximail-app"); continue; }
-      if (stage === "ehlo") { if (code < 200 || code >= 300) return failCode(code, line); stage = "mail"; command(`MAIL FROM:<${envelopeFrom}>`); continue; }
-      if (stage === "mail") { if (code < 200 || code >= 300) return failCode(code, line); stage = "rcpt"; command(`RCPT TO:<${recipient}>`); continue; }
-      if (stage === "rcpt") { if (code < 200 || code >= 300) return failCode(code, line); stage = "data"; command("DATA"); continue; }
-      if (stage === "data") { if (code !== 354) return failCode(code, line); stage = "body"; socket.write(`${dotStuff(raw)}\r\n.\r\n`); continue; }
-      if (stage === "body") { if (code < 200 || code >= 300) return failCode(code, line); const queueId = line.match(/queued as\s+([A-Z0-9]+)/i)?.[1] || line.match(/queue id[=:]?\s*([A-Z0-9]+)/i)?.[1] || null; stage = "done"; command("QUIT"); return finish(undefined, queueId); }
-    }});
+    const command = (value: string) => socket.write(`${value}\r\n`);
+    const failCode = (code: number, line: string) => finish(new Error(`MTA SMTP ${code}: ${line.slice(0, 800)}`));
+    socket.on("timeout", () => finish(new Error("MTA SMTP timeout")));
+    socket.on("error", (error) => finish(error));
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const match = line.match(/^(\d{3})([ -])(.*)$/);
+        if (!match || match[2] === "-") continue;
+        const code = Number(match[1]);
+        if (stage === "banner") { if (code !== 220) return failCode(code, line); stage = "ehlo"; command("EHLO neximail-app"); continue; }
+        if (stage === "ehlo") { if (code < 200 || code >= 300) return failCode(code, line); stage = "mail"; command(`MAIL FROM:<${envelopeFrom}>`); continue; }
+        if (stage === "mail") { if (code < 200 || code >= 300) return failCode(code, line); stage = "rcpt"; command(`RCPT TO:<${recipient}>`); continue; }
+        if (stage === "rcpt") { if (code < 200 || code >= 300) return failCode(code, line); stage = "data"; command("DATA"); continue; }
+        if (stage === "data") { if (code !== 354) return failCode(code, line); stage = "body"; socket.write(`${dotStuff(raw)}\r\n.\r\n`); continue; }
+        if (stage === "body") { if (code < 200 || code >= 300) return failCode(code, line); const queueId = line.match(/queued as\s+([A-Z0-9]+)/i)?.[1] || line.match(/queue id[=:]?\s*([A-Z0-9]+)/i)?.[1] || null; stage = "done"; command("QUIT"); return finish(undefined, queueId); }
+      }
+    });
   });
 }
 
-function warmupLimit(warmup: typeof sendingAccountWarmups.$inferSelect | null, accountDaily: number) { if (!warmup?.enabled || !warmup.startedAt) return accountDaily; const days = Math.max(0, Math.floor((Date.now() - warmup.startedAt.getTime()) / 86400000)); const calculated = Math.floor(warmup.dayOneLimit * Math.pow(1 + warmup.growthPercent / 100, days)); return Math.min(accountDaily, warmup.maxDailyLimit, Math.max(warmup.dayOneLimit, calculated)); }
-async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect) { const [warmup] = await db.select().from(sendingAccountWarmups).where(eq(sendingAccountWarmups.sendingAccountId, account.id)).limit(1); const effectiveDaily = warmupLimit(warmup || null, account.dailyLimit); const result = await db.execute(sql`select count(*) filter(where m.accepted_at >= now() - interval '1 hour')::int as hour_count,count(*) filter(where m.accepted_at >= date_trunc('day', now()))::int as day_count from messages m join campaigns c on c.id = m.campaign_id where c.sending_account_id = ${account.id}`); const row = (result.rows[0] || {}) as Record<string, unknown>; return { allowed: Number(row.hour_count || 0) < account.hourlyLimit && Number(row.day_count || 0) < effectiveDaily, effectiveDaily }; }
+function warmupLimit(warmup: typeof sendingAccountWarmups.$inferSelect | null, accountDaily: number) {
+  if (!warmup?.enabled || !warmup.startedAt) return accountDaily;
+  const days = Math.max(0, Math.floor((Date.now() - warmup.startedAt.getTime()) / 86400000));
+  const calculated = Math.floor(warmup.dayOneLimit * Math.pow(1 + warmup.growthPercent / 100, days));
+  return Math.min(accountDaily, warmup.maxDailyLimit, Math.max(warmup.dayOneLimit, calculated));
+}
+async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect) {
+  const [warmup] = await db.select().from(sendingAccountWarmups).where(eq(sendingAccountWarmups.sendingAccountId, account.id)).limit(1);
+  const effectiveDaily = warmupLimit(warmup || null, account.dailyLimit);
+  const result = await db.execute(sql`select count(*) filter(where m.accepted_at >= now() - interval '1 hour')::int as hour_count,count(*) filter(where m.accepted_at >= date_trunc('day', now()))::int as day_count from messages m join campaigns c on c.id = m.campaign_id where c.sending_account_id = ${account.id}`);
+  const row = (result.rows[0] || {}) as Record<string, unknown>;
+  return { allowed: Number(row.hour_count || 0) < account.hourlyLimit && Number(row.day_count || 0) < effectiveDaily, effectiveDaily };
+}
 
 type Claimed = { id: string; attempt_count: number };
 async function claimMessages(): Promise<Claimed[]> {
@@ -89,23 +114,51 @@ async function claimMessages(): Promise<Claimed[]> {
     returning m.id,m.attempt_count`, [claimBatch]);
   return result.rows;
 }
-async function markDeferred(id: string, attempt: number, error: unknown) { const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error"; if (attempt >= maxAttempts) { await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [id, detail]); await event(id,"transport_failed",{attempt,error:detail}); return "failed" as const; } const delaySeconds = retryDelaySeconds(attempt); await pool.query(`update messages set status='deferred',last_error=$2,next_attempt_at=now()+($3::int * interval '1 second') where id=$1 and status='sending'`, [id, detail, delaySeconds]); await event(id,"transport_deferred",{attempt,error:detail,retryInSeconds:delaySeconds}); return "deferred" as const; }
+async function markDeferred(id: string, attempt: number, error: unknown) {
+  const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error";
+  if (attempt >= maxAttempts) {
+    await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [id, detail]);
+    await event(id,"transport_failed",{attempt,error:detail});
+    return "failed" as const;
+  }
+  const delaySeconds = retryDelaySeconds(attempt);
+  await pool.query(`update messages set status='deferred',last_error=$2,next_attempt_at=now()+($3::int * interval '1 second') where id=$1 and status='sending'`, [id, detail, delaySeconds]);
+  await event(id,"transport_deferred",{attempt,error:detail,retryInSeconds:delaySeconds});
+  return "deferred" as const;
+}
 async function releaseThrottled(id: string) { await pool.query(`update messages set status='ready_for_transport',next_attempt_at=now()+interval '60 seconds',last_error='sending_account_rate_limited' where id=$1 and status='sending'`, [id]); await event(id,"transport_throttled",{retryInSeconds:60}); }
 async function recoverStaleClaims() { const result=await pool.query<{id:string}>(`update messages set status='failed',next_attempt_at=null,last_error='transport_state_uncertain_after_worker_restart' where status='sending' and accepted_at is null and last_attempt_at is not null and last_attempt_at < now()-interval '10 minutes' returning id`); for(const row of result.rows)await event(row.id,"transport_recovery_failed",{reason:"stale_sending_claim"}); }
 
 async function runOnce() {
   if (!appUrl) throw new Error("APP_URL is required");
-  const claimed = await claimMessages(); let accepted = 0, deferred = 0, failed = 0, throttled = 0;
+  const claimed = await claimMessages();
+  let accepted = 0, deferred = 0, failed = 0, throttled = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
   const templateAttachmentCache = new Map<string, CampaignAttachment[]>();
+
   for (const claim of claimed) {
-    const [message] = await db.select().from(messages).where(eq(messages.id, claim.id)).limit(1); if (!message) continue;
+    const [message] = await db.select().from(messages).where(eq(messages.id, claim.id)).limit(1);
+    if (!message) continue;
     await event(message.id,"transport_attempt",{attempt:claim.attempt_count,mtaHost,mtaPort});
-    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, message.campaignId)).limit(1); const [contact] = await db.select().from(contacts).where(eq(contacts.id, message.contactId)).limit(1);
-    if (!campaign || !contact || !campaign.sendingAccountId || !campaign.templateId || campaign.status !== "sending") { await pool.query(`update messages set status='failed',last_error='campaign_transport_configuration_incomplete',next_attempt_at=null where id=$1 and status='sending'`, [message.id]); await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"campaign_transport_configuration_incomplete"}); failed++; continue; }
-    const [account] = await db.select().from(sendingAccounts).where(eq(sendingAccounts.id, campaign.sendingAccountId)).limit(1); const [template] = await db.select().from(templates).where(eq(templates.id, campaign.templateId)).limit(1);
-    if (!account || account.status !== "active" || !template) { await pool.query(`update messages set status='failed',last_error='sending_account_or_template_unavailable',next_attempt_at=null where id=$1 and status='sending'`, [message.id]); await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"sending_account_or_template_unavailable"}); failed++; continue; }
-    const limit = await accountWithinLimits(account); if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
+
+    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, message.campaignId)).limit(1);
+    const [contact] = await db.select().from(contacts).where(eq(contacts.id, message.contactId)).limit(1);
+    if (!campaign || !contact || !campaign.sendingAccountId || !campaign.templateId || campaign.status !== "sending") {
+      await pool.query(`update messages set status='failed',last_error='campaign_transport_configuration_incomplete',next_attempt_at=null where id=$1 and status='sending'`, [message.id]);
+      await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"campaign_transport_configuration_incomplete"});
+      failed++; continue;
+    }
+
+    const [account] = await db.select().from(sendingAccounts).where(eq(sendingAccounts.id, campaign.sendingAccountId)).limit(1);
+    const [template] = await db.select().from(templates).where(eq(templates.id, campaign.templateId)).limit(1);
+    if (!account || account.status !== "active" || !template) {
+      await pool.query(`update messages set status='failed',last_error='sending_account_or_template_unavailable',next_attempt_at=null where id=$1 and status='sending'`, [message.id]);
+      await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"sending_account_or_template_unavailable"});
+      failed++; continue;
+    }
+
+    const limit = await accountWithinLimits(account);
+    if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
     let campaignAttachments = campaignAttachmentCache.get(campaign.id);
     if (!campaignAttachments) { campaignAttachments = await loadCampaignAttachments(campaign.id); campaignAttachmentCache.set(campaign.id, campaignAttachments); }
@@ -113,21 +166,56 @@ async function runOnce() {
     if (!templateAttachments) { templateAttachments = await loadTemplateAttachments(template.id); templateAttachmentCache.set(template.id, templateAttachments); }
     const attachments = [...templateAttachments, ...campaignAttachments];
 
-    const unsubscribeToken = await signPublicToken({ email: contact.email, messageId: message.id }, "90d"); const unsubscribeUrl = `${appUrl}/unsubscribe/${unsubscribeToken}`;
-    let html = personalize(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl); let text = personalize(template.textBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl); ({ html, text } = ensureUnsubscribe(html, text, unsubscribeUrl));
-    if (campaign.trackClicks) html = await rewriteLinks(html, message.id); if (campaign.trackOpens) { const token = await signPublicToken({ messageId: message.id }, "30d"); html += `<img src="${appUrl}/tracking/open/${token}" width="1" height="1" alt="" style="display:none!important" />`; }
-    const subject = headerValue(personalize(campaign.subject || template.subject || "", contact)); const fromName = headerValue(campaign.fromName || account.fromName); const fromEmail = headerValue(campaign.fromEmail || account.fromEmail); const replyTo = headerValue(account.replyTo || account.fromEmail); const recipient = headerValue(contact.email);
+    const unsubscribeToken = await signPublicToken({ email: contact.email, messageId: message.id }, "90d");
+    const unsubscribeUrl = `${appUrl}/unsubscribe/${unsubscribeToken}`;
+    let html = personalize(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
+    let text = personalize(template.textBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
+    const preheader = personalize(campaign.preheader || "", contact);
+    html = injectPreheader(html, preheader);
+    ({ html, text } = ensureUnsubscribe(html, text, unsubscribeUrl));
+    if (campaign.trackClicks) html = await rewriteLinks(html, message.id);
+    if (campaign.trackOpens) {
+      const token = await signPublicToken({ messageId: message.id }, "30d");
+      html += `<img src="${appUrl}/tracking/open/${token}" width="1" height="1" alt="" style="display:none!important" />`;
+    }
+
+    const subject = headerValue(personalize(campaign.subject || template.subject || "", contact));
+    const fromName = headerValue(campaign.fromName || account.fromName);
+    const fromEmail = headerValue(campaign.fromEmail || account.fromEmail);
+    const replyTo = headerValue(account.replyTo || account.fromEmail);
+    const recipient = headerValue(contact.email);
     const envelopeFrom = bounceEnabled ? makeBounceAddress(message.id) : fromEmail;
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
-    const raw = [`From: ${fromName} <${fromEmail}>`,`To: ${recipient}`,`Reply-To: ${replyTo}`,`Subject: ${subject}`,`Date: ${new Date().toUTCString()}`,`Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`,`X-NexiMail-Message-ID: ${message.id}`,"MIME-Version: 1.0",`List-Unsubscribe: <${unsubscribeUrl}>`,"List-Unsubscribe-Post: List-Unsubscribe=One-Click",mime.contentTypeHeader,"",...mime.bodyLines].join("\r\n");
+    const raw = [
+      `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
+      `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, "MIME-Version: 1.0",
+      `List-Unsubscribe: <${unsubscribeUrl}>`, "List-Unsubscribe-Post: List-Unsubscribe=One-Click", mime.contentTypeHeader, "", ...mime.bodyLines,
+    ].join("\r\n");
 
-    try { const result = await submitToMta(raw, envelopeFrom, recipient); if (!result.queueId) throw new Error("MTA accepted message without returning a queue id"); await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]); await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled}); accepted++; }
-    catch (error) { const state = await markDeferred(message.id, claim.attempt_count, error); if (state === "deferred") deferred++; else failed++; }
+    try {
+      const result = await submitToMta(raw, envelopeFrom, recipient);
+      if (!result.queueId) throw new Error("MTA accepted message without returning a queue id");
+      await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]);
+      await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled});
+      accepted++;
+    } catch (error) {
+      const state = await markDeferred(message.id, claim.attempt_count, error);
+      if (state === "deferred") deferred++; else failed++;
+    }
     await sleep(delayMs);
   }
+
   await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, perSecond, maxAttempts, mtaHost, mtaPort, bounceTracking: bounceEnabled });
 }
 
-async function main() { if (!appUrl) throw new Error("APP_URL is required"); await recoverStaleClaims(); while (true) { try { await runOnce(); } catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort, bounceTracking: bounceEnabled }).catch(() => {}); } await sleep(intervalMs); } }
+async function main() {
+  if (!appUrl) throw new Error("APP_URL is required");
+  await recoverStaleClaims();
+  while (true) {
+    try { await runOnce(); }
+    catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort, bounceTracking: bounceEnabled }).catch(() => {}); }
+    await sleep(intervalMs);
+  }
+}
 main().catch(console.error);
 process.on("SIGTERM", async () => { await pool.end(); process.exit(0); });
