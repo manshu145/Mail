@@ -71,9 +71,9 @@ if [ -n "$BOUNCE_DOMAIN" ]; then
   cat > /etc/postfix/transport <<EOF
 ${BOUNCE_DOMAIN} smtp:[${BOUNCE_RECEIVER_HOST}]:${BOUNCE_RECEIVER_PORT}
 EOF
-  postmap /etc/postfix/transport
+  postmap lmdb:/etc/postfix/transport
   postconf -e "relay_domains = ${BOUNCE_DOMAIN}"
-  postconf -e "transport_maps = hash:/etc/postfix/transport"
+  postconf -e "transport_maps = lmdb:/etc/postfix/transport"
 fi
 
 if ! grep -q '^10025[[:space:]]' /etc/postfix/master.cf; then
