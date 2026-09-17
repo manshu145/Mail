@@ -14,17 +14,32 @@ export type AudiencePreflightResult = {
   eligibleRecipients: AudienceRecipient[];
 };
 
+const SUPPRESSION_LOOKUP_BATCH = 5000;
+
+async function loadSuppressedEmails(normalized: string[]) {
+  const blocked = new Set<string>();
+  for (let offset = 0; offset < normalized.length; offset += SUPPRESSION_LOOKUP_BATCH) {
+    const chunk = normalized.slice(offset, offset + SUPPRESSION_LOOKUP_BATCH);
+    if (!chunk.length) continue;
+    const rows = await db.select({ normalizedEmail: suppressions.normalizedEmail })
+      .from(suppressions)
+      .where(inArray(suppressions.normalizedEmail, chunk));
+    for (const row of rows) blocked.add(row.normalizedEmail);
+  }
+  return blocked;
+}
+
 export async function preflightAudience(list: typeof lists.$inferSelect): Promise<AudiencePreflightResult> {
   const candidates = await resolveAudienceRecipients(list);
   if (!candidates.length) {
     return { rawCount: 0, eligibleCount: 0, suppressedCount: 0, invalidCount: 0, validCount: 0, pendingCount: 0, unknownCount: 0, eligibleRecipients: [] };
   }
 
+  // Never build a single massive IN (...) predicate. Large lists can contain
+  // hundreds of thousands of contacts and PostgreSQL/driver parameter limits
+  // would otherwise make campaign preflight fail before any mail is queued.
   const normalized = [...new Set(candidates.map((row) => row.normalizedEmail))];
-  const suppressedRows = normalized.length
-    ? await db.select({ normalizedEmail: suppressions.normalizedEmail }).from(suppressions).where(inArray(suppressions.normalizedEmail, normalized))
-    : [];
-  const blocked = new Set(suppressedRows.map((row) => row.normalizedEmail));
+  const blocked = await loadSuppressedEmails(normalized);
 
   let suppressedCount = 0;
   let invalidCount = 0;
