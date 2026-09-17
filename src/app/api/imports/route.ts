@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sql } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
 import { importJobs } from "@/db/schema";
 import { importUploads, type ImportMapping, type ImportOptions } from "@/db/import-schema";
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
   const createdBy = /^[0-9a-f-]{36}$/i.test(session.userId) ? session.userId : null;
   const [job] = await db.insert(importJobs).values({ filename: file.name.slice(0, 200), status: "pending", totalRows: matrix.length - 1, createdBy }).returning({ id: importJobs.id });
   await db.insert(importUploads).values({ jobId: job.id, content, headers, mapping, options, sizeBytes: file.size });
-  await db.execute(`update import_jobs set source_label=$1, list_id=$2 where id=$3` as never, [consentSource, listId, job.id] as never).catch(() => {});
+  await db.execute(sql`update import_jobs set source_label=${consentSource}, list_id=${listId} where id=${job.id}`);
 
   await audit("contact_import.queued", session, "import_job", job.id, { filename: file.name, total: matrix.length - 1, consentSource, listId, queueValidation, mapping });
   return NextResponse.json({ ok: true, queued: true, jobId: job.id, total: matrix.length - 1 }, { status: 202 });
