@@ -64,7 +64,26 @@ function warmupLimit(warmup: typeof sendingAccountWarmups.$inferSelect | null, a
 async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect) { const [warmup] = await db.select().from(sendingAccountWarmups).where(eq(sendingAccountWarmups.sendingAccountId, account.id)).limit(1); const effectiveDaily = warmupLimit(warmup || null, account.dailyLimit); const result = await db.execute(sql`select count(*) filter(where m.accepted_at >= now() - interval '1 hour')::int as hour_count,count(*) filter(where m.accepted_at >= date_trunc('day', now()))::int as day_count from messages m join campaigns c on c.id = m.campaign_id where c.sending_account_id = ${account.id}`); const row = (result.rows[0] || {}) as Record<string, unknown>; return { allowed: Number(row.hour_count || 0) < account.hourlyLimit && Number(row.day_count || 0) < effectiveDaily, effectiveDaily }; }
 
 type Claimed = { id: string; attempt_count: number };
-async function claimMessages(): Promise<Claimed[]> { const result = await pool.query<Claimed>(`with picked as (select id from messages where status in ('ready_for_transport','deferred') and (next_attempt_at is null or next_attempt_at <= now()) order by queued_at asc for update skip locked limit $1) update messages m set status='sending',last_attempt_at=now(),attempt_count=m.attempt_count+1,last_error=null from picked where m.id=picked.id returning m.id,m.attempt_count`, [claimBatch]); return result.rows; }
+async function claimMessages(): Promise<Claimed[]> {
+  const result = await pool.query<Claimed>(`
+    with picked as (
+      select m.id
+      from messages m
+      join campaigns c on c.id=m.campaign_id
+      where c.status='sending'
+        and m.status in ('ready_for_transport','deferred')
+        and (m.next_attempt_at is null or m.next_attempt_at <= now())
+      order by m.queued_at asc
+      for update of m skip locked
+      limit $1
+    )
+    update messages m
+    set status='sending',last_attempt_at=now(),attempt_count=m.attempt_count+1,last_error=null
+    from picked
+    where m.id=picked.id
+    returning m.id,m.attempt_count`, [claimBatch]);
+  return result.rows;
+}
 async function markDeferred(id: string, attempt: number, error: unknown) { const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error"; if (attempt >= maxAttempts) { await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [id, detail]); await event(id,"transport_failed",{attempt,error:detail}); return "failed" as const; } const delaySeconds = retryDelaySeconds(attempt); await pool.query(`update messages set status='deferred',last_error=$2,next_attempt_at=now()+($3::int * interval '1 second') where id=$1 and status='sending'`, [id, detail, delaySeconds]); await event(id,"transport_deferred",{attempt,error:detail,retryInSeconds:delaySeconds}); return "deferred" as const; }
 async function releaseThrottled(id: string) { await pool.query(`update messages set status='ready_for_transport',next_attempt_at=now()+interval '60 seconds',last_error='sending_account_rate_limited' where id=$1 and status='sending'`, [id]); await event(id,"transport_throttled",{retryInSeconds:60}); }
 async function recoverStaleClaims() { const result=await pool.query<{id:string}>(`update messages set status='failed',next_attempt_at=null,last_error='transport_state_uncertain_after_worker_restart' where status='sending' and accepted_at is null and last_attempt_at is not null and last_attempt_at < now()-interval '10 minutes' returning id`); for(const row of result.rows)await event(row.id,"transport_recovery_failed",{reason:"stale_sending_claim"}); }
@@ -76,7 +95,7 @@ async function runOnce() {
     const [message] = await db.select().from(messages).where(eq(messages.id, claim.id)).limit(1); if (!message) continue;
     await event(message.id,"transport_attempt",{attempt:claim.attempt_count,mtaHost,mtaPort});
     const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, message.campaignId)).limit(1); const [contact] = await db.select().from(contacts).where(eq(contacts.id, message.contactId)).limit(1);
-    if (!campaign || !contact || !campaign.sendingAccountId || !campaign.templateId || campaign.status === "cancelled") { await pool.query(`update messages set status='failed',last_error='campaign_transport_configuration_incomplete',next_attempt_at=null where id=$1 and status='sending'`, [message.id]); await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"campaign_transport_configuration_incomplete"}); failed++; continue; }
+    if (!campaign || !contact || !campaign.sendingAccountId || !campaign.templateId || campaign.status !== "sending") { await pool.query(`update messages set status='failed',last_error='campaign_transport_configuration_incomplete',next_attempt_at=null where id=$1 and status='sending'`, [message.id]); await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"campaign_transport_configuration_incomplete"}); failed++; continue; }
     const [account] = await db.select().from(sendingAccounts).where(eq(sendingAccounts.id, campaign.sendingAccountId)).limit(1); const [template] = await db.select().from(templates).where(eq(templates.id, campaign.templateId)).limit(1);
     if (!account || account.status !== "active" || !template) { await pool.query(`update messages set status='failed',last_error='sending_account_or_template_unavailable',next_attempt_at=null where id=$1 and status='sending'`, [message.id]); await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"sending_account_or_template_unavailable"}); failed++; continue; }
     const limit = await accountWithinLimits(account); if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
