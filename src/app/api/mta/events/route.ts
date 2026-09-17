@@ -8,6 +8,7 @@ import { normalizeEmail } from "@/lib/contact-utils";
 import { emitWebhookEvent } from "@/lib/webhooks";
 
 const allowed = new Set(["delivered", "deferred", "bounced", "failed", "complaint"]);
+const terminal = new Set(["delivered", "bounced", "failed", "cancelled"]);
 function safeEqual(a: string, b: string) {
   const aa = Buffer.from(a), bb = Buffer.from(b);
   return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
@@ -28,10 +29,15 @@ export async function POST(request: NextRequest) {
 
   if (body.status === "complaint") {
     await db.insert(messageEvents).values({ messageId: message.id, type: "complaint", payload: { detail: body.detail || null } });
+    // Complaint is a strong explicit suppression reason and may upgrade an older
+    // invalid/hard-bounce/manual entry.
     await db.insert(suppressions).values({ email: message.recipientEmail, normalizedEmail: normalizeEmail(message.recipientEmail), reason: "complaint", source: "feedback_loop" }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "complaint", source: "feedback_loop" } });
     await emitWebhookEvent("message.complaint", base).catch((error) => console.error("[mta.webhook]", error));
     return NextResponse.json({ ok: true });
   }
+
+  // A replayed/stale deferred event must never move a terminal message backwards.
+  if (body.status === "deferred" && terminal.has(message.status)) return NextResponse.json({ ok: true, ignored: "terminal_message" });
 
   // Remote deferral is owned by the MTA after local acceptance. Keep the app state
   // as mta_accepted so the transport worker never creates a duplicate submission.
@@ -41,6 +47,11 @@ export async function POST(request: NextRequest) {
     await emitWebhookEvent("message.deferred", base).catch((error) => console.error("[mta.webhook]", error));
     return NextResponse.json({ ok: true });
   }
+
+  // Idempotent terminal replay: do not duplicate timeline/webhook events.
+  if (body.status === "delivered" && message.status === "delivered") return NextResponse.json({ ok: true, ignored: "duplicate_terminal_event" });
+  if (body.status === "bounced" && message.status === "bounced") return NextResponse.json({ ok: true, ignored: "duplicate_terminal_event" });
+  if (body.status === "failed" && message.status === "failed") return NextResponse.json({ ok: true, ignored: "duplicate_terminal_event" });
 
   const status = body.status as "delivered" | "bounced" | "failed";
   await db.update(messages).set({
@@ -58,16 +69,15 @@ export async function POST(request: NextRequest) {
       payload: { detail: body.detail || null, remoteCode: body.remoteCode || null, bounceKind: classification.kind, bounceReason: classification.reason, recipientSuppressed: classification.suppressRecipient, providerPressure: classification.providerPressure },
     });
     if (classification.suppressRecipient) {
+      // Never downgrade an existing unsubscribe/complaint/manual suppression just
+      // because another delivery path later reports a hard bounce.
       await db.insert(suppressions).values({
         email: message.recipientEmail,
         normalizedEmail: normalizeEmail(message.recipientEmail),
         reason: "hard_bounce",
         source: "mta_event",
         note: detail || classification.reason,
-      }).onConflictDoUpdate({
-        target: suppressions.normalizedEmail,
-        set: { reason: "hard_bounce", source: "mta_event", note: detail || classification.reason },
-      });
+      }).onConflictDoNothing({ target: suppressions.normalizedEmail });
     }
   } else {
     await db.insert(messageEvents).values({ messageId: message.id, type: `mta_${status}`, payload: { detail: body.detail || null, remoteCode: body.remoteCode || null } });
