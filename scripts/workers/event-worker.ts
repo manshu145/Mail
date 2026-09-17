@@ -13,9 +13,12 @@ async function run() {
   for (const campaign of active) {
     const result = await db.execute(sql`select count(*)::int as total,count(*) filter(where status in ('queued','ready_for_transport','sending','mta_accepted','deferred'))::int as active from messages where campaign_id=${campaign.id}`);
     const row = (result.rows[0] || {}) as Record<string, unknown>;
-    if (Number(row.total || 0) > 0 && Number(row.active || 0) === 0) {
-      await db.update(campaigns).set({ status: "completed", updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
-      await emitWebhookEvent("campaign.completed", { campaignId: campaign.id, name: campaign.name }).catch((error) => console.error("[event-worker.webhook]", error));
+    const total = Number(row.total || 0);
+    const inFlight = Number(row.active || 0);
+    if (total > 0 && inFlight === 0) {
+      const now = new Date();
+      await db.update(campaigns).set({ status: "completed", completedAt: now, messageCount: total, lastError: null, updatedAt: now }).where(eq(campaigns.id, campaign.id));
+      await emitWebhookEvent("campaign.completed", { campaignId: campaign.id, name: campaign.name, messageCount: total, completedAt: now.toISOString() }).catch((error) => console.error("[event-worker.webhook]", error));
       completed++;
     }
   }
