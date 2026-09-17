@@ -26,30 +26,61 @@ async function attachTags(contactId: string, names: string[] = []) {
 }
 
 async function stageStoredUpload(jobId: string) {
-  const [existing] = await db.select({ id: importStagingRows.id }).from(importStagingRows).where(eq(importStagingRows.jobId, jobId)).limit(1);
-  if (existing) return;
   const [upload] = await db.select().from(importUploads).where(eq(importUploads.jobId, jobId)).limit(1);
-  if (!upload) return;
+  const existingResult = await db.execute(sql`select count(*)::int as count from import_staging_rows where job_id=${jobId}`);
+  const existingCount = Number((existingResult.rows[0] as Record<string, unknown> | undefined)?.count || 0);
+
+  if (!upload) {
+    if (existingCount > 0) return existingCount;
+    await db.update(importJobs).set({ status: "failed", errorMessage: "Stored CSV payload is missing.", completedAt: new Date() }).where(eq(importJobs.id, jobId));
+    await heartbeat({ state: "failed", jobId, error: "import_upload_missing" });
+    return 0;
+  }
 
   let headers: string[] | null = upload.headers.length ? upload.headers : null;
+  let headerConsumed = false;
   let dataRow = 0;
-  let staged = 0;
+  let newlyStaged = 0;
   let chunk: Array<{ jobId: string; rowNumber: number; payload: ReturnType<typeof buildImportRow> }> = [];
 
   for (const row of iterateCsvRows(upload.content)) {
-    if (!headers) { headers = row.map((value) => value.trim()); continue; }
-    if (dataRow === 0 && row.map((value) => value.trim()).join("\u0001") === headers.join("\u0001")) { dataRow++; continue; }
+    if (!headers) {
+      headers = row.map((value) => value.trim());
+      headerConsumed = true;
+      continue;
+    }
+    if (!headerConsumed && row.map((value) => value.trim()).join("\u0001") === headers.join("\u0001")) {
+      headerConsumed = true;
+      continue;
+    }
+    headerConsumed = true;
+    if (!row.some((value) => value.trim())) continue;
     dataRow++;
-    chunk.push({ jobId, rowNumber: dataRow + 1, payload: buildImportRow(headers, row, upload.mapping, upload.options) });
+
+    // Existing staging rows are a durable checkpoint. On restart we replay the
+    // CSV parser from the beginning and skip exactly the rows already committed.
+    if (dataRow <= existingCount) continue;
+
+    // Keep the historical row-number convention stable for already-created jobs.
+    const rowNumber = dataRow + 2;
+    chunk.push({ jobId, rowNumber, payload: buildImportRow(headers, row, upload.mapping, upload.options) });
     if (chunk.length >= stageBatchSize) {
-      await db.insert(importStagingRows).values(chunk);
-      staged += chunk.length;
+      await db.insert(importStagingRows).values(chunk).onConflictDoNothing({ target: [importStagingRows.jobId, importStagingRows.rowNumber] });
+      newlyStaged += chunk.length;
       chunk = [];
-      await heartbeat({ state: "staging", jobId, staged, total: dataRow });
+      await heartbeat({ state: "staging", jobId, staged: existingCount + newlyStaged, total: dataRow });
     }
   }
-  if (chunk.length) { await db.insert(importStagingRows).values(chunk); staged += chunk.length; }
-  await db.execute(sql`update import_jobs set total_rows=${staged}, started_at=coalesce(started_at, now()) where id=${jobId}`);
+
+  if (chunk.length) {
+    await db.insert(importStagingRows).values(chunk).onConflictDoNothing({ target: [importStagingRows.jobId, importStagingRows.rowNumber] });
+    newlyStaged += chunk.length;
+  }
+
+  const finalResult = await db.execute(sql`select count(*)::int as count from import_staging_rows where job_id=${jobId}`);
+  const stagedTotal = Number((finalResult.rows[0] as Record<string, unknown> | undefined)?.count || 0);
+  await db.execute(sql`update import_jobs set total_rows=${stagedTotal}, started_at=coalesce(started_at, now()) where id=${jobId}`);
+  return stagedTotal;
 }
 
 async function queueScopedValidation(jobId: string) {
@@ -89,7 +120,14 @@ async function runOnce() {
   if (!job) { const cleaned = await cleanupHistory(); await heartbeat({ state: "idle", cleaned }); return; }
   if (job.status === "pending") await db.update(importJobs).set({ status: "processing" }).where(eq(importJobs.id, job.id));
 
-  await stageStoredUpload(job.id);
+  const stagedTotal = await stageStoredUpload(job.id);
+  const [freshJob] = await db.select({ status: importJobs.status }).from(importJobs).where(eq(importJobs.id, job.id)).limit(1);
+  if (!freshJob || freshJob.status === "failed") return;
+  if (stagedTotal === 0) {
+    await db.update(importJobs).set({ status: "failed", errorMessage: "CSV contains no stageable data rows.", completedAt: new Date() }).where(eq(importJobs.id, job.id));
+    return;
+  }
+
   const listId = await importListId(job.id);
   const staged = await db.select().from(importStagingRows).where(and(eq(importStagingRows.jobId, job.id), eq(importStagingRows.processed, false))).orderBy(importStagingRows.rowNumber).limit(batchSize);
 
@@ -151,7 +189,7 @@ async function runOnce() {
   await db.update(importJobs).set({ importedRows: imported, duplicateRows: duplicates, invalidRows: invalid, errorMessage: null, ...(remaining === 0 ? { status: "completed" as const, completedAt: new Date() } : {}) }).where(eq(importJobs.id, job.id));
   await db.execute(sql`update import_jobs set suppressed_rows=${suppressed} where id=${job.id}`);
   if (remaining === 0) await queueScopedValidation(job.id);
-  await heartbeat({ state: remaining ? "processing" : "idle", jobId: job.id, listId, imported, duplicates, invalid, suppressed, remaining });
+  await heartbeat({ state: remaining ? "processing" : "idle", jobId: job.id, listId, imported, duplicates, invalid, suppressed, remaining, stagedTotal });
 }
 
 async function main() { console.log(`[import-worker] started, batch=${batchSize}, stageBatch=${stageBatchSize}, retention=${retentionDays}d`); while (true) { try { await runOnce(); } catch (error) { console.error("[import-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); } await sleep(intervalMs); } }
