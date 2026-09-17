@@ -51,7 +51,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!policy.sendingEnabled) return NextResponse.json({ error: "Sending is disabled by runtime configuration." }, { status: 423 });
     if (account.status !== "active") return NextResponse.json({ error: "Selected sending account is not active." }, { status: 409 });
     if (!template.htmlBody && !template.textBody) return NextResponse.json({ error: "Template has no email body." }, { status: 409 });
-    if (!template.htmlBody.includes("{{unsubscribe_url}}") && !template.textBody.includes("{{unsubscribe_url}}")) return NextResponse.json({ error: "Template must include {{unsubscribe_url}} so recipients have a visible unsubscribe link." }, { status: 409 });
 
     const fromEmail = (value(body.fromEmail) || account.fromEmail).toLowerCase();
     if (!isValidEmail(fromEmail)) return NextResponse.json({ error: "Sender email is invalid." }, { status: 400 });
