@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
-import { importJobs } from "@/db/schema";
+import { importJobs, lists } from "@/db/schema";
 import { importUploads, type ImportMapping, type ImportOptions } from "@/db/import-schema";
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
@@ -30,11 +30,18 @@ export async function POST(request: NextRequest) {
   const listId = String(form.get("listId") || "").trim() || null;
   const queueValidation = String(form.get("queueValidation") || "true") !== "false";
 
+  if (listId) {
+    if (!/^[0-9a-f-]{36}$/i.test(listId)) return NextResponse.json({ error: "Selected list id is invalid." }, { status: 400 });
+    const [list] = await db.select({ id: lists.id }).from(lists).where(eq(lists.id, listId)).limit(1);
+    if (!list) return NextResponse.json({ error: "Selected list no longer exists. Refresh and choose another list." }, { status: 409 });
+  }
+
   const content = await file.text();
   let headers: string[] | null = null;
   let totalRows = 0;
   for (const row of iterateCsvRows(content)) {
     if (!headers) { headers = row.map((h) => h.trim()); continue; }
+    if (!row.some((cell) => cell.trim())) continue;
     totalRows++;
     if (totalRows > MAX_IMPORT_ROWS) return NextResponse.json({ error: "A single import can contain up to 1,000,000 data rows." }, { status: 413 });
   }
@@ -48,10 +55,14 @@ export async function POST(request: NextRequest) {
 
   const options: ImportOptions = { consentSource, consentStatus, defaultSource, defaultCategory, defaultTags, listId, queueValidation };
   const createdBy = /^[0-9a-f-]{36}$/i.test(session.userId) ? session.userId : null;
-  const [job] = await db.insert(importJobs).values({ filename: file.name.slice(0, 200), status: "pending", totalRows, createdBy }).returning({ id: importJobs.id });
-  await db.insert(importUploads).values({ jobId: job.id, content, headers, mapping, options, sizeBytes: file.size });
-  await db.execute(sql`update import_jobs set source_label=${consentSource}, list_id=${listId} where id=${job.id}`);
 
-  await audit("contact_import.queued", session, "import_job", job.id, { filename: file.name, total: totalRows, consentSource, listId, queueValidation, mapping });
-  return NextResponse.json({ ok: true, queued: true, jobId: job.id, total: totalRows }, { status: 202 });
+  const jobId = await db.transaction(async (tx) => {
+    const [job] = await tx.insert(importJobs).values({ filename: file.name.slice(0, 200), status: "pending", totalRows, createdBy }).returning({ id: importJobs.id });
+    await tx.insert(importUploads).values({ jobId: job.id, content, headers, mapping, options, sizeBytes: file.size });
+    await tx.execute(sql`update import_jobs set source_label=${consentSource}, list_id=${listId} where id=${job.id}`);
+    return job.id;
+  });
+
+  await audit("contact_import.queued", session, "import_job", jobId, { filename: file.name, total: totalRows, consentSource, listId, queueValidation, mapping });
+  return NextResponse.json({ ok: true, queued: true, jobId, total: totalRows }, { status: 202 });
 }
