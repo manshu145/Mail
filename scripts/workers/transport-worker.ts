@@ -1,14 +1,15 @@
 import net from "node:net";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { campaigns, contacts, messageEvents, messages, sendingAccounts, templates } from "../../src/db/schema";
-import { sendingAccountWarmups, workerHeartbeats } from "../../src/db/operations-schema";
+import { providerCooldowns, sendingAccountWarmups, workerHeartbeats } from "../../src/db/operations-schema";
 import { signPublicToken } from "../../src/lib/public-tokens";
 import { loadCampaignAttachments, type CampaignAttachment } from "../../src/lib/campaign-attachments";
 import { loadTemplateAttachments } from "../../src/lib/template-attachments";
 import { buildMimeContent } from "../../src/lib/mime-email";
 import { makeBounceAddress } from "../../src/lib/bounce-address";
 import { injectPreheader } from "../../src/lib/email-preheader";
+import { providerForEmail } from "../../src/lib/provider";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -20,6 +21,7 @@ const intervalMs = Math.max(1000, Number(process.env.TRANSPORT_WORKER_INTERVAL_M
 const maxAttempts = Math.max(1, Number(process.env.TRANSPORT_MAX_ATTEMPTS || "5"));
 const claimBatch = Math.min(200, Math.max(1, Number(process.env.TRANSPORT_BATCH_SIZE || "50")));
 const bounceEnabled = Boolean(process.env.BOUNCE_DOMAIN?.trim() && process.env.BOUNCE_SECRET?.trim());
+const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN_MINUTES || "15"));
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return value.replaceAll("{{first_name}}", contact.firstName || "").replaceAll("{{last_name}}", contact.lastName || "").replaceAll("{{email}}", contact.email); }
@@ -93,6 +95,23 @@ async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect)
   return { allowed: Number(row.hour_count || 0) < account.hourlyLimit && Number(row.day_count || 0) < effectiveDaily, effectiveDaily };
 }
 
+async function providerGate(accountId: string, recipientEmail: string) {
+  const provider = providerForEmail(recipientEmail);
+  const [cooldown] = await db.select().from(providerCooldowns).where(and(eq(providerCooldowns.sendingAccountId, accountId), eq(providerCooldowns.provider, provider), eq(providerCooldowns.active, true))).limit(1);
+  if (!cooldown) return { allowed: true, provider, probe: false, retryAt: null as Date | null };
+  const now = new Date();
+  if (cooldown.nextProbeAt && cooldown.nextProbeAt > now) return { allowed: false, provider, probe: false, retryAt: cooldown.nextProbeAt };
+  const retryAt = new Date(Date.now() + providerCooldownMinutes * 60_000);
+  await db.update(providerCooldowns).set({ lastProbeAt: now, nextProbeAt: retryAt, updatedAt: now }).where(eq(providerCooldowns.id, cooldown.id));
+  return { allowed: true, provider, probe: true, retryAt };
+}
+
+async function releaseProviderCooldown(id: string, provider: string, retryAt: Date | null) {
+  const next = retryAt || new Date(Date.now() + providerCooldownMinutes * 60_000);
+  await pool.query(`update messages set status='ready_for_transport',next_attempt_at=$2,last_error=$3,attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'`, [id, next, `provider_cooldown:${provider}`]);
+  await event(id,"provider_cooldown",{provider,retryAt:next.toISOString()});
+}
+
 type Claimed = { id: string; attempt_count: number };
 async function claimMessages(): Promise<Claimed[]> {
   const result = await pool.query<Claimed>(`
@@ -126,13 +145,13 @@ async function markDeferred(id: string, attempt: number, error: unknown) {
   await event(id,"transport_deferred",{attempt,error:detail,retryInSeconds:delaySeconds});
   return "deferred" as const;
 }
-async function releaseThrottled(id: string) { await pool.query(`update messages set status='ready_for_transport',next_attempt_at=now()+interval '60 seconds',last_error='sending_account_rate_limited' where id=$1 and status='sending'`, [id]); await event(id,"transport_throttled",{retryInSeconds:60}); }
+async function releaseThrottled(id: string) { await pool.query(`update messages set status='ready_for_transport',next_attempt_at=now()+interval '60 seconds',last_error='sending_account_rate_limited',attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'`, [id]); await event(id,"transport_throttled",{retryInSeconds:60}); }
 async function recoverStaleClaims() { const result=await pool.query<{id:string}>(`update messages set status='failed',next_attempt_at=null,last_error='transport_state_uncertain_after_worker_restart' where status='sending' and accepted_at is null and last_attempt_at is not null and last_attempt_at < now()-interval '10 minutes' returning id`); for(const row of result.rows)await event(row.id,"transport_recovery_failed",{reason:"stale_sending_claim"}); }
 
 async function runOnce() {
   if (!appUrl) throw new Error("APP_URL is required");
   const claimed = await claimMessages();
-  let accepted = 0, deferred = 0, failed = 0, throttled = 0;
+  let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
   const templateAttachmentCache = new Map<string, CampaignAttachment[]>();
 
@@ -156,6 +175,10 @@ async function runOnce() {
       await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"sending_account_or_template_unavailable"});
       failed++; continue;
     }
+
+    const gate = await providerGate(account.id, contact.email);
+    if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.provider, gate.retryAt); providerHeld++; continue; }
+    if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,retryAt:gate.retryAt?.toISOString()}); }
 
     const limit = await accountWithinLimits(account);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
@@ -196,7 +219,7 @@ async function runOnce() {
       const result = await submitToMta(raw, envelopeFrom, recipient);
       if (!result.queueId) throw new Error("MTA accepted message without returning a queue id");
       await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]);
-      await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled});
+      await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled,provider:gate.provider,providerProbe:gate.probe});
       accepted++;
     } catch (error) {
       const state = await markDeferred(message.id, claim.attempt_count, error);
@@ -205,7 +228,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, perSecond, maxAttempts, mtaHost, mtaPort, bounceTracking: bounceEnabled });
+  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, perSecond, maxAttempts, mtaHost, mtaPort, bounceTracking: bounceEnabled });
 }
 
 async function main() {
