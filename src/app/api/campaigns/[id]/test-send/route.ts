@@ -9,7 +9,7 @@ import { getSession } from "@/lib/auth";
 import { isValidEmail } from "@/lib/contact-utils";
 import { submitToMta } from "@/lib/mta-submit";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
-import { loadCampaignAttachments } from "@/lib/campaign-attachments";
+import { combinedAttachmentLimitError, loadCampaignAttachments } from "@/lib/campaign-attachments";
 import { loadTemplateAttachments } from "@/lib/template-attachments";
 import { buildMimeContent } from "@/lib/mime-email";
 import { injectPreheader } from "@/lib/email-preheader";
@@ -67,6 +67,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     loadCampaignAttachments(id),
   ]);
   const attachments = [...templateAttachments, ...campaignAttachments];
+  const attachmentError = combinedAttachmentLimitError(attachments);
+  if (attachmentError) return NextResponse.json({ error: attachmentError }, { status: 413 });
+
   const mime = buildMimeContent({ text, html, boundarySeed: `test_${messageId.replaceAll("-", "")}`, attachments });
   const raw = [
     `From: ${clean(fromName)} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
