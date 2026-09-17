@@ -24,15 +24,24 @@ export function classifyBounce(status?: string | null, diagnostic?: string | nul
     /spam|policy|reputation|blocked|blacklist|high probability|unsolicited|authentication required|spf|dkim|dmarc/i.test(text);
 
   if (policyReject) {
-    return { kind: "policy", suppressRecipient: false, providerPressure: true, reason: "provider_policy_or_reputation" };
+    return { kind: "policy", suppressRecipient: false, providerPressure: false, reason: "message_policy_or_reputation_reject" };
   }
 
-  const temporary =
-    dsn.startsWith("4.") ||
-    /temporar|try again|rate limit|too many|throttl|greylist|mailbox full|over quota/i.test(text);
+  const recipientTemporary = /mailbox full|over quota|quota exceeded|recipient temporarily unavailable/i.test(text);
+  if (recipientTemporary) {
+    return { kind: "temporary", suppressRecipient: false, providerPressure: false, reason: "recipient_temporary_condition" };
+  }
 
-  if (temporary) {
-    return { kind: "temporary", suppressRecipient: false, providerPressure: true, reason: "temporary_provider_or_mailbox_condition" };
+  const providerTemporary =
+    dsn.startsWith("4.7.") ||
+    /rate limit|too many messages|too many connections|throttl|greylist|unusual traffic|temporarily deferred|try again later|421\b|450\b|451\b|452\b/i.test(text);
+
+  if (providerTemporary) {
+    return { kind: "temporary", suppressRecipient: false, providerPressure: true, reason: "temporary_provider_pressure" };
+  }
+
+  if (dsn.startsWith("4.")) {
+    return { kind: "temporary", suppressRecipient: false, providerPressure: false, reason: "temporary_delivery_failure" };
   }
 
   return { kind: "other", suppressRecipient: false, providerPressure: false, reason: "other_delivery_failure" };
