@@ -4,21 +4,19 @@ import { db, pool } from "../../src/db";
 import { campaigns, contacts, messageEvents, messages, sendingAccounts, templates } from "../../src/db/schema";
 import { providerCooldowns, sendingAccountWarmups, workerHeartbeats } from "../../src/db/operations-schema";
 import { signPublicToken } from "../../src/lib/public-tokens";
-import { loadCampaignAttachments, type CampaignAttachment } from "../../src/lib/campaign-attachments";
+import { combinedAttachmentLimitError, loadCampaignAttachments, type CampaignAttachment } from "../../src/lib/campaign-attachments";
 import { loadTemplateAttachments } from "../../src/lib/template-attachments";
 import { buildMimeContent } from "../../src/lib/mime-email";
 import { makeBounceAddress } from "../../src/lib/bounce-address";
 import { injectPreheader } from "../../src/lib/email-preheader";
 import { providerForEmail } from "../../src/lib/provider";
+import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
 const mtaPort = Math.max(1, Number(process.env.MTA_PORT || "10025"));
 const smtpTimeoutMs = Math.max(3000, Number(process.env.MTA_SMTP_TIMEOUT_MS || "15000"));
-const perSecond = Math.max(1, Number(process.env.TRANSPORT_RATE_PER_SECOND || "1"));
-const delayMs = Math.ceil(1000 / perSecond);
 const intervalMs = Math.max(1000, Number(process.env.TRANSPORT_WORKER_INTERVAL_MS || "3000"));
-const maxAttempts = Math.max(1, Number(process.env.TRANSPORT_MAX_ATTEMPTS || "5"));
 const claimBatch = Math.min(200, Math.max(1, Number(process.env.TRANSPORT_BATCH_SIZE || "50")));
 const bounceEnabled = Boolean(process.env.BOUNCE_DOMAIN?.trim() && process.env.BOUNCE_SECRET?.trim());
 const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN_MINUTES || "15"));
@@ -26,7 +24,7 @@ const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return value.replaceAll("{{first_name}}", contact.firstName || "").replaceAll("{{last_name}}", contact.lastName || "").replaceAll("{{email}}", contact.email); }
 function headerValue(value: string) { return value.replace(/[\r\n]+/g, " ").trim(); }
-function retryDelaySeconds(attempt: number) { return Math.min(3600, Math.max(30, 30 * 2 ** Math.max(0, attempt - 1))); }
+function retryDelaySeconds(attempt: number, settings: DeliverySettings) { return Math.min(settings.retryMaxSeconds, Math.max(settings.retryInitialSeconds, Math.round(settings.retryInitialSeconds * settings.retryBackoffMultiplier ** Math.max(0, attempt - 1)))); }
 function dotStuff(raw: string) { return raw.replace(/\r?\n/g, "\r\n").split("\r\n").map((line) => line.startsWith(".") ? `.${line}` : line).join("\r\n"); }
 function ensureUnsubscribe(html: string, text: string, unsubscribeUrl: string) {
   let nextHtml = html;
@@ -87,12 +85,13 @@ function warmupLimit(warmup: typeof sendingAccountWarmups.$inferSelect | null, a
   const calculated = Math.floor(warmup.dayOneLimit * Math.pow(1 + warmup.growthPercent / 100, days));
   return Math.min(accountDaily, warmup.maxDailyLimit, Math.max(warmup.dayOneLimit, calculated));
 }
-async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect) {
+async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect, settings: DeliverySettings) {
   const [warmup] = await db.select().from(sendingAccountWarmups).where(eq(sendingAccountWarmups.sendingAccountId, account.id)).limit(1);
-  const effectiveDaily = warmupLimit(warmup || null, account.dailyLimit);
-  const result = await db.execute(sql`select count(*) filter(where m.accepted_at >= now() - interval '1 hour')::int as hour_count,count(*) filter(where m.accepted_at >= date_trunc('day', now()))::int as day_count from messages m join campaigns c on c.id = m.campaign_id where c.sending_account_id = ${account.id}`);
+  const effectiveHourly = Math.min(account.hourlyLimit, settings.maxRollingHour);
+  const effectiveDaily = Math.min(warmupLimit(warmup || null, account.dailyLimit), settings.maxRolling24h);
+  const result = await db.execute(sql`select count(*) filter(where m.accepted_at >= now() - interval '1 hour')::int as hour_count,count(*) filter(where m.accepted_at >= now() - interval '24 hours')::int as day_count from messages m join campaigns c on c.id = m.campaign_id where c.sending_account_id = ${account.id}`);
   const row = (result.rows[0] || {}) as Record<string, unknown>;
-  return { allowed: Number(row.hour_count || 0) < account.hourlyLimit && Number(row.day_count || 0) < effectiveDaily, effectiveDaily };
+  return { allowed: Number(row.hour_count || 0) < effectiveHourly && Number(row.day_count || 0) < effectiveDaily, effectiveHourly, effectiveDaily };
 }
 
 async function providerGate(accountId: string, recipientEmail: string) {
@@ -103,6 +102,7 @@ async function providerGate(accountId: string, recipientEmail: string) {
   if (cooldown.nextProbeAt && cooldown.nextProbeAt > now) return { allowed: false, provider, probe: false, retryAt: cooldown.nextProbeAt };
   const retryAt = new Date(Date.now() + providerCooldownMinutes * 60_000);
   await db.update(providerCooldowns).set({ lastProbeAt: now, nextProbeAt: retryAt, updatedAt: now }).where(eq(providerCooldowns.id, cooldown.id));
+  await pool.query(`insert into provider_cooldown_events(cooldown_id,sending_account_id,provider,event_type,reason,response,metadata) values($1,$2,$3,'probe_started',$4,$5,$6::jsonb)`, [cooldown.id, accountId, provider, cooldown.reason, cooldown.lastResponse, JSON.stringify({ nextProbeAt: retryAt.toISOString(), recipientEmail })]);
   return { allowed: true, provider, probe: true, retryAt };
 }
 
@@ -133,14 +133,14 @@ async function claimMessages(): Promise<Claimed[]> {
     returning m.id,m.attempt_count`, [claimBatch]);
   return result.rows;
 }
-async function markDeferred(id: string, attempt: number, error: unknown) {
+async function markDeferred(id: string, attempt: number, error: unknown, settings: DeliverySettings) {
   const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error";
-  if (attempt >= maxAttempts) {
+  if (attempt >= settings.retryMaxAttempts) {
     await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [id, detail]);
     await event(id,"transport_failed",{attempt,error:detail});
     return "failed" as const;
   }
-  const delaySeconds = retryDelaySeconds(attempt);
+  const delaySeconds = retryDelaySeconds(attempt, settings);
   await pool.query(`update messages set status='deferred',last_error=$2,next_attempt_at=now()+($3::int * interval '1 second') where id=$1 and status='sending'`, [id, detail, delaySeconds]);
   await event(id,"transport_deferred",{attempt,error:detail,retryInSeconds:delaySeconds});
   return "deferred" as const;
@@ -150,6 +150,8 @@ async function recoverStaleClaims() { const result=await pool.query<{id:string}>
 
 async function runOnce() {
   if (!appUrl) throw new Error("APP_URL is required");
+  const settings = await readDeliverySettings();
+  const delayMs = Math.ceil(1000 / settings.maxPerSecond);
   const claimed = await claimMessages();
   let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
@@ -180,7 +182,7 @@ async function runOnce() {
     if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.provider, gate.retryAt); providerHeld++; continue; }
     if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,retryAt:gate.retryAt?.toISOString()}); }
 
-    const limit = await accountWithinLimits(account);
+    const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
     let campaignAttachments = campaignAttachmentCache.get(campaign.id);
@@ -188,6 +190,12 @@ async function runOnce() {
     let templateAttachments = templateAttachmentCache.get(template.id);
     if (!templateAttachments) { templateAttachments = await loadTemplateAttachments(template.id); templateAttachmentCache.set(template.id, templateAttachments); }
     const attachments = [...templateAttachments, ...campaignAttachments];
+    const attachmentError = combinedAttachmentLimitError(attachments);
+    if (attachmentError) {
+      await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [message.id, attachmentError]);
+      await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"combined_attachment_limit",detail:attachmentError});
+      failed++; continue;
+    }
 
     const unsubscribeToken = await signPublicToken({ email: contact.email, messageId: message.id }, "90d");
     const unsubscribeUrl = `${appUrl}/unsubscribe/${unsubscribeToken}`;
@@ -222,13 +230,13 @@ async function runOnce() {
       await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled,provider:gate.provider,providerProbe:gate.probe});
       accepted++;
     } catch (error) {
-      const state = await markDeferred(message.id, claim.attempt_count, error);
+      const state = await markDeferred(message.id, claim.attempt_count, error, settings);
       if (state === "deferred") deferred++; else failed++;
     }
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, perSecond, maxAttempts, mtaHost, mtaPort, bounceTracking: bounceEnabled });
+  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, mtaHost, mtaPort, bounceTracking: bounceEnabled, source: "database_control_plane" });
 }
 
 async function main() {
