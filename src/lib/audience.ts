@@ -3,12 +3,24 @@ import { db } from "@/db";
 import { contactLists, contacts, lists } from "@/db/schema";
 import { segmentDefinitions } from "@/db/segment-schema";
 
-export type AudienceRecipient = { contactId: string; email: string };
+export type AudienceRecipient = {
+  contactId: string;
+  email: string;
+  normalizedEmail: string;
+  validationStatus: "pending" | "valid" | "invalid" | "unknown" | "error";
+};
+
+const selection = {
+  contactId: contacts.id,
+  email: contacts.email,
+  normalizedEmail: contacts.normalizedEmail,
+  validationStatus: contacts.validationStatus,
+};
 
 export async function resolveAudienceRecipients(list: typeof lists.$inferSelect): Promise<AudienceRecipient[]> {
   if (!list.isDynamic) {
     return db
-      .select({ contactId: contacts.id, email: contacts.email })
+      .select(selection)
       .from(contactLists)
       .innerJoin(contacts, eq(contactLists.contactId, contacts.id))
       .where(and(eq(contactLists.listId, list.id), eq(contacts.status, "active")));
@@ -41,7 +53,7 @@ export async function resolveAudienceRecipients(list: typeof lists.$inferSelect)
   }
 
   return db
-    .select({ contactId: contacts.id, email: contacts.email })
+    .select(selection)
     .from(contacts)
     .where(and(eq(contacts.status, "active"), condition));
 }
