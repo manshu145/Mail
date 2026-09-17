@@ -45,8 +45,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   if (action === "retry_failed") {
     if (campaign.status === "cancelled") return NextResponse.json({ error: "Cancelled campaigns cannot be retried." }, { status: 409 });
-    const result = await pool.query<{ id: string }>(`update messages set status='ready_for_transport',last_error=null,next_attempt_at=now(),attempt_count=0 where campaign_id=$1 and status='failed' returning id::text`, [id]);
-    if (!result.rowCount) return NextResponse.json({ error: "There are no failed recipients to retry." }, { status: 409 });
+    const result = await pool.query<{ id: string }>(`update messages set status='ready_for_transport',last_error=null,next_attempt_at=now(),attempt_count=0 where campaign_id=$1 and status='failed' and accepted_at is null and provider_message_id is null and coalesce(last_error,'') not in ('transport_submission_uncertain','transport_state_uncertain_after_worker_restart') returning id::text`, [id]);
+    if (!result.rowCount) return NextResponse.json({ error: "There are no safely retryable failed recipients. Messages with uncertain or previously accepted delivery require reconciliation." }, { status: 409 });
     await db.update(campaigns).set({ status: "sending", completedAt: null, lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, id));
     await audit("campaign.failed_recipients_retried", session, "campaign", id, { retried: result.rowCount });
     return NextResponse.json({ ok: true, status: "sending", retried: result.rowCount });

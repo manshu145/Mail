@@ -17,15 +17,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const body = (await request.json().catch(() => null)) as { action?: string } | null;
 
   if (body?.action === "retry" && ["deferred", "failed"].includes(message.status)) {
-    await pool.query(
+    const result = await pool.query(
       `update messages
        set status='ready_for_transport',
            last_error=null,
            next_attempt_at=null,
            attempt_count=case when $2::boolean then 0 else attempt_count end
-       where id=$1`,
+       where id=$1 and status in ('deferred','failed')
+         and accepted_at is null and provider_message_id is null
+         and coalesce(last_error,'') not in ('transport_submission_uncertain','transport_state_uncertain_after_worker_restart')
+         and exists(select 1 from campaigns c where c.id=messages.campaign_id and c.status <> 'cancelled')`,
       [id, message.status === "failed"],
     );
+    if (!result.rowCount) return NextResponse.json({ error: "Retry blocked: the message changed, the campaign was cancelled, or prior delivery needs reconciliation." }, { status: 409 });
     await audit("message.retry", session, "message", id, { previousStatus: message.status });
     return NextResponse.json({ ok: true });
   }
