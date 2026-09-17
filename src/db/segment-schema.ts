@@ -1,13 +1,14 @@
 import { integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { campaigns, lists } from "./schema";
 
-export const segmentField = pgEnum("segment_field", ["email_domain", "validation_status", "contact_status"]);
+export const segmentField = pgEnum("segment_field", ["email_domain", "validation_status", "contact_status", "custom_attribute"]);
 export const segmentOperator = pgEnum("segment_operator", ["equals", "not_equals"]);
 
 export const segmentDefinitions = pgTable("segment_definitions", {
   id: uuid("id").defaultRandom().primaryKey(),
   listId: uuid("list_id").notNull().references(() => lists.id, { onDelete: "cascade" }),
   field: segmentField("field").notNull(),
+  attributeKey: text("attribute_key"),
   operator: segmentOperator("operator").notNull().default("equals"),
   value: text("value").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
