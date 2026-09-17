@@ -1,8 +1,9 @@
 import { eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
+import { campaignPreflights } from "../../src/db/campaign-ops-schema";
 import { auditLogs, campaigns, lists, messages } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
-import { resolveAudienceRecipients } from "../../src/lib/audience";
+import { preflightAudience } from "../../src/lib/audience-preflight";
 import { getRuntimePolicy } from "../../src/lib/runtime-policy";
 
 const intervalMs = Math.max(1000, Number(process.env.CAMPAIGN_WORKER_INTERVAL_MS || "5000"));
@@ -59,6 +60,7 @@ async function runOnce() {
 
   const claimedIds = await claimDueCampaigns();
   let resolved = 0;
+  let excluded = 0;
   let blocked = 0;
 
   for (const campaignId of claimedIds) {
@@ -68,24 +70,74 @@ async function runOnce() {
     const [list] = await db.select().from(lists).where(eq(lists.id, campaign.listId)).limit(1);
     if (!list) { await blockCampaign(campaign.id, "campaign.worker_list_not_found", { listId: campaign.listId }); blocked++; continue; }
 
-    const recipients = await resolveAudienceRecipients(list);
-    if (policy.maxRecipientsPerCampaign !== null && recipients.length > policy.maxRecipientsPerCampaign) {
-      await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { recipients: recipients.length, limit: policy.maxRecipientsPerCampaign });
+    const preflight = await preflightAudience(list);
+    await db.insert(campaignPreflights).values({
+      campaignId: campaign.id,
+      listId: list.id,
+      rawCount: preflight.rawCount,
+      eligibleCount: preflight.eligibleCount,
+      suppressedCount: preflight.suppressedCount,
+      invalidCount: preflight.invalidCount,
+      validCount: preflight.validCount,
+      pendingCount: preflight.pendingCount,
+      unknownCount: preflight.unknownCount,
+      checkedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: campaignPreflights.campaignId,
+      set: {
+        listId: list.id,
+        rawCount: preflight.rawCount,
+        eligibleCount: preflight.eligibleCount,
+        suppressedCount: preflight.suppressedCount,
+        invalidCount: preflight.invalidCount,
+        validCount: preflight.validCount,
+        pendingCount: preflight.pendingCount,
+        unknownCount: preflight.unknownCount,
+        checkedAt: new Date(),
+      },
+    });
+
+    if (policy.maxRecipientsPerCampaign !== null && preflight.eligibleCount > policy.maxRecipientsPerCampaign) {
+      await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { eligibleRecipients: preflight.eligibleCount, limit: policy.maxRecipientsPerCampaign });
       blocked++;
       continue;
     }
-    if (!recipients.length) { await blockCampaign(campaign.id, "campaign.worker_empty_audience", { listId: list.id }); blocked++; continue; }
+    if (!preflight.eligibleCount) {
+      await blockCampaign(campaign.id, "campaign.worker_no_eligible_recipients", {
+        rawCount: preflight.rawCount,
+        suppressedCount: preflight.suppressedCount,
+        invalidCount: preflight.invalidCount,
+      });
+      blocked++;
+      continue;
+    }
 
     await db.transaction(async (tx) => {
-      await tx.insert(messages).values(recipients.map((recipient) => ({ campaignId: campaign.id, contactId: recipient.contactId, recipientEmail: recipient.email, status: "queued" as const }))).onConflictDoNothing({ target: [messages.campaignId, messages.contactId] });
+      await tx.insert(messages).values(preflight.eligibleRecipients.map((recipient) => ({ campaignId: campaign.id, contactId: recipient.contactId, recipientEmail: recipient.email, status: "queued" as const }))).onConflictDoNothing({ target: [messages.campaignId, messages.contactId] });
       const [counts] = await tx.select({ count: sql<number>`count(*)::int` }).from(messages).where(eq(messages.campaignId, campaign.id));
-      await tx.update(campaigns).set({ audienceCount: recipients.length, messageCount: Number(counts?.count || 0), lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
-      await tx.insert(auditLogs).values({ action: "campaign.audience_snapshotted", entityType: "campaign", entityId: campaign.id, metadataJson: JSON.stringify({ audienceCount: recipients.length, messageCount: Number(counts?.count || 0), listId: list.id }) });
+      await tx.update(campaigns).set({ audienceCount: preflight.eligibleCount, messageCount: Number(counts?.count || 0), lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
+      await tx.insert(auditLogs).values({
+        action: "campaign.audience_snapshotted",
+        entityType: "campaign",
+        entityId: campaign.id,
+        metadataJson: JSON.stringify({
+          listId: list.id,
+          rawCount: preflight.rawCount,
+          eligibleCount: preflight.eligibleCount,
+          suppressedCount: preflight.suppressedCount,
+          invalidCount: preflight.invalidCount,
+          validCount: preflight.validCount,
+          pendingCount: preflight.pendingCount,
+          unknownCount: preflight.unknownCount,
+          messageCount: Number(counts?.count || 0),
+        }),
+      });
     });
-    resolved += recipients.length;
+    resolved += preflight.eligibleCount;
+    excluded += preflight.suppressedCount + preflight.invalidCount;
   }
 
-  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, blocked });
+  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked });
 }
 
 async function main() {
