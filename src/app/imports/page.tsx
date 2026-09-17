@@ -1,4 +1,4 @@
-import { desc, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { Database, FileCheck2, FileClock, FileUp, ShieldAlert } from "lucide-react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
@@ -7,19 +7,54 @@ import { db, databaseConfigured } from "@/db";
 import { importJobs, lists } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 
+type ImportJobRow = typeof importJobs.$inferSelect & {
+  suppressedRows?: number;
+  riskyRows?: number;
+  sourceLabel?: string | null;
+  startedAt?: Date | null;
+  validationJobId?: string | null;
+};
+
 export default async function ImportsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  let rows: (typeof importJobs.$inferSelect & { suppressedRows?: number; sourceLabel?: string | null })[] = [];
+  let rows: ImportJobRow[] = [];
   let listRows: { id: string; name: string }[] = [];
   let dbError = false;
+
   if (databaseConfigured) {
     try {
-      rows = (await db.execute(sql`select *, coalesce(suppressed_rows,0)::int as "suppressedRows", source_label as "sourceLabel" from import_jobs order by created_at desc limit 100`)).rows as typeof rows;
+      rows = (await db.execute(sql`
+        select
+          id,
+          filename,
+          status,
+          total_rows as "totalRows",
+          imported_rows as "importedRows",
+          duplicate_rows as "duplicateRows",
+          invalid_rows as "invalidRows",
+          coalesce(suppressed_rows, 0)::int as "suppressedRows",
+          coalesce(risky_rows, 0)::int as "riskyRows",
+          source_label as "sourceLabel",
+          validation_job_id as "validationJobId",
+          started_at as "startedAt",
+          error_message as "errorMessage",
+          created_by as "createdBy",
+          created_at as "createdAt",
+          completed_at as "completedAt"
+        from import_jobs
+        order by created_at desc
+        limit 100
+      `)).rows as unknown as ImportJobRow[];
+
       listRows = await db.select({ id: lists.id, name: lists.name }).from(lists).orderBy(lists.name);
-    } catch { dbError = true; }
+    } catch (error) {
+      console.error("[imports-page] failed to load import workspace", error);
+      dbError = true;
+    }
   }
+
   const usable = databaseConfigured && !dbError;
   const active = rows.filter((row) => row.status === "pending" || row.status === "processing").length;
   const processed = rows.reduce((sum, row) => sum + (row.status === "completed" ? row.totalRows : row.importedRows + row.duplicateRows + row.invalidRows + Number(row.suppressedRows || 0)), 0);
@@ -54,7 +89,7 @@ export default async function ImportsPage() {
 
     <section className="premium-panel overflow-hidden">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 sm:px-6"><div><p className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--muted)]">History</p><h2 className="mt-1 text-lg font-black">Import jobs</h2></div><FileUp className="h-5 w-5 text-[var(--muted)]" /></div>
-      {rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1050px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[0.13em] text-[var(--muted)]"><tr><th className="px-5 py-3.5">File / consent</th><th>Status</th><th>Progress</th><th>Imported</th><th>Invalid</th><th>Dup</th><th>Suppressed</th><th>Created</th></tr></thead><tbody>{rows.map((row) => { const suppressed = Number(row.suppressedRows || 0); const accounted = row.importedRows + row.duplicateRows + row.invalidRows + suppressed; const done = row.status === "completed" ? row.totalRows : accounted; const progress = row.status === "completed" ? 100 : row.totalRows ? Math.min(100, Math.round((accounted / row.totalRows) * 100)) : 0; return <tr key={row.id} className="border-t border-[var(--border)]"><td className="px-5 py-4"><p className="font-extrabold">{row.filename}</p><p className="mt-1 text-xs text-[var(--muted)]">{row.sourceLabel || "—"}</p>{row.errorMessage ? <p className="mt-1 max-w-md truncate text-xs text-rose-500">{row.errorMessage}</p> : null}</td><td><span className={`rounded-full px-2.5 py-1 text-xs font-bold capitalize ${row.status === "completed" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : row.status === "failed" ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>{row.status}</span></td><td className="pr-6"><div className="h-1.5 w-32 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-violet-500" style={{ width: `${progress}%` }} /></div><p className="mt-1 text-[10px] font-bold text-[var(--muted)]">{progress}% · {done.toLocaleString()} / {row.totalRows.toLocaleString()}</p></td><td className="font-bold text-emerald-600">{row.importedRows.toLocaleString()}</td><td>{row.invalidRows.toLocaleString()}</td><td>{row.duplicateRows.toLocaleString()}</td><td>{suppressed.toLocaleString()}</td><td className="text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(row.createdAt)}</td></tr>; })}</tbody></table></div> : <div className="grid min-h-64 place-items-center p-8 text-center"><div><FileUp className="mx-auto h-8 w-8 text-[var(--muted)]" /><h3 className="mt-4 font-black">No import jobs yet</h3><p className="mt-1 text-sm text-[var(--muted)]">Upload a CSV to start a background import.</p></div></div>}
+      {rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1050px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[0.13em] text-[var(--muted)]"><tr><th className="px-5 py-3.5">File / consent</th><th>Status</th><th>Progress</th><th>Imported</th><th>Invalid</th><th>Dup</th><th>Suppressed</th><th>Created</th></tr></thead><tbody>{rows.map((row) => { const suppressed = Number(row.suppressedRows || 0); const accounted = row.importedRows + row.duplicateRows + row.invalidRows + suppressed; const done = row.status === "completed" ? row.totalRows : accounted; const progress = row.status === "completed" ? 100 : row.totalRows ? Math.min(100, Math.round((accounted / row.totalRows) * 100)) : 0; return <tr key={row.id} className="border-t border-[var(--border)]"><td className="px-5 py-4"><p className="font-extrabold">{row.filename}</p><p className="mt-1 text-xs text-[var(--muted)]">{row.sourceLabel || "—"}</p>{row.errorMessage ? <p className="mt-1 max-w-md truncate text-xs text-rose-500">{row.errorMessage}</p> : null}</td><td><span className={`rounded-full px-2.5 py-1 text-xs font-bold capitalize ${row.status === "completed" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : row.status === "failed" ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>{row.status}</span></td><td className="pr-6"><div className="h-1.5 w-32 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-violet-500" style={{ width: `${progress}%` }} /></div><p className="mt-1 text-[10px] font-bold text-[var(--muted)]">{progress}% · {done.toLocaleString()} / {row.totalRows.toLocaleString()}</p></td><td className="font-bold text-emerald-600">{row.importedRows.toLocaleString()}</td><td>{row.invalidRows.toLocaleString()}</td><td>{row.duplicateRows.toLocaleString()}</td><td>{suppressed.toLocaleString()}</td><td className="text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(row.createdAt))}</td></tr>; })}</tbody></table></div> : <div className="grid min-h-64 place-items-center p-8 text-center"><div><FileUp className="mx-auto h-8 w-8 text-[var(--muted)]" /><h3 className="mt-4 font-black">No import jobs yet</h3><p className="mt-1 text-sm text-[var(--muted)]">Upload a CSV to start a background import.</p></div></div>}
     </section>
   </AppShell>;
 }
