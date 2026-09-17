@@ -32,7 +32,8 @@ export const importStagingRows = pgTable("import_staging_rows", {
 
 export const importUploads = pgTable("import_uploads", {
   jobId: uuid("job_id").primaryKey().references(() => importJobs.id, { onDelete: "cascade" }),
-  content: text("content").notNull(),
+  content: text("content").notNull().default(""),
+  storagePath: text("storage_path"),
   headers: jsonb("headers").$type<string[]>().notNull().default([]),
   mapping: jsonb("mapping").$type<ImportMapping>().notNull().default({}),
   options: jsonb("options").$type<ImportOptions>().notNull().default({ consentSource: "", consentStatus: "unconfirmed" }),
