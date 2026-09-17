@@ -9,6 +9,7 @@ import { getRuntimePolicy } from "../../src/lib/runtime-policy";
 
 const intervalMs = Math.max(1000, Number(process.env.CAMPAIGN_WORKER_INTERVAL_MS || "5000"));
 const claimBatch = Math.max(1, Math.min(25, Number(process.env.CAMPAIGN_CLAIM_BATCH || "5")));
+const messageInsertBatch = Math.max(100, Math.min(2000, Number(process.env.CAMPAIGN_MESSAGE_INSERT_BATCH || "1000")));
 
 async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "campaign", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
@@ -55,9 +56,6 @@ async function claimDueCampaigns() {
 }
 
 async function runOnce() {
-  // Recovery is intentionally checked every cycle, not only at process startup.
-  // A transient exception must never leave a claimed campaign stuck in "sending"
-  // forever while the worker process itself remains alive.
   const recovered = await recoverAbandonedClaims();
   const policy = getRuntimePolicy();
   const delivery = await readDeliverySettings();
@@ -124,7 +122,18 @@ async function runOnce() {
       }
 
       await db.transaction(async (tx) => {
-        await tx.insert(messages).values(preflight.eligibleRecipients.map((recipient) => ({ campaignId: campaign.id, contactId: recipient.contactId, recipientEmail: recipient.email, status: "queued" as const }))).onConflictDoNothing({ target: [messages.campaignId, messages.contactId] });
+        // Never submit a huge values(...) statement for a large campaign. PostgreSQL
+        // has practical parameter/query-size limits and million-row audiences would
+        // otherwise fail during snapshot creation before the transport queue starts.
+        for (let offset = 0; offset < preflight.eligibleRecipients.length; offset += messageInsertBatch) {
+          const chunk = preflight.eligibleRecipients.slice(offset, offset + messageInsertBatch).map((recipient) => ({
+            campaignId: campaign.id,
+            contactId: recipient.contactId,
+            recipientEmail: recipient.email,
+            status: "queued" as const,
+          }));
+          if (chunk.length) await tx.insert(messages).values(chunk).onConflictDoNothing({ target: [messages.campaignId, messages.contactId] });
+        }
         const [counts] = await tx.select({ count: sql<number>`count(*)::int` }).from(messages).where(eq(messages.campaignId, campaign.id));
         await tx.update(campaigns).set({ audienceCount: preflight.eligibleCount, messageCount: Number(counts?.count || 0), lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
         await tx.insert(auditLogs).values({
@@ -142,6 +151,7 @@ async function runOnce() {
             unknownCount: preflight.unknownCount,
             messageCount: Number(counts?.count || 0),
             campaignLimit,
+            messageInsertBatch,
           }),
         });
       });
@@ -156,7 +166,7 @@ async function runOnce() {
     }
   }
 
-  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked, recovered, maxRecipientsPerCampaign: campaignLimit, source: "database_control_plane" });
+  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked, recovered, maxRecipientsPerCampaign: campaignLimit, messageInsertBatch, source: "database_control_plane" });
 }
 
 async function main() {
