@@ -85,22 +85,23 @@ async function existingResults(jobId: string) {
   return result.rows;
 }
 
+async function addInvalidSuppression(email: string, contactId: string, detail: string | null) {
+  // Never downgrade an existing unsubscribe, complaint, manual or hard-bounce
+  // suppression merely because validation later reports an invalid mailbox.
+  await db.insert(suppressions).values({
+    email,
+    normalizedEmail: normalizeEmail(email),
+    contactId,
+    reason: "invalid",
+    source: "gmail_validation",
+    note: detail,
+  }).onConflictDoNothing({ target: suppressions.normalizedEmail });
+}
+
 async function reconcileExistingResults(rows: ExistingResult[]) {
   for (const row of rows) {
     await db.update(contacts).set({ validationStatus: row.status, updatedAt: new Date() }).where(eq(contacts.id, row.contact_id));
-    if (row.status === "invalid") {
-      await db.insert(suppressions).values({
-        email: row.email,
-        normalizedEmail: normalizeEmail(row.email),
-        contactId: row.contact_id,
-        reason: "invalid",
-        source: "gmail_validation",
-        note: row.detail,
-      }).onConflictDoUpdate({
-        target: suppressions.normalizedEmail,
-        set: { contactId: row.contact_id, reason: "invalid", source: "gmail_validation", note: row.detail },
-      });
-    }
+    if (row.status === "invalid") await addInvalidSuppression(row.email, row.contact_id, row.detail);
   }
 }
 
@@ -176,9 +177,7 @@ async function runJob() {
     const result = await smtpProbe(contact.normalizedEmail);
     await db.insert(validationResults).values({ jobId: job.id, contactId: contact.id, email: contact.email, status: result.status, detail: result.detail });
     await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
-    if (result.status === "invalid") {
-      await db.insert(suppressions).values({ email: contact.email, normalizedEmail: normalizeEmail(contact.email), contactId: contact.id, reason: "invalid", source: "gmail_validation", note: result.detail }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { contactId: contact.id, reason: "invalid", source: "gmail_validation", note: result.detail } });
-    }
+    if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
     processed++;
     await db.update(validationJobs).set({ processedRows: processed }).where(eq(validationJobs.id, job.id));
     await heartbeat({ state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed });
