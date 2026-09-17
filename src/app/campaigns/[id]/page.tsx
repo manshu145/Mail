@@ -6,6 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { CampaignControl } from "@/components/campaign-control";
 import { CampaignEditor } from "@/components/campaign-editor";
 import { db, databaseConfigured } from "@/db";
+import { campaignPreflights } from "@/db/campaign-ops-schema";
 import { campaigns, lists, sendingAccounts, templates } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
@@ -22,7 +23,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
   const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
   if (!campaign) notFound();
 
-  const [listRows, templateRows, accountRows, metrics, recipientResult, linkResult] = await Promise.all([
+  const [listRows, templateRows, accountRows, metrics, recipientResult, linkResult, preflightRows] = await Promise.all([
     db.select({ id: lists.id, name: lists.name }).from(lists),
     db.select({ id: templates.id, name: templates.name }).from(templates),
     db.select({ id: sendingAccounts.id, name: sendingAccounts.name, fromName: sendingAccounts.fromName, fromEmail: sendingAccounts.fromEmail, replyTo: sendingAccounts.replyTo }).from(sendingAccounts).where(eq(sendingAccounts.status, "active")),
@@ -51,10 +52,12 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
       order by clicks desc
       limit 20
     `),
+    db.select().from(campaignPreflights).where(eq(campaignPreflights.campaignId,id)).limit(1),
   ]);
 
   const recipientRows=recipientResult.rows as Array<Record<string,unknown>>;
   const links=linkResult.rows as Array<Record<string,unknown>>;
+  const preflight=preflightRows[0]||null;
   const editable = ["draft", "paused", "scheduled"].includes(campaign.status);
   const runtimePolicy = getRuntimePolicy();
   const cards = metrics ? [
@@ -67,7 +70,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
       <Link className="mb-5 inline-flex items-center gap-2 text-sm font-bold text-[var(--muted)] hover:text-[var(--foreground)]" href="/campaigns"><ArrowLeft className="h-4 w-4" />Campaigns</Link>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="page-eyebrow">Campaign report</p><h1 className="mt-2 text-3xl font-black tracking-[-.035em] sm:text-4xl">{campaign.name}</h1><p className="mt-2 text-sm text-[var(--muted)]">{campaign.subject}</p></div>
-        <div className="flex items-center gap-2"><span className="rounded-full bg-violet-500/10 px-3 py-1.5 text-xs font-extrabold capitalize text-violet-700 dark:text-violet-300">{campaign.status}</span><CampaignControl id={campaign.id} status={campaign.status} /></div>
+        <div className="flex flex-wrap items-center justify-end gap-2"><span className="rounded-full bg-violet-500/10 px-3 py-1.5 text-xs font-extrabold capitalize text-violet-700 dark:text-violet-300">{campaign.status}</span><CampaignControl id={campaign.id} status={campaign.status} failed={metrics?.failed||0} /></div>
       </div>
     </div>
 
@@ -76,6 +79,8 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
     </section>
 
     {campaign.lastError?<div className="mb-5 rounded-2xl border border-rose-500/20 bg-rose-500/[0.06] px-4 py-3 text-sm font-semibold text-rose-600">{campaign.lastError}</div>:null}
+
+    {preflight ? <section className="premium-panel mb-5 overflow-hidden"><div className="border-b border-[var(--border)] p-5"><h2 className="font-black">Audience preflight</h2><p className="mt-1 text-xs text-[var(--muted)]">Eligibility is snapshotted before delivery. Suppressed and invalid contacts never enter the transport queue.</p></div><div className="grid gap-px bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-7">{[["Selected",preflight.rawCount],["Eligible",preflight.eligibleCount],["Suppressed",preflight.suppressedCount],["Invalid",preflight.invalidCount],["Valid",preflight.validCount],["Pending",preflight.pendingCount],["Unknown",preflight.unknownCount]].map(([label,value])=><div className="bg-[var(--surface)] p-4" key={String(label)}><p className="text-xs font-bold text-[var(--muted)]">{label}</p><p className="mt-1 text-2xl font-black">{Number(value).toLocaleString()}</p></div>)}</div><div className="border-t border-[var(--border)] px-5 py-3 text-xs text-[var(--muted)]">Last checked {fmt(preflight.checkedAt)}</div></section> : null}
 
     {metrics && metrics.targeted>0 ? <>
       <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label,count,Icon])=><article className="premium-panel p-5" key={label}><div className="flex items-start justify-between"><div><p className="text-sm font-bold text-[var(--muted)]">{label}</p><p className="mt-2 text-3xl font-black">{Number(count).toLocaleString()}</p></div><Icon className="h-5 w-5 text-[var(--muted)]"/></div></article>)}</section>
