@@ -61,6 +61,9 @@ async function contactsForJob(scope: string) {
     if (!ids.length) return [];
     return db.select().from(contacts).where(inArray(contacts.id, ids));
   }
+  if (scope === "gmail:pending") {
+    return db.select().from(contacts).where(and(eq(contacts.status, "active"), eq(contacts.validationStatus, "pending"), sql`lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'`));
+  }
   return db.select().from(contacts).where(and(eq(contacts.status, "active"), sql`lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'`));
 }
 
@@ -76,16 +79,32 @@ async function syncImportValidationCounters(scope: string, validationJobId: stri
     where job_id=$1
   `, [validationJobId]);
   const row = result.rows[0] || { valid: 0, risky: 0, invalid: 0 };
-  await pool.query(`
-    update import_jobs
-    set valid_rows=$2, risky_rows=$3, validation_invalid_rows=$4
-    where id=$1
-  `, [importId, Number(row.valid || 0), Number(row.risky || 0), Number(row.invalid || 0)]);
+  await pool.query(`update import_jobs set valid_rows=$2, risky_rows=$3, validation_invalid_rows=$4 where id=$1`, [importId, Number(row.valid || 0), Number(row.risky || 0), Number(row.invalid || 0)]);
+}
+
+async function queuePendingGmailIfNeeded() {
+  const active = await pool.query<{ count: number }>(`select count(*)::int count from validation_jobs where status in ('pending','processing')`);
+  if (Number(active.rows[0]?.count || 0) > 0) return false;
+  const pending = await pool.query<{ count: number }>(`
+    select count(*)::int count from contacts
+    where status='active' and validation_status='pending'
+      and lower(normalized_email) ~ '@(gmail|googlemail)\\.com$'
+  `);
+  const count = Number(pending.rows[0]?.count || 0);
+  if (!count) return false;
+  await db.insert(validationJobs).values({ scope: "gmail:pending", totalRows: count });
+  await heartbeat({ state: "auto_queued", scope: "gmail:pending", total: count });
+  return true;
 }
 
 async function runJob() {
-  const [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "pending")).orderBy(validationJobs.createdAt).limit(1);
-  if (!job) { await heartbeat({ state: "idle" }); return; }
+  let [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "pending")).orderBy(validationJobs.createdAt).limit(1);
+  if (!job) {
+    const queued = await queuePendingGmailIfNeeded();
+    if (!queued) { await heartbeat({ state: "idle" }); return; }
+    [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "pending")).orderBy(validationJobs.createdAt).limit(1);
+    if (!job) return;
+  }
   await db.update(validationJobs).set({ status: "processing" }).where(eq(validationJobs.id, job.id));
   const rows = await contactsForJob(job.scope);
   await db.update(validationJobs).set({ totalRows: rows.length }).where(eq(validationJobs.id, job.id));
@@ -107,7 +126,7 @@ async function runJob() {
 }
 
 async function main() {
-  console.log("[validation-worker] started; supports global and import-scoped Gmail validation");
+  console.log("[validation-worker] started; global/import-scoped Gmail validation + automatic pending Gmail sweep");
   while (true) { try { await runJob(); } catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); } await new Promise(r=>setTimeout(r, intervalMs)); }
 }
 main().catch(console.error);
