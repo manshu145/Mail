@@ -10,6 +10,7 @@ import { isValidEmail } from "@/lib/contact-utils";
 import { submitToMta } from "@/lib/mta-submit";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
 import { loadCampaignAttachments } from "@/lib/campaign-attachments";
+import { loadTemplateAttachments } from "@/lib/template-attachments";
 import { buildMimeContent } from "@/lib/mime-email";
 
 function clean(value: unknown) { return String(value ?? "").replace(/[\r\n]+/g, " ").trim(); }
@@ -58,7 +59,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const text = `${sample(template.textBody, recipient)}${template.textBody ? "\n\n" : ""}Test send from NexiMail — no campaign recipient was queued.`;
   const replyTo = clean(account.replyTo || account.fromEmail);
   const messageId = randomUUID();
-  const attachments = await loadCampaignAttachments(id);
+  const [templateAttachments, campaignAttachments] = await Promise.all([
+    loadTemplateAttachments(template.id),
+    loadCampaignAttachments(id),
+  ]);
+  const attachments = [...templateAttachments, ...campaignAttachments];
   const mime = buildMimeContent({ text, html, boundarySeed: `test_${messageId.replaceAll("-", "")}`, attachments });
   const raw = [
     `From: ${clean(fromName)} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
