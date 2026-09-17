@@ -11,4 +11,6 @@ export type ImportRow = {
   email: string;
   firstName?: string;
   lastName?: string;
+  consentStatus?: "confirmed" | "unconfirmed";
+  consentSource?: string;
 };
