@@ -51,8 +51,8 @@ async function sync() {
       const selector = row.dkimSelector || "default";
       const domainDir = path.join(root, "keys", row.domain);
       const keyFile = path.join(domainDir, `${selector}.private`);
-      await fs.mkdir(domainDir, { recursive: true });
-      await atomicWrite(keyFile, privateKey, 0o644);
+      await fs.mkdir(domainDir, { recursive: true, mode: 0o755 });
+      await atomicWrite(keyFile, privateKey, 0o600);
       const identity = `${selector}._domainkey.${row.domain}`;
       keyTable.push(`${identity} ${row.domain}:${selector}:${keyFile}`);
       signingTable.push(`*@${row.domain} ${identity}`);
@@ -63,8 +63,8 @@ async function sync() {
     }
   }
 
-  await atomicWrite(path.join(root, "KeyTable"), `${keyTable.join("\n")}\n`);
-  await atomicWrite(path.join(root, "SigningTable"), `${signingTable.join("\n")}\n`);
+  await atomicWrite(path.join(root, "KeyTable"), `${keyTable.join("\n")}\n`, 0o644);
+  await atomicWrite(path.join(root, "SigningTable"), `${signingTable.join("\n")}\n`, 0o644);
   await heartbeat({ state: "online", domains: domains.length, written, generated, skipped });
 }
 
