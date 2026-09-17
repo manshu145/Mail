@@ -20,17 +20,30 @@ export function normalizeCsvHeader(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-export function parseCsv(text: string) {
-  const rows: string[][] = []; let row: string[] = []; let cell = ""; let quoted = false;
+export function* iterateCsvRows(text: string): Generator<string[]> {
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
-    if (char === '"') { if (quoted && text[i + 1] === '"') { cell += '"'; i++; } else quoted = !quoted; }
-    else if (char === "," && !quoted) { row.push(cell); cell = ""; }
-    else if ((char === "\n" || char === "\r") && !quoted) { if (char === "\r" && text[i + 1] === "\n") i++; row.push(cell); cell = ""; if (row.some((v) => v.length)) rows.push(row); row = []; }
-    else cell += char;
+    if (char === '"') {
+      if (quoted && text[i + 1] === '"') { cell += '"'; i++; }
+      else quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(cell); cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell); cell = "";
+      if (row.some((v) => v.length)) yield row;
+      row = [];
+    } else cell += char;
   }
-  row.push(cell); if (row.some((v) => v.length)) rows.push(row);
-  return rows;
+  row.push(cell);
+  if (row.some((v) => v.length)) yield row;
+}
+
+export function parseCsv(text: string) {
+  return [...iterateCsvRows(text)];
 }
 
 export function detectMapping(headers: string[]): ImportMapping {
