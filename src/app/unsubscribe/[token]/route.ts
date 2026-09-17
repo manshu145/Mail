@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, databaseConfigured } from "@/db";
-import { suppressions } from "@/db/schema";
+import { messageEvents, suppressions } from "@/db/schema";
 import { normalizeEmail } from "@/lib/contact-utils";
 import { verifyPublicToken } from "@/lib/public-tokens";
 import { emitWebhookEvent } from "@/lib/webhooks";
@@ -30,6 +30,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ to
     const { email, messageId } = await decode(token);
     if (!databaseConfigured) return new NextResponse("Unsubscribe service is temporarily unavailable.", { status: 503 });
     await db.insert(suppressions).values({ email, normalizedEmail: normalizeEmail(email), reason: "unsubscribe", source: "unsubscribe_link" }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "unsubscribe", source: "unsubscribe_link" } });
+    if (messageId && /^[0-9a-f-]{36}$/i.test(messageId)) {
+      await db.insert(messageEvents).values({ messageId, type: "unsubscribe", payload: { source: "unsubscribe_link", email } }).catch(() => undefined);
+    }
     await emitWebhookEvent("contact.unsubscribed", { email, messageId }).catch((error) => console.error("[unsubscribe.webhook]", error));
     return new Response(page(token, "You have been unsubscribed. This address is now in the global suppression list."), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
   } catch { return new NextResponse("Invalid or expired unsubscribe link.", { status: 400 }); }
