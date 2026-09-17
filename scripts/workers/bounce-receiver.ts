@@ -5,6 +5,7 @@ import { messageEvents, messages, suppressions } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import { parseBounceAddress } from "../../src/lib/bounce-address";
+import { classifyBounce } from "../../src/lib/bounce-classification";
 import { emitWebhookEvent } from "../../src/lib/webhooks";
 
 const host = process.env.BOUNCE_RECEIVER_HOST || "0.0.0.0";
@@ -19,9 +20,8 @@ function parseDsn(raw: string) {
   const action = raw.match(/^Action:\s*([^\r\n]+)/im)?.[1]?.trim().toLowerCase() || "unknown";
   const status = raw.match(/^Status:\s*([245](?:\.\d+){1,2})/im)?.[1] || raw.match(/\b([245]\.\d+\.\d+)\b/)?.[1] || null;
   const diagnostic = raw.match(/^Diagnostic-Code:\s*([^\r\n]+)/im)?.[1]?.trim() || raw.match(/^Final-Recipient:\s*([^\r\n]+)/im)?.[1]?.trim() || null;
-  const hard = action === "failed" || Boolean(status?.startsWith("5."));
   const delayed = action === "delayed" || Boolean(status?.startsWith("4."));
-  return { action, status, diagnostic: diagnostic?.slice(0, 1000) || null, hard, delayed };
+  return { action, status, diagnostic: diagnostic?.slice(0, 1000) || null, delayed };
 }
 
 async function heartbeat(meta: Record<string, unknown>) {
@@ -33,19 +33,25 @@ async function processDsn(messageId: string, raw: string) {
   const [message] = await db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
   if (!message) throw new Error("Unknown NexiMail message id");
   const dsn = parseDsn(raw);
-  const payload = { action: dsn.action, status: dsn.status, diagnostic: dsn.diagnostic, source: "verp_dsn" };
+  const classification = classifyBounce(dsn.status, dsn.diagnostic || raw.slice(-1000));
+  const failed = dsn.action === "failed" || Boolean(dsn.status?.startsWith("5."));
+  const payload = { action: dsn.action, status: dsn.status, diagnostic: dsn.diagnostic, source: "verp_dsn", bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient };
 
-  if (dsn.hard) {
+  if (failed) {
     await db.update(messages).set({ status: "bounced", bouncedAt: new Date(), lastError: dsn.diagnostic || `DSN ${dsn.status || "failed"}` }).where(eq(messages.id, message.id));
     await db.insert(messageEvents).values({ messageId: message.id, type: "dsn_bounced", payload });
-    await db.insert(suppressions).values({
-      email: message.recipientEmail,
-      normalizedEmail: normalizeEmail(message.recipientEmail),
-      reason: "hard_bounce",
-      source: "verp_dsn",
-      note: dsn.diagnostic || dsn.status || "Remote DSN hard bounce",
-    }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "hard_bounce", source: "verp_dsn", note: dsn.diagnostic || dsn.status || "Remote DSN hard bounce" } });
-    await emitWebhookEvent("message.bounced", { messageId: message.id, campaignId: message.campaignId, recipientEmail: message.recipientEmail, dsn: dsn.status, diagnostic: dsn.diagnostic }).catch(() => {});
+
+    if (classification.suppressRecipient) {
+      await db.insert(suppressions).values({
+        email: message.recipientEmail,
+        normalizedEmail: normalizeEmail(message.recipientEmail),
+        reason: "hard_bounce",
+        source: "verp_dsn",
+        note: dsn.diagnostic || dsn.status || "Remote DSN recipient hard bounce",
+      }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "hard_bounce", source: "verp_dsn", note: dsn.diagnostic || dsn.status || "Remote DSN recipient hard bounce" } });
+    }
+
+    await emitWebhookEvent("message.bounced", { messageId: message.id, campaignId: message.campaignId, recipientEmail: message.recipientEmail, dsn: dsn.status, diagnostic: dsn.diagnostic, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient }).catch(() => {});
     return "bounced";
   }
 
