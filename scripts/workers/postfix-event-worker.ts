@@ -6,6 +6,7 @@ import { providerCooldowns, workerHeartbeats } from "../../src/db/operations-sch
 import { providerCooldownEvents } from "../../src/db/provider-cooldown-event-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import { emitWebhookEvent } from "../../src/lib/webhooks";
+import { classifyBounce } from "../../src/lib/bounce-classification";
 import { isProviderPressureResponse, providerForDelivery } from "../../src/lib/provider";
 
 const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN_MINUTES || "15"));
@@ -81,10 +82,20 @@ async function handle(line: string) {
   }
 
   if (status === "bounced") {
+    const classification = classifyBounce(dsn, detail);
+    let cooldown: Awaited<ReturnType<typeof activateProviderCooldown>> = null;
+    if (classification.providerPressure) {
+      cooldown = await activateProviderCooldown({ campaignId: message.campaignId, recipientEmail: message.recipientEmail, response: detail, dsn });
+    }
+
     await db.update(messages).set({ status: "bounced", lastError: detail, bouncedAt: new Date() }).where(eq(messages.id, message.id));
-    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_bounced", payload: { queueId, dsn, provider, line: detail } });
-    await db.insert(suppressions).values({ email: message.recipientEmail, normalizedEmail: normalizeEmail(message.recipientEmail), reason: "hard_bounce", source: "postfix_event" }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "hard_bounce", source: "postfix_event" } });
-    await webhook("message.bounced", base);
+    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_bounced", payload: { queueId, dsn, provider, line: detail, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient, providerCooldown: Boolean(cooldown) } });
+
+    if (classification.suppressRecipient) {
+      await db.insert(suppressions).values({ email: message.recipientEmail, normalizedEmail: normalizeEmail(message.recipientEmail), reason: "hard_bounce", source: "postfix_event", note: detail }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "hard_bounce", source: "postfix_event", note: detail } });
+    }
+
+    await webhook("message.bounced", { ...base, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient, providerCooldown: Boolean(cooldown) });
     return true;
   }
 
