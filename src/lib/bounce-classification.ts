@@ -11,9 +11,12 @@ export function classifyBounce(status?: string | null, diagnostic?: string | nul
   const dsn = String(status || "").trim();
   const text = String(diagnostic || "").toLowerCase();
 
+  // Suppression must be conservative. Generic phrases such as "recipient address
+  // rejected" are also used for policy/authentication blocks and are not proof
+  // that the mailbox does not exist.
   const recipientNotFound =
     dsn === "5.1.1" ||
-    /user unknown|unknown user|no such user|no such mailbox|mailbox (?:does not exist|not found)|recipient address rejected|invalid recipient|address rejected|recipient not found|account does not exist/i.test(text);
+    /user unknown|unknown user|no such user|no such mailbox|mailbox (?:does not exist|not found)|recipient (?:does not exist|not found)|unknown recipient|account (?:does not exist|not found)|invalid mailbox/i.test(text);
 
   if (recipientNotFound) {
     return { kind: "recipient", suppressRecipient: true, providerPressure: false, reason: "recipient_not_found" };
@@ -21,7 +24,7 @@ export function classifyBounce(status?: string | null, diagnostic?: string | nul
 
   const policyReject =
     dsn.startsWith("5.7.") ||
-    /spam|policy|reputation|blocked|blacklist|high probability|unsolicited|authentication required|spf|dkim|dmarc/i.test(text);
+    /spam|policy|reputation|blocked|blacklist|high probability|unsolicited|authentication required|spf|dkim|dmarc|access denied|not authorized|relay access denied/i.test(text);
 
   if (policyReject) {
     return { kind: "policy", suppressRecipient: false, providerPressure: false, reason: "message_policy_or_reputation_reject" };
