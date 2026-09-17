@@ -5,15 +5,15 @@ export const ENGAGEMENT_RULES = ["opened", "clicked", "not_opened", "not_clicked
 export type EngagementRule = typeof ENGAGEMENT_RULES[number];
 
 function eventPredicate(type: "open" | "click", windowDays: number | null, negate = false) {
-  const window = windowDays ? ` and e.created_at >= now() - ($3::int * interval '1 day')` : "";
+  const window = windowDays ? ` and e.created_at >= now() - ($2::int * interval '1 day')` : "";
   const exists = `exists (select 1 from message_events e where e.message_id=m.id and e.type='${type}' and coalesce((e.payload->>'automated')::boolean,false)=false${window})`;
   return negate ? `not ${exists}` : exists;
 }
 
 export async function resolveEngagementAudience(campaignId: string, rule: EngagementRule, windowDays: number | null): Promise<AudienceRecipient[]> {
-  const params: unknown[] = [campaignId, rule];
+  const params: unknown[] = [campaignId];
   if (windowDays) params.push(windowDays);
-  const messageWindow = windowDays ? ` and m.queued_at >= now() - ($3::int * interval '1 day')` : "";
+  const messageWindow = windowDays ? ` and m.queued_at >= now() - ($2::int * interval '1 day')` : "";
   let condition = "true";
   if (rule === "opened") condition = eventPredicate("open", windowDays);
   else if (rule === "clicked") condition = eventPredicate("click", windowDays);
