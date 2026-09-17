@@ -5,6 +5,7 @@ import { campaigns, contacts, messageEvents, messages, sendingAccounts, template
 import { sendingAccountWarmups, workerHeartbeats } from "../../src/db/operations-schema";
 import { signPublicToken } from "../../src/lib/public-tokens";
 import { loadCampaignAttachments, type CampaignAttachment } from "../../src/lib/campaign-attachments";
+import { loadTemplateAttachments } from "../../src/lib/template-attachments";
 import { buildMimeContent } from "../../src/lib/mime-email";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
@@ -93,7 +94,8 @@ async function recoverStaleClaims() { const result=await pool.query<{id:string}>
 async function runOnce() {
   if (!appUrl) throw new Error("APP_URL is required");
   const claimed = await claimMessages(); let accepted = 0, deferred = 0, failed = 0, throttled = 0;
-  const attachmentCache = new Map<string, CampaignAttachment[]>();
+  const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
+  const templateAttachmentCache = new Map<string, CampaignAttachment[]>();
   for (const claim of claimed) {
     const [message] = await db.select().from(messages).where(eq(messages.id, claim.id)).limit(1); if (!message) continue;
     await event(message.id,"transport_attempt",{attempt:claim.attempt_count,mtaHost,mtaPort});
@@ -102,8 +104,12 @@ async function runOnce() {
     const [account] = await db.select().from(sendingAccounts).where(eq(sendingAccounts.id, campaign.sendingAccountId)).limit(1); const [template] = await db.select().from(templates).where(eq(templates.id, campaign.templateId)).limit(1);
     if (!account || account.status !== "active" || !template) { await pool.query(`update messages set status='failed',last_error='sending_account_or_template_unavailable',next_attempt_at=null where id=$1 and status='sending'`, [message.id]); await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"sending_account_or_template_unavailable"}); failed++; continue; }
     const limit = await accountWithinLimits(account); if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
-    let attachments = attachmentCache.get(campaign.id);
-    if (!attachments) { attachments = await loadCampaignAttachments(campaign.id); attachmentCache.set(campaign.id, attachments); }
+
+    let campaignAttachments = campaignAttachmentCache.get(campaign.id);
+    if (!campaignAttachments) { campaignAttachments = await loadCampaignAttachments(campaign.id); campaignAttachmentCache.set(campaign.id, campaignAttachments); }
+    let templateAttachments = templateAttachmentCache.get(template.id);
+    if (!templateAttachments) { templateAttachments = await loadTemplateAttachments(template.id); templateAttachmentCache.set(template.id, templateAttachments); }
+    const attachments = [...templateAttachments, ...campaignAttachments];
 
     const unsubscribeToken = await signPublicToken({ email: contact.email, messageId: message.id }, "90d"); const unsubscribeUrl = `${appUrl}/unsubscribe/${unsubscribeToken}`;
     let html = personalize(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl); let text = personalize(template.textBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl); ({ html, text } = ensureUnsubscribe(html, text, unsubscribeUrl));
