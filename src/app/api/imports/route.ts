@@ -5,9 +5,10 @@ import { importJobs } from "@/db/schema";
 import { importUploads, type ImportMapping, type ImportOptions } from "@/db/import-schema";
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { detectMapping, parseCsv } from "@/lib/csv-import";
+import { detectMapping, iterateCsvRows } from "@/lib/csv-import";
 
-const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+const MAX_IMPORT_BYTES = 300 * 1024 * 1024;
+const MAX_IMPORT_ROWS = 1_000_000;
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
@@ -17,7 +18,7 @@ export async function POST(request: NextRequest) {
   const form = await request.formData();
   const file = form.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "Choose a CSV file." }, { status: 400 });
-  if (file.size <= 0 || file.size > MAX_IMPORT_BYTES) return NextResponse.json({ error: "CSV must be between 1 byte and 50 MB." }, { status: 413 });
+  if (file.size <= 0 || file.size > MAX_IMPORT_BYTES) return NextResponse.json({ error: "CSV must be between 1 byte and 300 MB." }, { status: 413 });
 
   const consentSource = String(form.get("consentSource") || "").trim();
   if (!consentSource) return NextResponse.json({ error: "Consent source is required." }, { status: 400 });
@@ -30,9 +31,15 @@ export async function POST(request: NextRequest) {
   const queueValidation = String(form.get("queueValidation") || "true") !== "false";
 
   const content = await file.text();
-  const matrix = parseCsv(content);
-  if (matrix.length < 2) return NextResponse.json({ error: "CSV must include a header and at least one data row." }, { status: 400 });
-  const headers = matrix[0].map((h) => h.trim());
+  let headers: string[] | null = null;
+  let totalRows = 0;
+  for (const row of iterateCsvRows(content)) {
+    if (!headers) { headers = row.map((h) => h.trim()); continue; }
+    totalRows++;
+    if (totalRows > MAX_IMPORT_ROWS) return NextResponse.json({ error: "A single import can contain up to 1,000,000 data rows." }, { status: 413 });
+  }
+  if (!headers || !headers.length || totalRows < 1) return NextResponse.json({ error: "CSV must include a header and at least one data row." }, { status: 400 });
+
   const providedMapping = String(form.get("mapping") || "").trim();
   let mapping: ImportMapping;
   try { mapping = providedMapping ? JSON.parse(providedMapping) as ImportMapping : detectMapping(headers); }
@@ -41,10 +48,10 @@ export async function POST(request: NextRequest) {
 
   const options: ImportOptions = { consentSource, consentStatus, defaultSource, defaultCategory, defaultTags, listId, queueValidation };
   const createdBy = /^[0-9a-f-]{36}$/i.test(session.userId) ? session.userId : null;
-  const [job] = await db.insert(importJobs).values({ filename: file.name.slice(0, 200), status: "pending", totalRows: matrix.length - 1, createdBy }).returning({ id: importJobs.id });
+  const [job] = await db.insert(importJobs).values({ filename: file.name.slice(0, 200), status: "pending", totalRows, createdBy }).returning({ id: importJobs.id });
   await db.insert(importUploads).values({ jobId: job.id, content, headers, mapping, options, sizeBytes: file.size });
   await db.execute(sql`update import_jobs set source_label=${consentSource}, list_id=${listId} where id=${job.id}`);
 
-  await audit("contact_import.queued", session, "import_job", job.id, { filename: file.name, total: matrix.length - 1, consentSource, listId, queueValidation, mapping });
-  return NextResponse.json({ ok: true, queued: true, jobId: job.id, total: matrix.length - 1 }, { status: 202 });
+  await audit("contact_import.queued", session, "import_job", job.id, { filename: file.name, total: totalRows, consentSource, listId, queueValidation, mapping });
+  return NextResponse.json({ ok: true, queued: true, jobId: job.id, total: totalRows }, { status: 202 });
 }
