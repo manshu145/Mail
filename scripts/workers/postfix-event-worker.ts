@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { campaigns, messageEvents, messages, suppressions } from "../../src/db/schema";
 import { providerCooldowns, workerHeartbeats } from "../../src/db/operations-schema";
+import { providerCooldownEvents } from "../../src/db/provider-cooldown-event-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import { emitWebhookEvent } from "../../src/lib/webhooks";
 import { isProviderPressureResponse, providerForDelivery } from "../../src/lib/provider";
@@ -28,17 +29,26 @@ async function activateProviderCooldown(params: { campaignId: string; recipientE
   if (!sendingAccountId) return null;
   const provider = providerForDelivery(params.recipientEmail, params.response);
   const nextProbeAt = new Date(Date.now() + providerCooldownMinutes * 60_000);
-  await db.insert(providerCooldowns).values({ sendingAccountId, provider, active: true, reason: params.dsn ? `SMTP ${params.dsn}` : "provider_pressure", lastResponse: params.response.slice(0, 1000), detectedAt: new Date(), nextProbeAt, updatedAt: new Date() })
-    .onConflictDoUpdate({ target: [providerCooldowns.sendingAccountId, providerCooldowns.provider], set: { active: true, reason: params.dsn ? `SMTP ${params.dsn}` : "provider_pressure", lastResponse: params.response.slice(0, 1000), detectedAt: new Date(), nextProbeAt, clearedAt: null, updatedAt: new Date() } });
-  return { provider, nextProbeAt, sendingAccountId };
+  const reason = params.dsn ? `SMTP ${params.dsn}` : "provider_pressure";
+  const response = params.response.slice(0, 1000);
+  const now = new Date();
+  const [cooldown] = await db.insert(providerCooldowns).values({ sendingAccountId, provider, active: true, reason, lastResponse: response, detectedAt: now, nextProbeAt, updatedAt: now })
+    .onConflictDoUpdate({ target: [providerCooldowns.sendingAccountId, providerCooldowns.provider], set: { active: true, reason, lastResponse: response, detectedAt: now, nextProbeAt, clearedAt: null, updatedAt: now } })
+    .returning({ id: providerCooldowns.id });
+  if (cooldown) await db.insert(providerCooldownEvents).values({ cooldownId: cooldown.id, sendingAccountId, provider, eventType: "detected", reason, response, metadata: { dsn: params.dsn, nextProbeAt: nextProbeAt.toISOString(), campaignId: params.campaignId } });
+  return { id: cooldown?.id || null, provider, nextProbeAt, sendingAccountId };
 }
 
 async function clearProviderCooldown(campaignId: string, recipientEmail: string, response: string) {
   const sendingAccountId = await sendingAccountForMessage(campaignId);
   if (!sendingAccountId) return;
   const provider = providerForDelivery(recipientEmail, response);
-  await db.update(providerCooldowns).set({ active: false, lastResponse: response.slice(0, 1000), clearedAt: new Date(), nextProbeAt: null, updatedAt: new Date() })
-    .where(and(eq(providerCooldowns.sendingAccountId, sendingAccountId), eq(providerCooldowns.provider, provider), eq(providerCooldowns.active, true)));
+  const [cooldown] = await db.select().from(providerCooldowns).where(and(eq(providerCooldowns.sendingAccountId, sendingAccountId), eq(providerCooldowns.provider, provider), eq(providerCooldowns.active, true))).limit(1);
+  if (!cooldown) return;
+  const now = new Date();
+  const clipped = response.slice(0, 1000);
+  await db.update(providerCooldowns).set({ active: false, lastResponse: clipped, clearedAt: now, nextProbeAt: null, updatedAt: now }).where(eq(providerCooldowns.id, cooldown.id));
+  await db.insert(providerCooldownEvents).values({ cooldownId: cooldown.id, sendingAccountId, provider, eventType: "cleared_delivery", reason: cooldown.reason, response: clipped, metadata: { campaignId } });
 }
 
 async function handle(line: string) {
