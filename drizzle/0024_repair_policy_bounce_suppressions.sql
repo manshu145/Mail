@@ -1,6 +1,6 @@
 DELETE FROM "suppressions" s
 WHERE s."reason" = 'hard_bounce'
-  AND s."source" IN ('postfix_event', 'verp_dsn')
+  AND s."source" IN ('postfix_event', 'verp_dsn', 'mta_event')
   AND EXISTS (
     SELECT 1
     FROM "messages" m
