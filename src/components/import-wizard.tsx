@@ -8,6 +8,7 @@ import { detectMapping, IMPORT_FIELDS, parseCsv } from "@/lib/csv-import";
 type ListOption = { id: string; name: string };
 type Mapping = Record<string, string>;
 const fieldClass = "w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-3 text-sm outline-none focus:border-violet-400 dark:border-zinc-800 dark:bg-zinc-900";
+const MAX_FILE_BYTES = 300 * 1024 * 1024;
 
 export function ImportWizard({ lists }: { lists: ListOption[] }) {
   const router = useRouter();
@@ -28,7 +29,7 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
   async function choose(next: File | null) {
     setFile(next); setMessage("");
     if (!next) { setHeaders([]); setPreview([]); setMapping({}); return; }
-    if (next.size > 50 * 1024 * 1024) { setMessage("CSV is larger than 50 MB."); return; }
+    if (next.size > MAX_FILE_BYTES) { setFile(null); setMessage("CSV is larger than 300 MB."); return; }
     const sample = await next.slice(0, Math.min(next.size, 256 * 1024)).text();
     const matrix = parseCsv(sample);
     const nextHeaders = (matrix[0] || []).map((v) => v.trim());
@@ -56,17 +57,17 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
       const response = await fetch("/api/imports", { method: "POST", body });
       const data = await response.json() as { error?: string; total?: number };
       if (!response.ok) throw new Error(data.error || "Import could not be queued.");
-      setMessage(`Queued ${(data.total || 0).toLocaleString()} rows. You can leave this page; the worker continues in background.`);
+      setMessage(`Queued ${(data.total || 0).toLocaleString()} rows. Processing continues in background with live progress, speed and ETA.`);
       setFile(null); setHeaders([]); setPreview([]); setMapping({}); router.refresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Import failed."); }
     finally { setBusy(false); }
   }
 
   return <section className="premium-panel mb-5 overflow-hidden">
-    <div className="border-b border-[var(--border)] px-5 py-4 sm:px-6"><p className="text-[10px] font-black uppercase tracking-[.16em] text-[var(--muted)]">Start an import</p><h2 className="mt-1 text-lg font-black">Upload CSV audience</h2><p className="mt-1 text-xs text-[var(--muted)]">The file is stored once, then the import worker processes it independently.</p></div>
+    <div className="border-b border-[var(--border)] px-5 py-4 sm:px-6"><p className="text-[10px] font-black uppercase tracking-[.16em] text-[var(--muted)]">Start an import</p><h2 className="mt-1 text-lg font-black">Upload CSV audience</h2><p className="mt-1 text-xs text-[var(--muted)]">Up to 1,000,000 data rows in one job. The file is stored once, then a background worker processes it independently.</p></div>
     <div className="grid gap-5 p-5 lg:grid-cols-[1.1fr_.9fr] sm:p-6">
       <div className="space-y-4">
-        <label className="grid min-h-36 cursor-pointer place-items-center rounded-2xl border border-dashed border-violet-300 bg-violet-500/[.04] p-6 text-center"><div><UploadCloud className="mx-auto h-8 w-8 text-violet-500"/><p className="mt-3 font-black">{file ? file.name : "Choose CSV"}</p><p className="mt-1 text-xs text-[var(--muted)]">Up to 50 MB · processing continues in background</p></div><input type="file" accept=".csv,text/csv" className="hidden" onChange={(e)=>void choose(e.target.files?.[0] || null)} /></label>
+        <label className="grid min-h-36 cursor-pointer place-items-center rounded-2xl border border-dashed border-violet-300 bg-violet-500/[.04] p-6 text-center"><div><UploadCloud className="mx-auto h-8 w-8 text-violet-500"/><p className="mt-3 font-black">{file ? file.name : "Choose CSV"}</p><p className="mt-1 text-xs text-[var(--muted)]">Up to 300 MB · up to 1,000,000 rows · safe background processing</p></div><input type="file" accept=".csv,text/csv" className="hidden" onChange={(e)=>void choose(e.target.files?.[0] || null)} /></label>
         {headers.length ? <div className="rounded-2xl border border-[var(--border)] p-4"><div className="mb-3 flex items-center justify-between"><h3 className="font-black">Column mapping</h3><span className="text-xs font-bold text-violet-500">{mappedCount} mapped</span></div><div className="grid gap-3 sm:grid-cols-2">{IMPORT_FIELDS.map((field)=><label key={field}><span className="mb-1 block text-xs font-bold capitalize">{field.replaceAll("_"," ")}{field === "email" ? " *" : ""}</span><select className={fieldClass} value={mapping[field] || ""} onChange={(e)=>setMapping((m)=>({...m,[field]:e.target.value}))}><option value="">Not mapped</option>{headers.map((h)=><option key={h} value={h}>{h}</option>)}</select></label>)}</div></div> : null}
       </div>
       <div className="space-y-3">
