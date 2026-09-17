@@ -59,6 +59,14 @@ async function handle(line: string) {
   if (!message) return false;
   const status = line.match(/status=(sent|deferred|bounced|expired)/i)?.[1]?.toLowerCase();
   if (!status) return false;
+
+  // Compose deliberately replays a bounded tail of the durable Postfix log after
+  // worker restarts so final provider outcomes are not lost. Terminal events must
+  // therefore be idempotent and must not emit duplicate webhooks/timeline rows.
+  if ((status === "sent" && message.status === "delivered") ||
+      (status === "bounced" && message.status === "bounced") ||
+      (status === "expired" && message.status === "failed")) return true;
+
   const dsn = line.match(/dsn=([0-9.]+)/i)?.[1] || null;
   const detail = line.slice(-1000);
   const provider = providerForDelivery(message.recipientEmail, detail);
