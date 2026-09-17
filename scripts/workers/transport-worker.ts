@@ -7,6 +7,7 @@ import { signPublicToken } from "../../src/lib/public-tokens";
 import { loadCampaignAttachments, type CampaignAttachment } from "../../src/lib/campaign-attachments";
 import { loadTemplateAttachments } from "../../src/lib/template-attachments";
 import { buildMimeContent } from "../../src/lib/mime-email";
+import { makeBounceAddress } from "../../src/lib/bounce-address";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -17,6 +18,7 @@ const delayMs = Math.ceil(1000 / perSecond);
 const intervalMs = Math.max(1000, Number(process.env.TRANSPORT_WORKER_INTERVAL_MS || "3000"));
 const maxAttempts = Math.max(1, Number(process.env.TRANSPORT_MAX_ATTEMPTS || "5"));
 const claimBatch = Math.min(200, Math.max(1, Number(process.env.TRANSPORT_BATCH_SIZE || "50")));
+const bounceEnabled = Boolean(process.env.BOUNCE_DOMAIN?.trim() && process.env.BOUNCE_SECRET?.trim());
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return value.replaceAll("{{first_name}}", contact.firstName || "").replaceAll("{{last_name}}", contact.lastName || "").replaceAll("{{email}}", contact.email); }
@@ -115,16 +117,17 @@ async function runOnce() {
     let html = personalize(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl); let text = personalize(template.textBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl); ({ html, text } = ensureUnsubscribe(html, text, unsubscribeUrl));
     if (campaign.trackClicks) html = await rewriteLinks(html, message.id); if (campaign.trackOpens) { const token = await signPublicToken({ messageId: message.id }, "30d"); html += `<img src="${appUrl}/tracking/open/${token}" width="1" height="1" alt="" style="display:none!important" />`; }
     const subject = headerValue(personalize(campaign.subject || template.subject || "", contact)); const fromName = headerValue(campaign.fromName || account.fromName); const fromEmail = headerValue(campaign.fromEmail || account.fromEmail); const replyTo = headerValue(account.replyTo || account.fromEmail); const recipient = headerValue(contact.email);
+    const envelopeFrom = bounceEnabled ? makeBounceAddress(message.id) : fromEmail;
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
     const raw = [`From: ${fromName} <${fromEmail}>`,`To: ${recipient}`,`Reply-To: ${replyTo}`,`Subject: ${subject}`,`Date: ${new Date().toUTCString()}`,`Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`,`X-NexiMail-Message-ID: ${message.id}`,"MIME-Version: 1.0",`List-Unsubscribe: <${unsubscribeUrl}>`,"List-Unsubscribe-Post: List-Unsubscribe=One-Click",mime.contentTypeHeader,"",...mime.bodyLines].join("\r\n");
 
-    try { const result = await submitToMta(raw, fromEmail, recipient); if (!result.queueId) throw new Error("MTA accepted message without returning a queue id"); await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]); await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length}); accepted++; }
+    try { const result = await submitToMta(raw, envelopeFrom, recipient); if (!result.queueId) throw new Error("MTA accepted message without returning a queue id"); await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]); await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled}); accepted++; }
     catch (error) { const state = await markDeferred(message.id, claim.attempt_count, error); if (state === "deferred") deferred++; else failed++; }
     await sleep(delayMs);
   }
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, perSecond, maxAttempts, mtaHost, mtaPort });
+  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, perSecond, maxAttempts, mtaHost, mtaPort, bounceTracking: bounceEnabled });
 }
 
-async function main() { if (!appUrl) throw new Error("APP_URL is required"); await recoverStaleClaims(); while (true) { try { await runOnce(); } catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort }).catch(() => {}); } await sleep(intervalMs); } }
+async function main() { if (!appUrl) throw new Error("APP_URL is required"); await recoverStaleClaims(); while (true) { try { await runOnce(); } catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort, bounceTracking: bounceEnabled }).catch(() => {}); } await sleep(intervalMs); } }
 main().catch(console.error);
 process.on("SIGTERM", async () => { await pool.end(); process.exit(0); });
