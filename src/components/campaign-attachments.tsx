@@ -1,7 +1,7 @@
 "use client";
 
 import { Paperclip, Trash2, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type CampaignAttachmentView = {
   id: string;
@@ -17,11 +17,23 @@ function sizeLabel(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function CampaignAttachments({ campaignId, initial }: { campaignId: string; initial: CampaignAttachmentView[] }) {
-  const [items, setItems] = useState(initial);
+export function CampaignAttachments({ campaignId }: { campaignId: string }) {
+  const [items, setItems] = useState<CampaignAttachmentView[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/campaigns/${campaignId}/attachments`).then(async (response) => {
+      const data = await response.json().catch(() => ({})) as { attachments?: CampaignAttachmentView[]; error?: string };
+      if (!live) return;
+      if (!response.ok) setError(data.error || "Could not load attachments."); else setItems(data.attachments || []);
+      setLoading(false);
+    }).catch(() => { if (live) { setError("Could not load attachments."); setLoading(false); } });
+    return () => { live = false; };
+  }, [campaignId]);
 
   async function upload(file: File) {
     setBusy(true); setError("");
@@ -44,12 +56,12 @@ export function CampaignAttachments({ campaignId, initial }: { campaignId: strin
   }
 
   const total = items.reduce((sum, item) => sum + item.sizeBytes, 0);
-  return <div className="mb-5 rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4">
+  return <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><div className="flex items-center gap-2"><Paperclip className="h-4 w-4"/><p className="text-sm font-extrabold">Attachments</p></div><p className="mt-1 text-xs text-[var(--muted)]">PDF, CSV, images, Word or Excel · up to 5 files · 8 MB each · 12 MB total.</p></div>
-      <label className={`btn-secondary cursor-pointer ${busy || items.length >= 5 ? "pointer-events-none opacity-50" : ""}`}><Upload className="mr-2 inline h-4 w-4"/>{busy ? "Uploading…" : "Add attachment"}<input ref={inputRef} className="hidden" type="file" accept=".pdf,.txt,.csv,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx" disabled={busy || items.length >= 5} onChange={(event)=>{const file=event.target.files?.[0];if(file)void upload(file)}}/></label>
+      <div><div className="flex items-center gap-2"><Paperclip className="h-4 w-4"/><p className="text-sm font-extrabold">Attachments</p></div><p className="mt-1 text-xs text-[var(--muted)]">PDF, CSV, images, Word or Excel · up to 5 files · 8 MB each · 12 MB total. Test sends include the same files.</p></div>
+      <label className={`btn-secondary cursor-pointer ${busy || loading || items.length >= 5 ? "pointer-events-none opacity-50" : ""}`}><Upload className="mr-2 inline h-4 w-4"/>{busy ? "Uploading…" : "Add attachment"}<input ref={inputRef} className="hidden" type="file" accept=".pdf,.txt,.csv,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx" disabled={busy || loading || items.length >= 5} onChange={(event)=>{const file=event.target.files?.[0];if(file)void upload(file)}}/></label>
     </div>
-    {items.length ? <div className="mt-4 space-y-2">{items.map((item)=><div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{item.filename}</p><p className="mt-0.5 text-xs text-[var(--muted)]">{sizeLabel(item.sizeBytes)} · {item.contentType}</p></div><button type="button" disabled={busy} onClick={()=>void remove(item.id)} className="rounded-lg p-2 text-rose-500 hover:bg-rose-500/10" aria-label={`Remove ${item.filename}`}><Trash2 className="h-4 w-4"/></button></div>)}</div> : <div className="mt-4 rounded-xl border border-dashed border-[var(--border-strong)] px-4 py-5 text-center text-sm text-[var(--muted)]">No attachments. Add an invoice, statement, brochure or other campaign file here.</div>}
+    {loading ? <div className="mt-4 text-sm text-[var(--muted)]">Loading attachments…</div> : items.length ? <div className="mt-4 space-y-2">{items.map((item)=><div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{item.filename}</p><p className="mt-0.5 text-xs text-[var(--muted)]">{sizeLabel(item.sizeBytes)} · {item.contentType}</p></div><button type="button" disabled={busy} onClick={()=>void remove(item.id)} className="rounded-lg p-2 text-rose-500 hover:bg-rose-500/10" aria-label={`Remove ${item.filename}`}><Trash2 className="h-4 w-4"/></button></div>)}</div> : <div className="mt-4 rounded-xl border border-dashed border-[var(--border-strong)] px-4 py-5 text-center text-sm text-[var(--muted)]">No attachments. Add an invoice, statement, brochure or other campaign file here.</div>}
     <div className="mt-3 text-right text-xs font-semibold text-[var(--muted)]">{items.length}/5 files · {sizeLabel(total)} total</div>
     {error ? <p className="mt-3 rounded-xl border border-rose-500/15 bg-rose-500/[0.06] px-3.5 py-3 text-sm font-semibold text-rose-600">{error}</p> : null}
   </div>;
