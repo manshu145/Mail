@@ -22,7 +22,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
   const [listRows, templateRows, accountRows, stateRows] = await Promise.all([
     db.select({ id: lists.id, name: lists.name }).from(lists),
     db.select({ id: templates.id, name: templates.name }).from(templates),
-    db.select({ id: sendingAccounts.id, name: sendingAccounts.name }).from(sendingAccounts).where(eq(sendingAccounts.status, "active")),
+    db.select({ id: sendingAccounts.id, name: sendingAccounts.name, fromName: sendingAccounts.fromName, fromEmail: sendingAccounts.fromEmail, replyTo: sendingAccounts.replyTo }).from(sendingAccounts).where(eq(sendingAccounts.status, "active")),
     db.select({ status: messages.status, value: sql<number>`count(*)::int` }).from(messages).where(eq(messages.campaignId, id)).groupBy(messages.status),
   ]);
 
