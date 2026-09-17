@@ -13,15 +13,11 @@ import { combinedAttachmentLimitError, loadCampaignAttachments } from "@/lib/cam
 import { loadTemplateAttachments } from "@/lib/template-attachments";
 import { buildMimeContent } from "@/lib/mime-email";
 import { injectPreheader } from "@/lib/email-preheader";
+import { samplePersonalization } from "@/lib/personalization";
 
 function clean(value: unknown) { return String(value ?? "").replace(/[\r\n]+/g, " ").trim(); }
 function sample(value: string, recipient: string) {
-  const first = recipient.split("@")[0]?.split(/[._-]/)[0] || "Test";
-  return value
-    .replaceAll("{{first_name}}", first.charAt(0).toUpperCase() + first.slice(1))
-    .replaceAll("{{last_name}}", "Recipient")
-    .replaceAll("{{email}}", recipient)
-    .replaceAll("{{unsubscribe_url}}", "#test-unsubscribe");
+  return samplePersonalization(value, recipient).replaceAll("{{unsubscribe_url}}", "#test-unsubscribe");
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -55,7 +51,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const [domain] = await db.select().from(sendingDomains).where(eq(sendingDomains.domain, sendingDomain)).limit(1);
   if (!domain || domain.status !== "ready") return NextResponse.json({ error: `Sending domain ${sendingDomain} is not ready.` }, { status: 409 });
 
-  const subject = `[TEST] ${clean(body.subject) || campaign.subject || template.subject || "NexiMail test"}`;
+  const subject = `[TEST] ${sample(clean(body.subject) || campaign.subject || template.subject || "NexiMail test", recipient)}`;
   const preheader = sample(clean(body.preheader) || campaign.preheader || "", recipient);
   const bodyHtml = sample(template.htmlBody, recipient) + `<div style="margin:24px auto 0;max-width:640px;padding:12px 16px;border-radius:10px;background:#f3f4f6;font-family:Arial,sans-serif;font-size:12px;color:#6b7280;text-align:center">Test send from NexiMail — no campaign recipient was queued.</div>`;
   const html = injectPreheader(bodyHtml, preheader);
