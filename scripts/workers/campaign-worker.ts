@@ -22,14 +22,16 @@ async function blockCampaign(campaignId: string, reason: string, metadata: Recor
 }
 
 async function recoverAbandonedClaims() {
-  await pool.query(`
+  const result = await pool.query<{ id: string }>(`
     update campaigns
     set status='paused', last_error='campaign_worker_interrupted_before_audience_snapshot', updated_at=now()
     where status='sending'
       and coalesce(message_count,0)=0
       and started_at is not null
       and started_at < now() - interval '10 minutes'
+    returning id::text
   `);
+  return result.rowCount || 0;
 }
 
 async function claimDueCampaigns() {
@@ -53,10 +55,14 @@ async function claimDueCampaigns() {
 }
 
 async function runOnce() {
+  // Recovery is intentionally checked every cycle, not only at process startup.
+  // A transient exception must never leave a claimed campaign stuck in "sending"
+  // forever while the worker process itself remains alive.
+  const recovered = await recoverAbandonedClaims();
   const policy = getRuntimePolicy();
   const delivery = await readDeliverySettings();
   if (!policy.sendingEnabled) {
-    await heartbeat({ state: "online", sendingEnabled: false, mode: policy.mode, maxRecipientsPerCampaign: delivery.maxRecipientsPerCampaign });
+    await heartbeat({ state: "online", sendingEnabled: false, mode: policy.mode, maxRecipientsPerCampaign: delivery.maxRecipientsPerCampaign, recovered });
     return;
   }
 
@@ -68,27 +74,16 @@ async function runOnce() {
   let blocked = 0;
 
   for (const campaignId of claimedIds) {
-    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
-    if (!campaign) continue;
-    if (!campaign.listId) { await blockCampaign(campaign.id, "campaign.worker_missing_list", {}); blocked++; continue; }
-    const [list] = await db.select().from(lists).where(eq(lists.id, campaign.listId)).limit(1);
-    if (!list) { await blockCampaign(campaign.id, "campaign.worker_list_not_found", { listId: campaign.listId }); blocked++; continue; }
+    try {
+      const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+      if (!campaign) continue;
+      if (!campaign.listId) { await blockCampaign(campaign.id, "campaign.worker_missing_list", {}); blocked++; continue; }
+      const [list] = await db.select().from(lists).where(eq(lists.id, campaign.listId)).limit(1);
+      if (!list) { await blockCampaign(campaign.id, "campaign.worker_list_not_found", { listId: campaign.listId }); blocked++; continue; }
 
-    const preflight = await preflightAudience(list);
-    await db.insert(campaignPreflights).values({
-      campaignId: campaign.id,
-      listId: list.id,
-      rawCount: preflight.rawCount,
-      eligibleCount: preflight.eligibleCount,
-      suppressedCount: preflight.suppressedCount,
-      invalidCount: preflight.invalidCount,
-      validCount: preflight.validCount,
-      pendingCount: preflight.pendingCount,
-      unknownCount: preflight.unknownCount,
-      checkedAt: new Date(),
-    }).onConflictDoUpdate({
-      target: campaignPreflights.campaignId,
-      set: {
+      const preflight = await preflightAudience(list);
+      await db.insert(campaignPreflights).values({
+        campaignId: campaign.id,
         listId: list.id,
         rawCount: preflight.rawCount,
         eligibleCount: preflight.eligibleCount,
@@ -98,33 +93,9 @@ async function runOnce() {
         pendingCount: preflight.pendingCount,
         unknownCount: preflight.unknownCount,
         checkedAt: new Date(),
-      },
-    });
-
-    if (preflight.eligibleCount > campaignLimit) {
-      await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { eligibleRecipients: preflight.eligibleCount, limit: campaignLimit, runtimeLimit, deliveryLimit: delivery.maxRecipientsPerCampaign });
-      blocked++;
-      continue;
-    }
-    if (!preflight.eligibleCount) {
-      await blockCampaign(campaign.id, "campaign.worker_no_eligible_recipients", {
-        rawCount: preflight.rawCount,
-        suppressedCount: preflight.suppressedCount,
-        invalidCount: preflight.invalidCount,
-      });
-      blocked++;
-      continue;
-    }
-
-    await db.transaction(async (tx) => {
-      await tx.insert(messages).values(preflight.eligibleRecipients.map((recipient) => ({ campaignId: campaign.id, contactId: recipient.contactId, recipientEmail: recipient.email, status: "queued" as const }))).onConflictDoNothing({ target: [messages.campaignId, messages.contactId] });
-      const [counts] = await tx.select({ count: sql<number>`count(*)::int` }).from(messages).where(eq(messages.campaignId, campaign.id));
-      await tx.update(campaigns).set({ audienceCount: preflight.eligibleCount, messageCount: Number(counts?.count || 0), lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
-      await tx.insert(auditLogs).values({
-        action: "campaign.audience_snapshotted",
-        entityType: "campaign",
-        entityId: campaign.id,
-        metadataJson: JSON.stringify({
+      }).onConflictDoUpdate({
+        target: campaignPreflights.campaignId,
+        set: {
           listId: list.id,
           rawCount: preflight.rawCount,
           eligibleCount: preflight.eligibleCount,
@@ -133,16 +104,59 @@ async function runOnce() {
           validCount: preflight.validCount,
           pendingCount: preflight.pendingCount,
           unknownCount: preflight.unknownCount,
-          messageCount: Number(counts?.count || 0),
-          campaignLimit,
-        }),
+          checkedAt: new Date(),
+        },
       });
-    });
-    resolved += preflight.eligibleCount;
-    excluded += preflight.suppressedCount + preflight.invalidCount;
+
+      if (preflight.eligibleCount > campaignLimit) {
+        await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { eligibleRecipients: preflight.eligibleCount, limit: campaignLimit, runtimeLimit, deliveryLimit: delivery.maxRecipientsPerCampaign });
+        blocked++;
+        continue;
+      }
+      if (!preflight.eligibleCount) {
+        await blockCampaign(campaign.id, "campaign.worker_no_eligible_recipients", {
+          rawCount: preflight.rawCount,
+          suppressedCount: preflight.suppressedCount,
+          invalidCount: preflight.invalidCount,
+        });
+        blocked++;
+        continue;
+      }
+
+      await db.transaction(async (tx) => {
+        await tx.insert(messages).values(preflight.eligibleRecipients.map((recipient) => ({ campaignId: campaign.id, contactId: recipient.contactId, recipientEmail: recipient.email, status: "queued" as const }))).onConflictDoNothing({ target: [messages.campaignId, messages.contactId] });
+        const [counts] = await tx.select({ count: sql<number>`count(*)::int` }).from(messages).where(eq(messages.campaignId, campaign.id));
+        await tx.update(campaigns).set({ audienceCount: preflight.eligibleCount, messageCount: Number(counts?.count || 0), lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
+        await tx.insert(auditLogs).values({
+          action: "campaign.audience_snapshotted",
+          entityType: "campaign",
+          entityId: campaign.id,
+          metadataJson: JSON.stringify({
+            listId: list.id,
+            rawCount: preflight.rawCount,
+            eligibleCount: preflight.eligibleCount,
+            suppressedCount: preflight.suppressedCount,
+            invalidCount: preflight.invalidCount,
+            validCount: preflight.validCount,
+            pendingCount: preflight.pendingCount,
+            unknownCount: preflight.unknownCount,
+            messageCount: Number(counts?.count || 0),
+            campaignLimit,
+          }),
+        });
+      });
+      resolved += preflight.eligibleCount;
+      excluded += preflight.suppressedCount + preflight.invalidCount;
+    } catch (error) {
+      console.error(`[campaign-worker] failed campaign ${campaignId}`, error);
+      await blockCampaign(campaignId, "campaign.worker_snapshot_failed", {
+        error: error instanceof Error ? error.message.slice(0, 500) : "unknown_error",
+      }).catch((blockError) => console.error(`[campaign-worker] could not pause failed campaign ${campaignId}`, blockError));
+      blocked++;
+    }
   }
 
-  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked, maxRecipientsPerCampaign: campaignLimit, source: "database_control_plane" });
+  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked, recovered, maxRecipientsPerCampaign: campaignLimit, source: "database_control_plane" });
 }
 
 async function main() {
