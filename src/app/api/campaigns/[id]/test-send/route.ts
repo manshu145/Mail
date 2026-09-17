@@ -9,6 +9,8 @@ import { getSession } from "@/lib/auth";
 import { isValidEmail } from "@/lib/contact-utils";
 import { submitToMta } from "@/lib/mta-submit";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
+import { loadCampaignAttachments } from "@/lib/campaign-attachments";
+import { buildMimeContent } from "@/lib/mime-email";
 
 function clean(value: unknown) { return String(value ?? "").replace(/[\r\n]+/g, " ").trim(); }
 function sample(value: string, recipient: string) {
@@ -56,19 +58,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const text = `${sample(template.textBody, recipient)}${template.textBody ? "\n\n" : ""}Test send from NexiMail — no campaign recipient was queued.`;
   const replyTo = clean(account.replyTo || account.fromEmail);
   const messageId = randomUUID();
-  const boundary = `neximail_test_${messageId.replaceAll("-", "")}`;
+  const attachments = await loadCampaignAttachments(id);
+  const mime = buildMimeContent({ text, html, boundarySeed: `test_${messageId.replaceAll("-", "")}`, attachments });
   const raw = [
     `From: ${clean(fromName)} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
-    `Message-ID: <test-${messageId}@${sendingDomain}>`, `X-NexiMail-Test: true`, "MIME-Version: 1.0", `Content-Type: multipart/alternative; boundary="${boundary}"`, "",
-    `--${boundary}`, "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit", "", text || "NexiMail test message", "",
-    `--${boundary}`, "Content-Type: text/html; charset=UTF-8", "Content-Transfer-Encoding: 8bit", "", html || "<p>NexiMail test message</p>", "", `--${boundary}--`, "",
+    `Message-ID: <test-${messageId}@${sendingDomain}>`, `X-NexiMail-Test: true`, "MIME-Version: 1.0", mime.contentTypeHeader, "", ...mime.bodyLines,
   ].join("\r\n");
 
   try {
     const result = await submitToMta(raw, fromEmail, recipient);
     if (!result.queueId) return NextResponse.json({ error: "MTA accepted the message without returning a queue id." }, { status: 502 });
-    await audit("campaign.test_sent", session, "campaign", id, { recipient, queueId: result.queueId, sendingAccountId: account.id, templateId: template.id });
-    return NextResponse.json({ ok: true, queueId: result.queueId });
+    await audit("campaign.test_sent", session, "campaign", id, { recipient, queueId: result.queueId, sendingAccountId: account.id, templateId: template.id, attachments: attachments.length });
+    return NextResponse.json({ ok: true, queueId: result.queueId, attachments: attachments.length });
   } catch (error) {
     console.error("[campaign.test-send]", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Test send failed." }, { status: 502 });
