@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { CampaignAttachments } from "@/components/campaign-attachments";
 
 type Option = { id: string; name: string };
 type AccountOption = Option & { fromName: string; fromEmail: string; replyTo: string | null };
@@ -71,10 +72,10 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     const fd = new FormData(form);
     const body = { ...payload(fd, "save"), recipient: testRecipient.trim(), action: undefined };
     const response = await fetch(`/api/campaigns/${campaign.id}/test-send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const data = await response.json().catch(() => ({})) as { error?: string; queueId?: string };
+    const data = await response.json().catch(() => ({})) as { error?: string; queueId?: string; attachments?: number };
     setBusy(false);
     if (!response.ok) { setError(data.error || "Test send failed."); return; }
-    setNotice(`Test email accepted by MTA${data.queueId ? ` · Queue ${data.queueId}` : ""}.`);
+    setNotice(`Test email accepted by MTA${data.queueId ? ` · Queue ${data.queueId}` : ""}${data.attachments ? ` · ${data.attachments} attachment${data.attachments === 1 ? "" : "s"}` : ""}.`);
     setShowTest(false);
   }
 
@@ -91,6 +92,8 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
       <label><span className="mb-1.5 block text-sm font-bold">Sending account</span><select name="sendingAccountId" value={accountId} onChange={(e)=>chooseAccount(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select account</option>{accounts.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
     </div>
 
+    <CampaignAttachments campaignId={campaign.id} />
+
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><p className="text-sm font-extrabold">Sender</p><p className="mt-0.5 text-xs text-[var(--muted)]">Uses the selected verified sending identity.</p></div>{selectedAccount ? <button type="button" className="btn-secondary" onClick={()=>{setFromName(selectedAccount.fromName);setFromEmail(selectedAccount.fromEmail)}}>Use identity defaults</button> : null}</div>
       <div className="grid gap-4 lg:grid-cols-3">
@@ -104,7 +107,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     <div className="flex flex-wrap gap-5 rounded-2xl bg-[var(--surface-soft)] p-4 text-sm font-bold"><label className="flex items-center gap-2"><input type="checkbox" name="trackOpens" defaultChecked={campaign.trackOpens} /> Track opens</label><label className="flex items-center gap-2"><input type="checkbox" name="trackClicks" defaultChecked={campaign.trackClicks} /> Track clicks</label></div>
     <p className="text-xs text-[var(--muted)]">NexiMail automatically adds a visible unsubscribe link and one-click unsubscribe headers at send time.</p>
 
-    {showTest ? <div className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.05] p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><label className="flex-1"><span className="mb-1.5 block text-sm font-bold">Test recipient</span><input type="email" value={testRecipient} onChange={(e)=>setTestRecipient(e.target.value)} placeholder="you@example.com" className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm outline-none" /></label><button type="button" disabled={busy || !runtimePolicy.sendingEnabled} onClick={(event)=>{const form=event.currentTarget.form;if(form)sendTest(form)}} className="btn-primary">{busy ? "Sending…" : "Send test"}</button><button type="button" onClick={()=>setShowTest(false)} className="btn-secondary">Cancel</button></div><p className="mt-2 text-[11px] text-[var(--muted)]">This sends one real message through the configured MTA but does not add the address to your audience or campaign queue.</p></div> : null}
+    {showTest ? <div className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.05] p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><label className="flex-1"><span className="mb-1.5 block text-sm font-bold">Test recipient</span><input type="email" value={testRecipient} onChange={(e)=>setTestRecipient(e.target.value)} placeholder="you@example.com" className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm outline-none" /></label><button type="button" disabled={busy || !runtimePolicy.sendingEnabled} onClick={(event)=>{const form=event.currentTarget.form;if(form)sendTest(form)}} className="btn-primary">{busy ? "Sending…" : "Send test"}</button><button type="button" onClick={()=>setShowTest(false)} className="btn-secondary">Cancel</button></div><p className="mt-2 text-[11px] text-[var(--muted)]">This sends one real message through the configured MTA, including campaign attachments, but does not add the address to your audience or campaign queue.</p></div> : null}
 
     {error ? <p className="rounded-xl border border-rose-500/15 bg-rose-500/[0.06] px-3.5 py-3 text-sm font-semibold text-rose-600">{error}</p> : null}
     {notice ? <p className="rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-3.5 py-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">{notice}</p> : null}
