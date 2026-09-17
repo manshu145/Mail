@@ -42,7 +42,7 @@ export async function preflightAudience(list: typeof lists.$inferSelect): Promis
       invalidCount++;
       continue;
     }
-    if (recipient.validationStatus === "valid") validCount++;
+    if (recipient.validationStatus === "valid" || recipient.validationStatus === "accepted") validCount++;
     else if (recipient.validationStatus === "pending") pendingCount++;
     else unknownCount++;
     eligibleRecipients.push(recipient);
