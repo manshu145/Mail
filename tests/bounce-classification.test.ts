@@ -9,15 +9,23 @@ test("5.1.1 recipient not found is suppressible", () => {
   assert.equal(result.providerPressure, false);
 });
 
-test("5.7.1 spam policy rejection does not suppress recipient", () => {
+test("5.7.1 spam policy rejection is message-level, not provider cooldown", () => {
   const result = classifyBounce("5.7.1", "554 5.7.1 Rejected due to high probability of spam");
   assert.equal(result.kind, "policy");
+  assert.equal(result.suppressRecipient, false);
+  assert.equal(result.providerPressure, false);
+});
+
+test("temporary provider restriction requests provider cooldown", () => {
+  const result = classifyBounce("4.7.0", "421 temporary rate limit, try again later");
+  assert.equal(result.kind, "temporary");
   assert.equal(result.suppressRecipient, false);
   assert.equal(result.providerPressure, true);
 });
 
-test("temporary provider failures do not suppress recipient", () => {
-  const result = classifyBounce("4.7.0", "421 temporary rate limit, try again");
+test("mailbox full is recipient-specific and does not pause provider", () => {
+  const result = classifyBounce("4.2.2", "452 4.2.2 mailbox full / over quota");
   assert.equal(result.kind, "temporary");
   assert.equal(result.suppressRecipient, false);
+  assert.equal(result.providerPressure, false);
 });
