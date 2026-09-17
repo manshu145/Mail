@@ -1,7 +1,28 @@
-DO $$ BEGIN
-  ALTER TYPE "validation_status" ADD VALUE IF NOT EXISTS 'accepted';
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type t
+    JOIN pg_enum e ON e.enumtypid = t.oid
+    WHERE t.typname = 'validation_status' AND e.enumlabel = 'accepted'
+  ) THEN
+    CREATE TYPE "validation_status_v2" AS ENUM ('pending', 'accepted', 'valid', 'invalid', 'unknown', 'error');
+
+    ALTER TABLE "contacts"
+      ALTER COLUMN "validation_status" DROP DEFAULT,
+      ALTER COLUMN "validation_status" TYPE "validation_status_v2"
+        USING "validation_status"::text::"validation_status_v2";
+
+    ALTER TABLE "validation_results"
+      ALTER COLUMN "status" TYPE "validation_status_v2"
+        USING "status"::text::"validation_status_v2";
+
+    DROP TYPE "validation_status";
+    ALTER TYPE "validation_status_v2" RENAME TO "validation_status";
+
+    ALTER TABLE "contacts"
+      ALTER COLUMN "validation_status" SET DEFAULT 'pending'::"validation_status";
+  END IF;
 END $$;
 
 ALTER TABLE "contacts"
