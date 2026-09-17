@@ -11,6 +11,7 @@ import { makeBounceAddress } from "../../src/lib/bounce-address";
 import { injectPreheader } from "../../src/lib/email-preheader";
 import { providerForEmail } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
+import { personalizeContactText } from "../../src/lib/personalization";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -22,7 +23,7 @@ const bounceEnabled = Boolean(process.env.BOUNCE_DOMAIN?.trim() && process.env.B
 const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN_MINUTES || "15"));
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
-function personalize(value: string, contact: typeof contacts.$inferSelect) { return value.replaceAll("{{first_name}}", contact.firstName || "").replaceAll("{{last_name}}", contact.lastName || "").replaceAll("{{email}}", contact.email); }
+function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
 function headerValue(value: string) { return value.replace(/[\r\n]+/g, " ").trim(); }
 function retryDelaySeconds(attempt: number, settings: DeliverySettings) { return Math.min(settings.retryMaxSeconds, Math.max(settings.retryInitialSeconds, Math.round(settings.retryInitialSeconds * settings.retryBackoffMultiplier ** Math.max(0, attempt - 1)))); }
 function dotStuff(raw: string) { return raw.replace(/\r?\n/g, "\r\n").split("\r\n").map((line) => line.startsWith(".") ? `.${line}` : line).join("\r\n"); }
