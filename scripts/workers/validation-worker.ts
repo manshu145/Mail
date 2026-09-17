@@ -11,6 +11,13 @@ const intervalMs = Math.max(15000, Number(process.env.VALIDATION_INTERVAL_MS || 
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_SMTP_TIMEOUT_MS || "8000"));
 const helo = process.env.VALIDATION_HELO || "validator.local";
 
+type ExistingResult = {
+  contact_id: string;
+  email: string;
+  status: "pending" | "accepted" | "valid" | "invalid" | "unknown" | "error";
+  detail: string | null;
+};
+
 async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "validation", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
 }
@@ -67,16 +74,51 @@ async function contactsForJob(scope: string) {
   return db.select().from(contacts).where(and(eq(contacts.status, "active"), sql`lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'`));
 }
 
+async function existingResults(jobId: string) {
+  const result = await pool.query<ExistingResult>(`
+    select distinct on (contact_id)
+      contact_id, email, status::text as status, detail
+    from validation_results
+    where job_id=$1 and contact_id is not null
+    order by contact_id, created_at desc
+  `, [jobId]);
+  return result.rows;
+}
+
+async function reconcileExistingResults(rows: ExistingResult[]) {
+  for (const row of rows) {
+    await db.update(contacts).set({ validationStatus: row.status, updatedAt: new Date() }).where(eq(contacts.id, row.contact_id));
+    if (row.status === "invalid") {
+      await db.insert(suppressions).values({
+        email: row.email,
+        normalizedEmail: normalizeEmail(row.email),
+        contactId: row.contact_id,
+        reason: "invalid",
+        source: "gmail_validation",
+        note: row.detail,
+      }).onConflictDoUpdate({
+        target: suppressions.normalizedEmail,
+        set: { contactId: row.contact_id, reason: "invalid", source: "gmail_validation", note: row.detail },
+      });
+    }
+  }
+}
+
 async function syncImportValidationCounters(scope: string, validationJobId: string) {
   if (!scope.startsWith("import:")) return;
   const importId = scope.slice("import:".length);
   const result = await pool.query<{ valid: number; risky: number; invalid: number }>(`
+    with latest as (
+      select distinct on (contact_id) contact_id, status
+      from validation_results
+      where job_id=$1 and contact_id is not null
+      order by contact_id, created_at desc
+    )
     select
       count(*) filter(where status in ('accepted','valid'))::int as valid,
       count(*) filter(where status in ('unknown','error'))::int as risky,
       count(*) filter(where status='invalid')::int as invalid
-    from validation_results
-    where job_id=$1
+    from latest
   `, [validationJobId]);
   const row = result.rows[0] || { valid: 0, risky: 0, invalid: 0 };
   await pool.query(`update import_jobs set valid_rows=$2, risky_rows=$3, validation_invalid_rows=$4 where id=$1`, [importId, Number(row.valid || 0), Number(row.risky || 0), Number(row.invalid || 0)]);
@@ -97,37 +139,64 @@ async function queuePendingGmailIfNeeded() {
   return true;
 }
 
-async function runJob() {
+async function selectWorkJob() {
   let [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "pending")).orderBy(validationJobs.createdAt).limit(1);
+  if (job) return job;
+  [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "processing")).orderBy(validationJobs.createdAt).limit(1);
+  return job;
+}
+
+async function runJob() {
+  let job = await selectWorkJob();
   if (!job) {
     const queued = await queuePendingGmailIfNeeded();
     if (!queued) { await heartbeat({ state: "idle" }); return; }
-    [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "pending")).orderBy(validationJobs.createdAt).limit(1);
+    job = await selectWorkJob();
     if (!job) return;
   }
-  await db.update(validationJobs).set({ status: "processing" }).where(eq(validationJobs.id, job.id));
+
+  const resumed = job.status === "processing";
+  if (!resumed) await db.update(validationJobs).set({ status: "processing" }).where(eq(validationJobs.id, job.id));
+
+  const previous = await existingResults(job.id);
+  if (previous.length) await reconcileExistingResults(previous);
+  const existingIds = new Set(previous.map((row) => row.contact_id));
   const rows = await contactsForJob(job.scope);
-  await db.update(validationJobs).set({ totalRows: rows.length }).where(eq(validationJobs.id, job.id));
-  let processed = 0;
-  for (const contact of rows) {
+
+  const remaining = rows.filter((contact) => !existingIds.has(contact.id));
+  const total = job.scope === "gmail:pending"
+    ? existingIds.size + remaining.length
+    : Math.max(rows.length, existingIds.size);
+  let processed = Math.min(existingIds.size, total);
+
+  await db.update(validationJobs).set({ totalRows: total, processedRows: processed }).where(eq(validationJobs.id, job.id));
+  await heartbeat({ state: resumed ? "resumed" : "processing", jobId: job.id, scope: job.scope, processed, total, remaining: remaining.length });
+
+  for (const contact of remaining) {
     const result = await smtpProbe(contact.normalizedEmail);
     await db.insert(validationResults).values({ jobId: job.id, contactId: contact.id, email: contact.email, status: result.status, detail: result.detail });
     await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
     if (result.status === "invalid") {
-      await db.insert(suppressions).values({ email: contact.email, normalizedEmail: normalizeEmail(contact.email), contactId: contact.id, reason: "invalid", source: "gmail_validation", note: result.detail }).onConflictDoNothing({ target: suppressions.normalizedEmail });
+      await db.insert(suppressions).values({ email: contact.email, normalizedEmail: normalizeEmail(contact.email), contactId: contact.id, reason: "invalid", source: "gmail_validation", note: result.detail }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { contactId: contact.id, reason: "invalid", source: "gmail_validation", note: result.detail } });
     }
     processed++;
     await db.update(validationJobs).set({ processedRows: processed }).where(eq(validationJobs.id, job.id));
-    await heartbeat({ state: "processing", jobId: job.id, scope: job.scope, processed, total: rows.length });
+    await heartbeat({ state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed });
   }
-  await db.update(validationJobs).set({ status: "completed", processedRows: processed, totalRows: rows.length, completedAt: new Date() }).where(eq(validationJobs.id, job.id));
+
+  await db.update(validationJobs).set({ status: "completed", processedRows: total, totalRows: total, completedAt: new Date() }).where(eq(validationJobs.id, job.id));
   await syncImportValidationCounters(job.scope, job.id);
-  await heartbeat({ state: "idle", lastJobId: job.id, scope: job.scope, processed });
+  await heartbeat({ state: "idle", lastJobId: job.id, scope: job.scope, processed: total, resumed });
 }
 
 async function main() {
-  console.log("[validation-worker] started; global/import-scoped Gmail validation + automatic pending Gmail sweep");
-  while (true) { try { await runJob(); } catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); } await new Promise(r=>setTimeout(r, intervalMs)); }
+  console.log("[validation-worker] started; restart-safe Gmail validation with automatic pending sweep");
+  while (true) {
+    try { await runJob(); }
+    catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
+
 main().catch(console.error);
 process.on("SIGTERM", async()=>{ await pool.end(); process.exit(0); });
