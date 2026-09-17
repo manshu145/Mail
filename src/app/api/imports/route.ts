@@ -1,0 +1,49 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db, databaseConfigured } from "@/db";
+import { importJobs } from "@/db/schema";
+import { importUploads, type ImportMapping, type ImportOptions } from "@/db/import-schema";
+import { getSession } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { detectMapping, parseCsv } from "@/lib/csv-import";
+
+const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+
+export async function POST(request: NextRequest) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!databaseConfigured) return NextResponse.json({ error: "Import storage is unavailable." }, { status: 503 });
+
+  const form = await request.formData();
+  const file = form.get("file");
+  if (!(file instanceof File)) return NextResponse.json({ error: "Choose a CSV file." }, { status: 400 });
+  if (file.size <= 0 || file.size > MAX_IMPORT_BYTES) return NextResponse.json({ error: "CSV must be between 1 byte and 50 MB." }, { status: 413 });
+
+  const consentSource = String(form.get("consentSource") || "").trim();
+  if (!consentSource) return NextResponse.json({ error: "Consent source is required." }, { status: 400 });
+
+  const consentStatus = String(form.get("consentStatus") || "unconfirmed") === "confirmed" ? "confirmed" : "unconfirmed";
+  const defaultSource = String(form.get("defaultSource") || "csv_import").trim() || "csv_import";
+  const defaultCategory = String(form.get("defaultCategory") || "").trim();
+  const defaultTags = String(form.get("defaultTags") || "").split("|").map((v) => v.trim()).filter(Boolean);
+  const listId = String(form.get("listId") || "").trim() || null;
+  const queueValidation = String(form.get("queueValidation") || "true") !== "false";
+
+  const content = await file.text();
+  const matrix = parseCsv(content);
+  if (matrix.length < 2) return NextResponse.json({ error: "CSV must include a header and at least one data row." }, { status: 400 });
+  const headers = matrix[0].map((h) => h.trim());
+  const providedMapping = String(form.get("mapping") || "").trim();
+  let mapping: ImportMapping;
+  try { mapping = providedMapping ? JSON.parse(providedMapping) as ImportMapping : detectMapping(headers); }
+  catch { return NextResponse.json({ error: "Column mapping is invalid." }, { status: 400 }); }
+  if (!mapping.email || !headers.includes(mapping.email)) return NextResponse.json({ error: "Map an email column before starting the import." }, { status: 400 });
+
+  const options: ImportOptions = { consentSource, consentStatus, defaultSource, defaultCategory, defaultTags, listId, queueValidation };
+  const createdBy = /^[0-9a-f-]{36}$/i.test(session.userId) ? session.userId : null;
+  const [job] = await db.insert(importJobs).values({ filename: file.name.slice(0, 200), status: "pending", totalRows: matrix.length - 1, createdBy }).returning({ id: importJobs.id });
+  await db.insert(importUploads).values({ jobId: job.id, content, headers, mapping, options, sizeBytes: file.size });
+  await db.execute(`update import_jobs set source_label=$1, list_id=$2 where id=$3` as never, [consentSource, listId, job.id] as never).catch(() => {});
+
+  await audit("contact_import.queued", session, "import_job", job.id, { filename: file.name, total: matrix.length - 1, consentSource, listId, queueValidation, mapping });
+  return NextResponse.json({ ok: true, queued: true, jobId: job.id, total: matrix.length - 1 }, { status: 202 });
+}
