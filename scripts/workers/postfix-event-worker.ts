@@ -1,10 +1,13 @@
 import readline from "node:readline";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, pool } from "../../src/db";
-import { messageEvents, messages, suppressions } from "../../src/db/schema";
-import { workerHeartbeats } from "../../src/db/operations-schema";
+import { campaigns, messageEvents, messages, suppressions } from "../../src/db/schema";
+import { providerCooldowns, workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import { emitWebhookEvent } from "../../src/lib/webhooks";
+import { isProviderPressureResponse, providerForDelivery } from "../../src/lib/provider";
+
+const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN_MINUTES || "15"));
 
 async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "postfix-events", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
@@ -13,6 +16,29 @@ async function heartbeat(meta: Record<string, unknown> = {}) {
 async function webhook(type: string, payload: Record<string, unknown>) {
   try { await emitWebhookEvent(type, payload); }
   catch (error) { console.error("[postfix-event-webhook]", error); }
+}
+
+async function sendingAccountForMessage(campaignId: string) {
+  const [campaign] = await db.select({ sendingAccountId: campaigns.sendingAccountId }).from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+  return campaign?.sendingAccountId || null;
+}
+
+async function activateProviderCooldown(params: { campaignId: string; recipientEmail: string; response: string; dsn: string | null }) {
+  const sendingAccountId = await sendingAccountForMessage(params.campaignId);
+  if (!sendingAccountId) return null;
+  const provider = providerForDelivery(params.recipientEmail, params.response);
+  const nextProbeAt = new Date(Date.now() + providerCooldownMinutes * 60_000);
+  await db.insert(providerCooldowns).values({ sendingAccountId, provider, active: true, reason: params.dsn ? `SMTP ${params.dsn}` : "provider_pressure", lastResponse: params.response.slice(0, 1000), detectedAt: new Date(), nextProbeAt, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: [providerCooldowns.sendingAccountId, providerCooldowns.provider], set: { active: true, reason: params.dsn ? `SMTP ${params.dsn}` : "provider_pressure", lastResponse: params.response.slice(0, 1000), detectedAt: new Date(), nextProbeAt, clearedAt: null, updatedAt: new Date() } });
+  return { provider, nextProbeAt, sendingAccountId };
+}
+
+async function clearProviderCooldown(campaignId: string, recipientEmail: string, response: string) {
+  const sendingAccountId = await sendingAccountForMessage(campaignId);
+  if (!sendingAccountId) return;
+  const provider = providerForDelivery(recipientEmail, response);
+  await db.update(providerCooldowns).set({ active: false, lastResponse: response.slice(0, 1000), clearedAt: new Date(), nextProbeAt: null, updatedAt: new Date() })
+    .where(and(eq(providerCooldowns.sendingAccountId, sendingAccountId), eq(providerCooldowns.provider, provider), eq(providerCooldowns.active, true)));
 }
 
 async function handle(line: string) {
@@ -24,32 +50,36 @@ async function handle(line: string) {
   if (!status) return false;
   const dsn = line.match(/dsn=([0-9.]+)/i)?.[1] || null;
   const detail = line.slice(-1000);
-  const base = { messageId: message.id, campaignId: message.campaignId, recipientEmail: message.recipientEmail, queueId, dsn };
+  const provider = providerForDelivery(message.recipientEmail, detail);
+  const base = { messageId: message.id, campaignId: message.campaignId, recipientEmail: message.recipientEmail, queueId, dsn, provider };
 
   if (status === "deferred") {
     await db.update(messages).set({ status: "mta_accepted", lastError: detail }).where(eq(messages.id, message.id));
-    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_deferred", payload: { queueId, dsn, line: detail } });
-    await webhook("message.deferred", base);
+    let cooldown: Awaited<ReturnType<typeof activateProviderCooldown>> = null;
+    if (isProviderPressureResponse(detail, dsn)) cooldown = await activateProviderCooldown({ campaignId: message.campaignId, recipientEmail: message.recipientEmail, response: detail, dsn });
+    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_deferred", payload: { queueId, dsn, provider, line: detail, providerCooldown: Boolean(cooldown), nextProbeAt: cooldown?.nextProbeAt?.toISOString() } });
+    await webhook("message.deferred", { ...base, providerCooldown: Boolean(cooldown) });
     return true;
   }
 
   if (status === "sent") {
+    await clearProviderCooldown(message.campaignId, message.recipientEmail, detail);
     await db.update(messages).set({ status: "delivered", lastError: null, deliveredAt: new Date() }).where(eq(messages.id, message.id));
-    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_delivered", payload: { queueId, dsn, line: detail } });
+    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_delivered", payload: { queueId, dsn, provider, line: detail } });
     await webhook("message.delivered", base);
     return true;
   }
 
   if (status === "bounced") {
     await db.update(messages).set({ status: "bounced", lastError: detail, bouncedAt: new Date() }).where(eq(messages.id, message.id));
-    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_bounced", payload: { queueId, dsn, line: detail } });
+    await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_bounced", payload: { queueId, dsn, provider, line: detail } });
     await db.insert(suppressions).values({ email: message.recipientEmail, normalizedEmail: normalizeEmail(message.recipientEmail), reason: "hard_bounce", source: "postfix_event" }).onConflictDoUpdate({ target: suppressions.normalizedEmail, set: { reason: "hard_bounce", source: "postfix_event" } });
     await webhook("message.bounced", base);
     return true;
   }
 
   await db.update(messages).set({ status: "failed", lastError: detail }).where(eq(messages.id, message.id));
-  await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_expired", payload: { queueId, dsn, line: detail } });
+  await db.insert(messageEvents).values({ messageId: message.id, type: "postfix_expired", payload: { queueId, dsn, provider, line: detail } });
   await webhook("message.failed", base);
   return true;
 }
@@ -59,10 +89,10 @@ async function main() {
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   let processed = 0, matched = 0;
   for await (const line of rl) {
-    try { if (await handle(line)) matched++; processed++; if (processed % 25 === 0) await heartbeat({ state: "online", processed, matched }); }
+    try { if (await handle(line)) matched++; processed++; if (processed % 25 === 0) await heartbeat({ state: "online", processed, matched, providerCooldownMinutes }); }
     catch (error) { console.error("[postfix-event-worker]", error); }
   }
-  await heartbeat({ state: "stopped", processed, matched });
+  await heartbeat({ state: "stopped", processed, matched, providerCooldownMinutes });
 }
 
 main().catch(console.error).finally(() => pool.end());
