@@ -49,8 +49,17 @@ export function providerLabel(provider: string) {
   return provider;
 }
 
+/**
+ * Provider cooldown is only for temporary provider-level pressure/restrictions.
+ * Permanent 5.x policy/spam rejections are message-level failures and must not
+ * pause the entire provider from a single rejection.
+ */
 export function isProviderPressureResponse(response: string, dsn?: string | null) {
   const text = String(response || "").toLowerCase();
+  if (dsn?.startsWith("5.")) return false;
   if (dsn?.startsWith("4.")) return true;
-  return /rate limit|temporar|try again|too many|throttl|reputation|policy|spam rate|unusual traffic|421|450|451|452|4\.7\./i.test(text);
+
+  // Only explicit temporary SMTP/provider signals qualify when DSN is absent.
+  if (/\b(?:421|450|451|452)\b|\b4\.\d+\.\d+\b/i.test(text)) return true;
+  return /temporar(?:y|ily)?|try again|rate limit|too many|throttl|greylist|resources? temporarily unavailable|unusual traffic.*try again/i.test(text);
 }
