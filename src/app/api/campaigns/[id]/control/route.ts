@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, databaseConfigured } from "@/db";
+import { eq, sql } from "drizzle-orm";
+import { db, databaseConfigured, pool } from "@/db";
 import { campaigns, messages } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
-
-const retryableStatuses = ["failed"] as const;
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -23,8 +21,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const now = new Date();
     await db.transaction(async (tx) => {
       await tx.update(campaigns).set({ status: "cancelled", cancelledAt: now, lastError: null, updatedAt: now }).where(eq(campaigns.id, id));
-      await tx.update(messages).set({ status: "cancelled", lastError: "campaign_cancelled", nextAttemptAt: null }).where(and(eq(messages.campaignId, id), inArray(messages.status, ["queued", "ready_for_transport", "deferred"])));
     });
+    await pool.query(`update messages set status='cancelled',last_error='campaign_cancelled',next_attempt_at=null where campaign_id=$1 and status in ('queued','ready_for_transport','deferred')`, [id]);
     await audit("campaign.cancelled", session, "campaign", id, { previousStatus: campaign.status, cancelledAt: now.toISOString() });
     return NextResponse.json({ ok: true, status: "cancelled" });
   }
@@ -46,12 +44,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   if (action === "retry_failed") {
-    if (["cancelled"].includes(campaign.status)) return NextResponse.json({ error: "Cancelled campaigns cannot be retried." }, { status: 409 });
-    const result = await db.update(messages).set({ status: "ready_for_transport", lastError: null, nextAttemptAt: new Date(), attemptCount: 0 }).where(and(eq(messages.campaignId, id), inArray(messages.status, [...retryableStatuses]))).returning({ id: messages.id });
-    if (!result.length) return NextResponse.json({ error: "There are no failed recipients to retry." }, { status: 409 });
+    if (campaign.status === "cancelled") return NextResponse.json({ error: "Cancelled campaigns cannot be retried." }, { status: 409 });
+    const result = await pool.query<{ id: string }>(`update messages set status='ready_for_transport',last_error=null,next_attempt_at=now(),attempt_count=0 where campaign_id=$1 and status='failed' returning id::text`, [id]);
+    if (!result.rowCount) return NextResponse.json({ error: "There are no failed recipients to retry." }, { status: 409 });
     await db.update(campaigns).set({ status: "sending", completedAt: null, lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, id));
-    await audit("campaign.failed_recipients_retried", session, "campaign", id, { retried: result.length });
-    return NextResponse.json({ ok: true, status: "sending", retried: result.length });
+    await audit("campaign.failed_recipients_retried", session, "campaign", id, { retried: result.rowCount });
+    return NextResponse.json({ ok: true, status: "sending", retried: result.rowCount });
   }
 
   return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
