@@ -104,16 +104,45 @@ async function runOnce() {
     if (suppressed) { await db.update(importStagingRows).set({ processed: true, result: "suppressed", detail: String(suppressed.reason) }).where(eq(importStagingRows.id, row.id)); continue; }
 
     const attributes = { ...(item.attributes || {}), ...(item.categories?.length ? { categories: item.categories.join("|") } : {}) };
-    const inserted = await db.insert(contacts).values({ email: item.email.trim(), normalizedEmail, firstName: item.firstName?.trim() || null, lastName: item.lastName?.trim() || null, source: item.source?.trim() || "csv_import", consentStatus, consentSource, attributes }).onConflictDoNothing({ target: contacts.normalizedEmail }).returning({ id: contacts.id });
-    let contactId = inserted[0]?.id; let result: "imported" | "duplicate" = "imported";
+    const inserted = await db.insert(contacts).values({
+      email: item.email.trim(), normalizedEmail,
+      firstName: item.firstName?.trim() || null,
+      lastName: item.lastName?.trim() || null,
+      source: item.source?.trim() || "csv_import",
+      consentStatus, consentSource, attributes,
+    }).onConflictDoNothing({ target: contacts.normalizedEmail }).returning({ id: contacts.id });
+
+    let contactId = inserted[0]?.id;
+    let result: "imported" | "duplicate" = "imported";
     if (!contactId) {
-      const [existing] = await db.select({ id: contacts.id }).from(contacts).where(eq(contacts.normalizedEmail, normalizedEmail)).limit(1);
-      contactId = existing?.id; result = "duplicate";
-      if (contactId) await db.update(contacts).set({ consentStatus, consentSource, source: item.source?.trim() || "csv_import", attributes, updatedAt: new Date() }).where(eq(contacts.id, contactId));
+      const [existing] = await db.select({
+        id: contacts.id,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        source: contacts.source,
+        consentStatus: contacts.consentStatus,
+        consentSource: contacts.consentSource,
+        attributes: contacts.attributes,
+      }).from(contacts).where(eq(contacts.normalizedEmail, normalizedEmail)).limit(1);
+      contactId = existing?.id;
+      result = "duplicate";
+      if (existing) {
+        const keepConfirmedConsent = existing.consentStatus === "confirmed";
+        const mergedAttributes = { ...(existing.attributes || {}), ...attributes };
+        await db.update(contacts).set({
+          firstName: item.firstName?.trim() || existing.firstName,
+          lastName: item.lastName?.trim() || existing.lastName,
+          source: existing.source,
+          consentStatus: keepConfirmedConsent ? "confirmed" : consentStatus,
+          consentSource: keepConfirmedConsent ? (existing.consentSource || consentSource) : consentSource,
+          attributes: mergedAttributes,
+          updatedAt: new Date(),
+        }).where(eq(contacts.id, existing.id));
+      }
     }
+
     if (contactId) { await attachToList(contactId, listId); await attachTags(contactId, item.tags); }
-    await db.update(importStagingRows).set({ processed: true, result, detail: contactId ? null : "contact_lookup_failed" }).where(eq(importStagingRows.id, row.id));
-    if (contactId) await pool.query(`update import_staging_rows set contact_id=$2 where id=$1`, [row.id, contactId]);
+    await db.update(importStagingRows).set({ processed: true, result, detail: contactId ? null : "contact_lookup_failed", contactId: contactId || null }).where(eq(importStagingRows.id, row.id));
   }
 
   const counts = await db.execute(sql`select count(*) filter(where result='imported')::int as imported,count(*) filter(where result='duplicate')::int as duplicates,count(*) filter(where result='invalid')::int as invalid,count(*) filter(where result='suppressed')::int as suppressed,count(*) filter(where processed=false)::int as remaining from import_staging_rows where job_id=${job.id}`);
