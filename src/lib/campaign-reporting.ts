@@ -34,6 +34,14 @@ const n = (value: unknown) => Number(value || 0);
 const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 10000) / 100 : 0;
 const humanEvent = sql`coalesce((payload->>'automated')::boolean,false)=false`;
 
+function outcomeRates(delivered: number, bounced: number, failed: number) {
+  const finalized = delivered + bounced + failed;
+  return {
+    deliveryRate: pct(delivered, finalized),
+    bounceRate: pct(bounced, finalized),
+  };
+}
+
 export async function getCampaignMetrics(campaignId: string): Promise<CampaignMetrics | null> {
   const result = await db.execute(sql`
     with m as (
@@ -67,12 +75,13 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
   `);
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) return null;
-  const delivered = n(row.delivered), opens = n(row.unique_opens), clicks = n(row.unique_clicks), targeted = n(row.targeted), bounced = n(row.bounced);
+  const delivered = n(row.delivered), opens = n(row.unique_opens), clicks = n(row.unique_clicks), targeted = n(row.targeted), bounced = n(row.bounced), failed = n(row.failed);
+  const rates = outcomeRates(delivered, bounced, failed);
   return {
     campaignId: String(row.campaign_id), campaignName: String(row.campaign_name), campaignStatus: String(row.campaign_status),
     targeted, queued:n(row.queued), ready:n(row.ready), sending:n(row.sending), accepted:n(row.accepted), deferred:n(row.deferred),
-    delivered, bounced, failed:n(row.failed), cancelled:n(row.cancelled), uniqueOpens:opens, totalOpens:n(row.total_opens), uniqueClicks:clicks, totalClicks:n(row.total_clicks), automatedOpens:n(row.automated_opens), automatedClicks:n(row.automated_clicks),
-    unsubscribes:n(row.unsubscribes), complaints:n(row.complaints), deliveryRate:pct(delivered,targeted), bounceRate:pct(bounced,targeted),
+    delivered, bounced, failed, cancelled:n(row.cancelled), uniqueOpens:opens, totalOpens:n(row.total_opens), uniqueClicks:clicks, totalClicks:n(row.total_clicks), automatedOpens:n(row.automated_opens), automatedClicks:n(row.automated_clicks),
+    unsubscribes:n(row.unsubscribes), complaints:n(row.complaints), deliveryRate:rates.deliveryRate, bounceRate:rates.bounceRate,
     openRate:pct(opens,delivered), clickRate:pct(clicks,delivered), ctor:pct(clicks,opens),
   };
 }
@@ -106,9 +115,11 @@ export async function getCampaignMetricsList(limit = 50): Promise<CampaignMetric
     limit ${limit}
   `);
   return result.rows.map((raw) => {
-    const row=raw as Record<string,unknown>; const targeted=n(row.targeted), delivered=n(row.delivered), bounced=n(row.bounced), opens=n(row.unique_opens), clicks=n(row.unique_clicks);
+    const row=raw as Record<string,unknown>;
+    const targeted=n(row.targeted), delivered=n(row.delivered), bounced=n(row.bounced), failed=n(row.failed), opens=n(row.unique_opens), clicks=n(row.unique_clicks);
+    const rates=outcomeRates(delivered,bounced,failed);
     return { campaignId:String(row.campaign_id),campaignName:String(row.campaign_name),campaignStatus:String(row.campaign_status),targeted,
-      queued:n(row.queued),ready:n(row.ready),sending:n(row.sending),accepted:n(row.accepted),deferred:n(row.deferred),delivered,bounced,failed:n(row.failed),cancelled:n(row.cancelled),
-      uniqueOpens:opens,totalOpens:n(row.total_opens),uniqueClicks:clicks,totalClicks:n(row.total_clicks),automatedOpens:n(row.automated_opens),automatedClicks:n(row.automated_clicks),unsubscribes:n(row.unsubscribes),complaints:n(row.complaints),deliveryRate:pct(delivered,targeted),bounceRate:pct(bounced,targeted),openRate:pct(opens,delivered),clickRate:pct(clicks,delivered),ctor:pct(clicks,opens)};
+      queued:n(row.queued),ready:n(row.ready),sending:n(row.sending),accepted:n(row.accepted),deferred:n(row.deferred),delivered,bounced,failed,cancelled:n(row.cancelled),
+      uniqueOpens:opens,totalOpens:n(row.total_opens),uniqueClicks:clicks,totalClicks:n(row.total_clicks),automatedOpens:n(row.automated_opens),automatedClicks:n(row.automated_clicks),unsubscribes:n(row.unsubscribes),complaints:n(row.complaints),deliveryRate:rates.deliveryRate,bounceRate:rates.bounceRate,openRate:pct(opens,delivered),clickRate:pct(clicks,delivered),ctor:pct(clicks,opens)};
   });
 }
