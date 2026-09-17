@@ -4,6 +4,7 @@ import { campaignPreflights } from "../../src/db/campaign-ops-schema";
 import { auditLogs, campaigns, lists, messages } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { preflightAudience } from "../../src/lib/audience-preflight";
+import { readDeliverySettings } from "../../src/lib/delivery-settings";
 import { getRuntimePolicy } from "../../src/lib/runtime-policy";
 
 const intervalMs = Math.max(1000, Number(process.env.CAMPAIGN_WORKER_INTERVAL_MS || "5000"));
@@ -53,11 +54,14 @@ async function claimDueCampaigns() {
 
 async function runOnce() {
   const policy = getRuntimePolicy();
+  const delivery = await readDeliverySettings();
   if (!policy.sendingEnabled) {
-    await heartbeat({ state: "online", sendingEnabled: false, mode: policy.mode });
+    await heartbeat({ state: "online", sendingEnabled: false, mode: policy.mode, maxRecipientsPerCampaign: delivery.maxRecipientsPerCampaign });
     return;
   }
 
+  const runtimeLimit = policy.maxRecipientsPerCampaign;
+  const campaignLimit = runtimeLimit === null ? delivery.maxRecipientsPerCampaign : Math.min(runtimeLimit, delivery.maxRecipientsPerCampaign);
   const claimedIds = await claimDueCampaigns();
   let resolved = 0;
   let excluded = 0;
@@ -97,8 +101,8 @@ async function runOnce() {
       },
     });
 
-    if (policy.maxRecipientsPerCampaign !== null && preflight.eligibleCount > policy.maxRecipientsPerCampaign) {
-      await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { eligibleRecipients: preflight.eligibleCount, limit: policy.maxRecipientsPerCampaign });
+    if (preflight.eligibleCount > campaignLimit) {
+      await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { eligibleRecipients: preflight.eligibleCount, limit: campaignLimit, runtimeLimit, deliveryLimit: delivery.maxRecipientsPerCampaign });
       blocked++;
       continue;
     }
@@ -130,6 +134,7 @@ async function runOnce() {
           pendingCount: preflight.pendingCount,
           unknownCount: preflight.unknownCount,
           messageCount: Number(counts?.count || 0),
+          campaignLimit,
         }),
       });
     });
@@ -137,7 +142,7 @@ async function runOnce() {
     excluded += preflight.suppressedCount + preflight.invalidCount;
   }
 
-  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked });
+  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked, maxRecipientsPerCampaign: campaignLimit, source: "database_control_plane" });
 }
 
 async function main() {
