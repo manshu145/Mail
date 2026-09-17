@@ -14,10 +14,14 @@ export async function resolveEngagementAudience(campaignId: string, rule: Engage
   const params: unknown[] = [campaignId];
   if (windowDays) params.push(windowDays);
 
-  // Engagement follow-up audiences are intentionally based on recipients that reached
-  // a final remote-accepted state. This prevents bounced, failed, queued or still
-  // in-flight recipients from being pulled back into a follow-up audience.
-  const deliveredWindow = windowDays ? ` and m.delivered_at >= now() - ($2::int * interval '1 day')` : "";
+  // Follow-up audiences only use recipients that reached a final remote-accepted
+  // delivery state. Bounced, failed, queued and still in-flight recipients are never
+  // pulled back into engagement targeting.
+  const negativeRule = rule === "not_opened" || rule === "not_clicked" || rule === "delivered_not_opened";
+  const deliveryWindow = windowDays && negativeRule
+    ? ` and m.delivered_at >= now() - ($2::int * interval '1 day')`
+    : "";
+
   let condition = "true";
   if (rule === "opened") condition = eventPredicate("open", windowDays);
   else if (rule === "clicked") condition = eventPredicate("click", windowDays);
@@ -37,7 +41,7 @@ export async function resolveEngagementAudience(campaignId: string, rule: Engage
       and not exists (
         select 1 from suppressions s where s.normalized_email=c.normalized_email
       )
-      ${deliveredWindow}
+      ${deliveryWindow}
       and (${condition})
     order by c.id
   `, params);
