@@ -86,8 +86,6 @@ async function existingResults(jobId: string) {
 }
 
 async function addInvalidSuppression(email: string, contactId: string, detail: string | null) {
-  // Never downgrade an existing unsubscribe, complaint, manual or hard-bounce
-  // suppression merely because validation later reports an invalid mailbox.
   await db.insert(suppressions).values({
     email,
     normalizedEmail: normalizeEmail(email),
@@ -141,9 +139,11 @@ async function queuePendingGmailIfNeeded() {
 }
 
 async function selectWorkJob() {
-  let [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "pending")).orderBy(validationJobs.createdAt).limit(1);
+  // A processing job means a previous worker execution was interrupted. Resume it
+  // before accepting newer queued work so one stuck job cannot remain forever.
+  let [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "processing")).orderBy(validationJobs.createdAt).limit(1);
   if (job) return job;
-  [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "processing")).orderBy(validationJobs.createdAt).limit(1);
+  [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "pending")).orderBy(validationJobs.createdAt).limit(1);
   return job;
 }
 
