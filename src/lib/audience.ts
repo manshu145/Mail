@@ -1,7 +1,8 @@
 import { and, eq, ilike, ne, notIlike } from "drizzle-orm";
 import { db } from "@/db";
 import { contactLists, contacts, lists } from "@/db/schema";
-import { segmentDefinitions } from "@/db/segment-schema";
+import { engagementSegmentDefinitions, segmentDefinitions } from "@/db/segment-schema";
+import { resolveEngagementAudience, type EngagementRule } from "@/lib/engagement-audience";
 
 export type AudienceRecipient = {
   contactId: string;
@@ -14,6 +15,10 @@ const selection = { contactId: contacts.id, email: contacts.email, normalizedEma
 
 export async function resolveAudienceRecipients(list: typeof lists.$inferSelect): Promise<AudienceRecipient[]> {
   if (!list.isDynamic) return db.select(selection).from(contactLists).innerJoin(contacts, eq(contactLists.contactId, contacts.id)).where(and(eq(contactLists.listId, list.id), eq(contacts.status, "active")));
+
+  const [engagementRule] = await db.select().from(engagementSegmentDefinitions).where(eq(engagementSegmentDefinitions.listId, list.id)).limit(1);
+  if (engagementRule) return resolveEngagementAudience(engagementRule.campaignId, engagementRule.ruleType as EngagementRule, engagementRule.windowDays ?? null);
+
   const [rule] = await db.select().from(segmentDefinitions).where(eq(segmentDefinitions.listId, list.id)).limit(1);
   if (!rule) return [];
   let condition;
