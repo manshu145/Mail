@@ -16,7 +16,11 @@ export type CampaignMetrics = {
   failed: number;
   cancelled: number;
   uniqueOpens: number;
+  totalOpens: number;
   uniqueClicks: number;
+  totalClicks: number;
+  automatedOpens: number;
+  automatedClicks: number;
   unsubscribes: number;
   complaints: number;
   deliveryRate: number;
@@ -28,6 +32,7 @@ export type CampaignMetrics = {
 
 const n = (value: unknown) => Number(value || 0);
 const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 10000) / 100 : 0;
+const humanEvent = sql`coalesce((payload->>'automated')::boolean,false)=false`;
 
 export async function getCampaignMetrics(campaignId: string): Promise<CampaignMetrics | null> {
   const result = await db.execute(sql`
@@ -46,8 +51,12 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
       from messages where campaign_id=${campaignId}
     ), e as (
       select
-        count(distinct message_id) filter(where type='open')::int unique_opens,
-        count(distinct message_id) filter(where type='click')::int unique_clicks,
+        count(distinct message_id) filter(where type='open' and ${humanEvent})::int unique_opens,
+        count(*) filter(where type='open' and ${humanEvent})::int total_opens,
+        count(distinct message_id) filter(where type='click' and ${humanEvent})::int unique_clicks,
+        count(*) filter(where type='click' and ${humanEvent})::int total_clicks,
+        count(*) filter(where type='open' and coalesce((payload->>'automated')::boolean,false)=true)::int automated_opens,
+        count(*) filter(where type='click' and coalesce((payload->>'automated')::boolean,false)=true)::int automated_clicks,
         count(distinct message_id) filter(where type='unsubscribe')::int unsubscribes,
         count(distinct message_id) filter(where type='complaint')::int complaints
       from message_events
@@ -62,7 +71,7 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
   return {
     campaignId: String(row.campaign_id), campaignName: String(row.campaign_name), campaignStatus: String(row.campaign_status),
     targeted, queued:n(row.queued), ready:n(row.ready), sending:n(row.sending), accepted:n(row.accepted), deferred:n(row.deferred),
-    delivered, bounced, failed:n(row.failed), cancelled:n(row.cancelled), uniqueOpens:opens, uniqueClicks:clicks,
+    delivered, bounced, failed:n(row.failed), cancelled:n(row.cancelled), uniqueOpens:opens, totalOpens:n(row.total_opens), uniqueClicks:clicks, totalClicks:n(row.total_clicks), automatedOpens:n(row.automated_opens), automatedClicks:n(row.automated_clicks),
     unsubscribes:n(row.unsubscribes), complaints:n(row.complaints), deliveryRate:pct(delivered,targeted), bounceRate:pct(bounced,targeted),
     openRate:pct(opens,delivered), clickRate:pct(clicks,delivered), ctor:pct(clicks,opens),
   };
@@ -71,18 +80,22 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
 export async function getCampaignMetricsList(limit = 50): Promise<CampaignMetrics[]> {
   const result = await db.execute(sql`
     select c.id::text campaign_id,c.name campaign_name,c.status::text campaign_status,
-      count(m.id)::int targeted,
-      count(m.id) filter(where m.status='queued')::int queued,
-      count(m.id) filter(where m.status='ready_for_transport')::int ready,
-      count(m.id) filter(where m.status='sending')::int sending,
-      count(m.id) filter(where m.status='mta_accepted')::int accepted,
-      count(m.id) filter(where m.status='deferred')::int deferred,
-      count(m.id) filter(where m.status='delivered')::int delivered,
-      count(m.id) filter(where m.status='bounced')::int bounced,
-      count(m.id) filter(where m.status='failed')::int failed,
-      count(m.id) filter(where m.status='cancelled')::int cancelled,
-      count(distinct case when e.type='open' then e.message_id end)::int unique_opens,
-      count(distinct case when e.type='click' then e.message_id end)::int unique_clicks,
+      count(distinct m.id)::int targeted,
+      count(distinct m.id) filter(where m.status='queued')::int queued,
+      count(distinct m.id) filter(where m.status='ready_for_transport')::int ready,
+      count(distinct m.id) filter(where m.status='sending')::int sending,
+      count(distinct m.id) filter(where m.status='mta_accepted')::int accepted,
+      count(distinct m.id) filter(where m.status='deferred')::int deferred,
+      count(distinct m.id) filter(where m.status='delivered')::int delivered,
+      count(distinct m.id) filter(where m.status='bounced')::int bounced,
+      count(distinct m.id) filter(where m.status='failed')::int failed,
+      count(distinct m.id) filter(where m.status='cancelled')::int cancelled,
+      count(distinct case when e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false then e.message_id end)::int unique_opens,
+      count(e.id) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false)::int total_opens,
+      count(distinct case when e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false then e.message_id end)::int unique_clicks,
+      count(e.id) filter(where e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false)::int total_clicks,
+      count(e.id) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=true)::int automated_opens,
+      count(e.id) filter(where e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=true)::int automated_clicks,
       count(distinct case when e.type='unsubscribe' then e.message_id end)::int unsubscribes,
       count(distinct case when e.type='complaint' then e.message_id end)::int complaints
     from campaigns c
@@ -96,6 +109,6 @@ export async function getCampaignMetricsList(limit = 50): Promise<CampaignMetric
     const row=raw as Record<string,unknown>; const targeted=n(row.targeted), delivered=n(row.delivered), bounced=n(row.bounced), opens=n(row.unique_opens), clicks=n(row.unique_clicks);
     return { campaignId:String(row.campaign_id),campaignName:String(row.campaign_name),campaignStatus:String(row.campaign_status),targeted,
       queued:n(row.queued),ready:n(row.ready),sending:n(row.sending),accepted:n(row.accepted),deferred:n(row.deferred),delivered,bounced,failed:n(row.failed),cancelled:n(row.cancelled),
-      uniqueOpens:opens,uniqueClicks:clicks,unsubscribes:n(row.unsubscribes),complaints:n(row.complaints),deliveryRate:pct(delivered,targeted),bounceRate:pct(bounced,targeted),openRate:pct(opens,delivered),clickRate:pct(clicks,delivered),ctor:pct(clicks,opens)};
+      uniqueOpens:opens,totalOpens:n(row.total_opens),uniqueClicks:clicks,totalClicks:n(row.total_clicks),automatedOpens:n(row.automated_opens),automatedClicks:n(row.automated_clicks),unsubscribes:n(row.unsubscribes),complaints:n(row.complaints),deliveryRate:pct(delivered,targeted),bounceRate:pct(bounced,targeted),openRate:pct(opens,delivered),clickRate:pct(clicks,delivered),ctor:pct(clicks,opens)};
   });
 }
