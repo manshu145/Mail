@@ -13,13 +13,17 @@ function eventPredicate(type: "open" | "click", windowDays: number | null, negat
 export async function resolveEngagementAudience(campaignId: string, rule: EngagementRule, windowDays: number | null): Promise<AudienceRecipient[]> {
   const params: unknown[] = [campaignId];
   if (windowDays) params.push(windowDays);
-  const messageWindow = windowDays ? ` and m.queued_at >= now() - ($2::int * interval '1 day')` : "";
+
+  // Engagement follow-up audiences are intentionally based on recipients that reached
+  // a final remote-accepted state. This prevents bounced, failed, queued or still
+  // in-flight recipients from being pulled back into a follow-up audience.
+  const deliveredWindow = windowDays ? ` and m.delivered_at >= now() - ($2::int * interval '1 day')` : "";
   let condition = "true";
   if (rule === "opened") condition = eventPredicate("open", windowDays);
   else if (rule === "clicked") condition = eventPredicate("click", windowDays);
   else if (rule === "not_opened") condition = eventPredicate("open", windowDays, true);
   else if (rule === "not_clicked") condition = eventPredicate("click", windowDays, true);
-  else if (rule === "delivered_not_opened") condition = `m.status='delivered' and ${eventPredicate("open", windowDays, true)}`;
+  else if (rule === "delivered_not_opened") condition = eventPredicate("open", windowDays, true);
   else if (rule === "opened_not_clicked") condition = `${eventPredicate("open", windowDays)} and ${eventPredicate("click", windowDays, true)}`;
 
   const result = await pool.query<{ contact_id: string; email: string; normalized_email: string; validation_status: AudienceRecipient["validationStatus"] }>(`
@@ -27,12 +31,13 @@ export async function resolveEngagementAudience(campaignId: string, rule: Engage
     from messages m
     join contacts c on c.id=m.contact_id
     where m.campaign_id=$1
+      and m.status='delivered'
       and c.status='active'
       and c.validation_status <> 'invalid'
       and not exists (
         select 1 from suppressions s where s.normalized_email=c.normalized_email
       )
-      ${messageWindow}
+      ${deliveredWindow}
       and (${condition})
     order by c.id
   `, params);
