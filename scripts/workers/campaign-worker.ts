@@ -127,7 +127,7 @@ async function runOnce() {
         const selection = await audienceSelection(list);
         await tx.execute(sql`insert into messages(campaign_id,contact_id,recipient_email,status)
           select ${campaign.id}::uuid, contact_id, email, 'queued'::message_status from (${selection}) audience
-          where not suppressed and validation_status<>'invalid'
+          where not suppressed and send_eligible
           on conflict(campaign_id,contact_id) do nothing`);
         const [counts] = await tx.select({ count: sql<number>`count(*)::int` }).from(messages).where(eq(messages.campaignId, campaign.id));
         if (!Number(counts?.count || 0)) throw new Error("No eligible recipients remain at snapshot time");
