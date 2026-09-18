@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity, BarChart3, Blocks, ChevronDown, CircleGauge, ContactRound, FileUp, Gauge,
   Globe2, History, Inbox, KeyRound, Layers3, ListOrdered, Mail, MailCheck, Menu, Network,
@@ -20,25 +20,38 @@ const navGroups: NavGroup[] = [
   { label: "Overview", items: [
     { href: "/dashboard", label: "Dashboard", icon: Gauge },
   ]},
+  { label: "Campaigns", items: [
+    { href: "/campaigns", label: "Campaigns", icon: Send },
+    { href: "/templates", label: "Templates", icon: Mail },
+  ]},
   { label: "Audience", items: [
-    { href: "/contacts", label: "Contacts", icon: ContactRound }, { href: "/lists", label: "Lists", icon: Layers3 },
-    { href: "/segments", label: "Segments", icon: Blocks }, { href: "/imports", label: "Imports", icon: FileUp },
+    { href: "/contacts", label: "Contacts", icon: ContactRound },
+    { href: "/imports", label: "Imports", icon: FileUp },
+    { href: "/lists", label: "Lists", icon: Layers3 },
+    { href: "/segments", label: "Segments", icon: Blocks },
     { href: "/validation", label: "Validation", icon: MailCheck },
   ]},
-  { label: "Messaging", items: [
-    { href: "/campaigns", label: "Campaigns", icon: Send }, { href: "/templates", label: "Templates", icon: Mail },
-    { href: "/messages", label: "Message log", icon: ListOrdered }, { href: "/queue", label: "Delivery queue", icon: CircleGauge },
+  { label: "Delivery", items: [
+    { href: "/messages", label: "Message log", icon: ListOrdered },
+    { href: "/queue", label: "Delivery queue", icon: CircleGauge },
+    { href: "/reports", label: "Reports", icon: BarChart3 },
   ]},
   { label: "Deliverability", items: [
-    { href: "/domains", label: "Sending domains", icon: Globe2 }, { href: "/sender-identities", label: "Sender identities", icon: Network },
-    { href: "/sending-limits", label: "Sending limits", icon: Gauge }, { href: "/inbox-placement", label: "Inbox placement", icon: Inbox },
-    { href: "/suppressions", label: "Suppressions", icon: ShieldBan }, { href: "/provider-cooldowns", label: "Provider cooldowns", icon: CircleGauge },
-    { href: "/delivery-integrity", label: "Delivery integrity", icon: Activity }, { href: "/reports", label: "Analytics", icon: BarChart3 },
+    { href: "/domains", label: "Sending domains", icon: Globe2 },
+    { href: "/sender-identities", label: "Sender identities", icon: Network },
+    { href: "/sending-limits", label: "Sending limits", icon: Gauge },
+    { href: "/suppressions", label: "Suppressions", icon: ShieldBan },
+    { href: "/provider-cooldowns", label: "Provider cooldowns", icon: CircleGauge },
+    { href: "/inbox-placement", label: "Inbox placement", icon: Inbox },
+    { href: "/delivery-integrity", label: "Delivery integrity", icon: Activity },
   ]},
   { label: "Platform", items: [
-    { href: "/infrastructure", label: "Infrastructure", icon: ServerCog }, { href: "/api-keys", label: "API keys", icon: KeyRound, roles: ["owner"] },
-    { href: "/webhooks", label: "Webhooks", icon: Webhook, roles: ["owner"] }, { href: "/users", label: "Team access", icon: Users, roles: ["owner"] },
-    { href: "/audit-log", label: "Audit log", icon: History }, { href: "/system-health", label: "System health", icon: Activity },
+    { href: "/system-health", label: "System health", icon: Activity },
+    { href: "/infrastructure", label: "Infrastructure", icon: ServerCog },
+    { href: "/api-keys", label: "API keys", icon: KeyRound, roles: ["owner"] },
+    { href: "/webhooks", label: "Webhooks", icon: Webhook, roles: ["owner"] },
+    { href: "/users", label: "Team access", icon: Users, roles: ["owner"] },
+    { href: "/audit-log", label: "Audit log", icon: History },
     { href: "/settings", label: "Settings", icon: Settings },
   ]},
 ];
@@ -53,6 +66,7 @@ export function AppShell({ session, children }: { session: SessionView; children
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => Object.fromEntries(navGroups.map((group) => [group.label, true])));
 
   const visibleGroups = useMemo(() => navGroups.map((group) => ({
     ...group,
@@ -64,14 +78,39 @@ export function AppShell({ session, children }: { session: SessionView; children
     return visibleGroups[0]?.items[0] || navGroups[0].items[0];
   }, [pathname, visibleGroups]);
 
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("neximail.sidebar.groups");
+      if (stored) setOpenGroups((current) => ({ ...current, ...JSON.parse(stored) }));
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const activeGroup = visibleGroups.find((group) => group.items.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)));
+    if (activeGroup) setOpenGroups((current) => current[activeGroup.label] ? current : { ...current, [activeGroup.label]: true });
+  }, [pathname, visibleGroups]);
+
+  function toggleGroup(label: string) {
+    setOpenGroups((current) => {
+      const next = { ...current, [label]: !current[label] };
+      try { window.localStorage.setItem("neximail.sidebar.groups", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
   const sidebar = (
     <div className="flex h-full flex-col overflow-hidden bg-[var(--sidebar)] text-[var(--sidebar-fg)]">
       <div className={`flex h-[70px] items-center border-b border-[var(--sidebar-border)] ${collapsed ? "justify-center px-3" : "px-5"}`}><BrandMark compact={collapsed} /></div>
       <div className="flex-1 overflow-y-auto px-3 py-4 scrollbar-thin">
-        {visibleGroups.map((group) => <div key={group.label} className="mb-4 last:mb-1">
-          {!collapsed && <div className="mb-1.5 px-2.5 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--sidebar-muted)]">{group.label}</div>}
-          <nav className="space-y-1">{group.items.map((item) => { const Icon=item.icon; const active=pathname===item.href||pathname.startsWith(`${item.href}/`); return <Link key={item.href} href={item.href} title={collapsed?item.label:undefined} onClick={()=>setMobileOpen(false)} className={`group flex h-9 items-center rounded-[11px] border transition-all duration-150 ${collapsed?"justify-center px-2":"gap-2.5 px-2.5"} ${active?"border-violet-500/20 bg-violet-600 text-white shadow-[0_8px_20px_rgba(109,93,252,.22)]":"border-transparent text-[var(--sidebar-muted)] hover:border-violet-500/10 hover:bg-[linear-gradient(90deg,var(--sidebar-hover),rgba(109,93,252,.055))] hover:text-[var(--sidebar-fg)] hover:shadow-[inset_3px_0_0_rgba(109,93,252,.22)]"}`}><Icon className="h-4 w-4 shrink-0" strokeWidth={active?2.15:1.8}/>{!collapsed&&<span className="truncate text-[12.5px] font-bold">{item.label}</span>}</Link>})}</nav>
-        </div>)}
+        {visibleGroups.map((group) => {
+          const groupOpen = collapsed || openGroups[group.label] !== false;
+          return <div key={group.label} className="mb-3 last:mb-1">
+            {!collapsed ? <button type="button" onClick={() => toggleGroup(group.label)} className="mb-1 flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--sidebar-muted)] transition hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-fg)]">
+              <span>{group.label}</span><ChevronDown className={`h-3 w-3 transition-transform ${groupOpen?"rotate-0":"-rotate-90"}`}/>
+            </button> : null}
+            {groupOpen ? <nav className="space-y-1">{group.items.map((item) => { const Icon=item.icon; const active=pathname===item.href||pathname.startsWith(`${item.href}/`); return <Link key={item.href} href={item.href} title={collapsed?item.label:undefined} onClick={()=>setMobileOpen(false)} className={`group flex h-9 items-center rounded-[11px] border transition-all duration-150 ${collapsed?"justify-center px-2":"gap-2.5 px-2.5"} ${active?"border-violet-500/20 bg-violet-600 text-white shadow-[0_8px_20px_rgba(109,93,252,.22)]":"border-transparent text-[var(--sidebar-muted)] hover:border-violet-500/10 hover:bg-[linear-gradient(90deg,var(--sidebar-hover),rgba(109,93,252,.055))] hover:text-[var(--sidebar-fg)] hover:shadow-[inset_3px_0_0_rgba(109,93,252,.22)]"}`}><Icon className="h-4 w-4 shrink-0" strokeWidth={active?2.15:1.8}/>{!collapsed&&<span className="truncate text-[12.5px] font-bold">{item.label}</span>}</Link>})}</nav> : null}
+          </div>;
+        })}
       </div>
       <div className="border-t border-[var(--sidebar-border)] bg-[linear-gradient(180deg,transparent,rgba(109,93,252,.025))] p-3">
         <div className={`flex items-center ${collapsed?"justify-center":"gap-2.5"}`}><div className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-gradient-to-br from-[#7c5cff] to-[#4b7cff] text-[10px] font-black text-white">{initials(session.name)}</div>{!collapsed&&<><div className="min-w-0 flex-1"><div className="truncate text-[12px] font-extrabold">{session.name}</div><div className="truncate text-[10px] capitalize text-[var(--sidebar-muted)]">{session.role}</div></div><ChevronDown className="h-3.5 w-3.5 text-[var(--sidebar-muted)]"/></>}</div>
