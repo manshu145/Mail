@@ -60,6 +60,7 @@ services:
       - mta_logs:/var/log/mta
       - mta_spool:/var/spool/postfix
       - dkim_keys:/var/lib/neximail/dkim
+      - mta_tls:/etc/postfix/tls:ro
     healthcheck:
       test: ["CMD-SHELL", "postfix status && test -f /run/opendkim/opendkim.pid && kill -0 $(cat /run/opendkim/opendkim.pid)"]
       interval: 10s
@@ -158,4 +159,5 @@ volumes:
   mta_logs:
   mta_spool:
   dkim_keys:
+  mta_tls:
   import_uploads:
