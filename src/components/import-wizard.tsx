@@ -18,11 +18,20 @@ function uploadFile(url: string, file: File, onProgress: (value: number) => void
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) onProgress(Math.min(100, Math.round(event.loaded / event.total * 100)));
     };
-    xhr.onerror = () => reject(new Error("CSV upload failed."));
+    xhr.onerror = () => reject(new Error("CSV upload could not reach the server. Check the connection and retry."));
+    xhr.onabort = () => reject(new Error("CSV upload was cancelled before completion."));
+    xhr.ontimeout = () => reject(new Error("CSV upload timed out before the server finished receiving it."));
     xhr.onload = () => {
       let data: { error?: string; bytes?: number } = {};
       try { data = JSON.parse(xhr.responseText || "{}"); } catch {}
-      if (xhr.status < 200 || xhr.status >= 300) { reject(new Error(data.error || "CSV upload failed.")); return; }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const fallback = xhr.status === 413
+          ? "The server or reverse proxy rejected this CSV as too large. NexiMail supports up to 300 MB, but the web proxy upload limit may need to be increased."
+          : xhr.status === 401 ? "Your login session expired. Sign in again and retry the import."
+          : xhr.status === 403 ? "You do not have permission to upload this CSV."
+          : `CSV upload failed with HTTP ${xhr.status || "network error"}.`;
+        reject(new Error(data.error || fallback)); return;
+      }
       onProgress(100);
       resolve(data);
     };
