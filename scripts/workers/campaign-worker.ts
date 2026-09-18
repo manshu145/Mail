@@ -65,7 +65,11 @@ async function runOnce() {
   }
 
   const runtimeLimit = policy.maxRecipientsPerCampaign;
-  const campaignLimit = runtimeLimit === null ? delivery.maxRecipientsPerCampaign : Math.min(runtimeLimit, delivery.maxRecipientsPerCampaign);
+  const deliveryLimit = delivery.maxRecipientsPerCampaign > 0 ? delivery.maxRecipientsPerCampaign : null;
+  const campaignLimit =
+    runtimeLimit === null ? deliveryLimit :
+    deliveryLimit === null ? runtimeLimit :
+    Math.min(runtimeLimit, deliveryLimit);
   const claimedIds = await claimDueCampaigns();
   let resolved = 0;
   let excluded = 0;
@@ -106,7 +110,7 @@ async function runOnce() {
         },
       });
 
-      if (preflight.eligibleCount > campaignLimit) {
+      if (campaignLimit !== null && preflight.eligibleCount > campaignLimit) {
         await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { eligibleRecipients: preflight.eligibleCount, limit: campaignLimit, runtimeLimit, deliveryLimit: delivery.maxRecipientsPerCampaign });
         blocked++;
         continue;
@@ -131,7 +135,7 @@ async function runOnce() {
           on conflict(campaign_id,contact_id) do nothing`);
         const [counts] = await tx.select({ count: sql<number>`count(*)::int` }).from(messages).where(eq(messages.campaignId, campaign.id));
         if (!Number(counts?.count || 0)) throw new Error("No eligible recipients remain at snapshot time");
-        if (Number(counts?.count || 0) > campaignLimit) throw new Error("Audience grew beyond campaign limit during snapshot");
+        if (campaignLimit !== null && Number(counts?.count || 0) > campaignLimit) throw new Error("Audience grew beyond campaign limit during snapshot");
         await tx.update(campaigns).set({ audienceCount: Number(counts?.count || 0), messageCount: Number(counts?.count || 0), lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
         await tx.insert(auditLogs).values({
           action: "campaign.audience_snapshotted",
