@@ -4,10 +4,10 @@ import { contacts, suppressions, systemSettings, validationJobs, validationResul
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import { isDirectGmailAddress, type ValidationVerdict } from "../../src/lib/validation-policy";
+import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
 
 const intervalMs = Math.max(15000, Number(process.env.VALIDATION_INTERVAL_MS || "30000"));
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_API_TIMEOUT_MS || "10000"));
-const supersendApiKey = String(process.env.SUPERSEND_API_KEY || "").trim();
 const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v1/verify-email").trim();
 
 type ExistingResult = {
@@ -36,22 +36,27 @@ function classifySupersendMessage(message: string): ValidationVerdict {
   return { status: "unknown", detail: `supersend:${message.slice(0, 300)}` };
 }
 
-async function verifyWithSupersend(email: string): Promise<ValidationVerdict> {
+async function configuredSupersendApiKey() {
+  const [row] = await db.select({ value: systemSettings.value }).from(systemSettings)
+    .where(eq(systemSettings.key, "validation.supersend_api_key")).limit(1);
+  return decryptWorkspaceSecret(row?.value) || String(process.env.SUPERSEND_API_KEY || "").trim() || null;
+}
+
+async function verifyWithSupersend(email: string, apiKey: string): Promise<ValidationVerdict> {
   if (!isDirectGmailAddress(email)) return { status: "unknown", detail: "gmail_scope_only" };
-  if (!supersendApiKey) return { status: "error", detail: "supersend_api_key_missing" };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const url = new URL(supersendEndpoint);
     url.searchParams.set("email", email);
-    url.searchParams.set("key", supersendApiKey);
+    url.searchParams.set("key", apiKey);
 
     const response = await fetch(url, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${supersendApiKey}`,
+        "Authorization": `Bearer ${apiKey}`,
       },
       signal: controller.signal,
     });
@@ -198,6 +203,12 @@ async function runJob() {
     return;
   }
 
+  const apiKey = await configuredSupersendApiKey();
+  if (!apiKey) {
+    await heartbeat({ state: "waiting_provider_key", provider: "supersend", jobId: job.id, scope: job.scope });
+    return;
+  }
+
   const resumed = job.status === "processing";
   if (!resumed) await db.update(validationJobs).set({ status: "processing" }).where(eq(validationJobs.id, job.id));
 
@@ -220,7 +231,7 @@ async function runJob() {
       await heartbeat({ state: "paused", jobId: job.id, scope: job.scope, processed, total, remaining: total - processed });
       return;
     }
-    const result = await verifyWithSupersend(contact.normalizedEmail);
+    const result = await verifyWithSupersend(contact.normalizedEmail, apiKey);
     await db.insert(validationResults).values({ jobId: job.id, contactId: contact.id, email: contact.email, status: result.status, detail: result.detail });
     await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
     if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
