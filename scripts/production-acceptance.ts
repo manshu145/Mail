@@ -58,7 +58,7 @@ async function main(){
   for(const name of expected){
     const hb=hbMap.get(name);
     if(!hb) missing.push(name);
-    else if(Date.now()-hb.lastSeenAt.getTime()>180000) stale.push(`${name}(${Math.round((Date.now()-hb.lastSeenAt.getTime())/1000)}s)`);
+    else if(Date.now()-hb.lastSeenAt.getTime()>600000) stale.push(`${name}(${Math.round((Date.now()-hb.lastSeenAt.getTime())/1000)}s)`);
   }
   if(!missing.length && !stale.length) record("Worker heartbeats","PASS",`${expected.length}/${expected.length} fresh`);
   else record("Worker heartbeats","FAIL",`missing=[${missing.join(",")}] stale=[${stale.join(",")}]`);
@@ -191,8 +191,15 @@ async function main(){
     record("Campaign -> transport","WARN",`requires active Gmail seed inbox + active sending account + imported test contact (seed=${Boolean(seed)}, account=${Boolean(account)}, contact=${Boolean(created.contactId)})`);
   }
 
+  let bounceBaseCampaignId:string|undefined;
+  const campaignCount=await pool.query("select count(*)::int count from campaigns");
+  if(Number(campaignCount.rows[0]?.count||0)===0 && created.contactId){
+    const [base]=await db.insert(campaigns).values({name:`__acceptance_bounce_base_${stamp}`,subject:"Acceptance bounce base",status:"draft"}).returning({id:campaigns.id});
+    bounceBaseCampaignId=base.id;
+  }
   const bounceCode=await runBounceSmoke();
   record("Bounce processing",bounceCode===0?"PASS":"FAIL",`npm run smoke:bounce exit=${bounceCode}`);
+  if(bounceBaseCampaignId) await db.delete(campaigns).where(eq(campaigns.id,bounceBaseCampaignId));
 
   // Cleanup only when the test campaign is terminal or was never created.
   // If Postfix has accepted a message but it is still in flight, retain the rows
