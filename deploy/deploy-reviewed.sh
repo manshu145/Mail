@@ -69,6 +69,8 @@ on_error() {
 trap 'on_error "$LINENO"' ERR
 "${old_dc[@]}" stop --timeout 120 "${workers[@]}"
 "${dc[@]}" run --rm --no-deps app npm run db:migrate
+# Ensure the persistent CSV spool is writable by the non-root runtime user.
+"${dc[@]}" run --rm --no-deps import-volume-init
 # Persist the CURRENT queue before replacing the MTA container. Never mount an empty
 # volume over its writable-layer queue. Reuse its image to preserve Postfix UIDs.
 mta_id=$("${old_dc[@]}" ps -aq mta)
