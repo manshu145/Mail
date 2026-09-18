@@ -70,12 +70,12 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
       await handlePostfixEvent(tx as unknown as EventDb, sent, message.id);
       throw new Error("simulated interruption");
     }));
-    assert.equal((await pg.query<{status:string}>("select status from messages")).rows[0].status, "failed");
+    assert.equal((await pg.query<{status:string}>("select status from messages where id=$1", [message.id])).rows[0].status, "failed");
     assert.equal((await pg.query("select * from webhook_events")).rows.length, 0);
     await orm.transaction(tx => handlePostfixEvent(tx as unknown as EventDb, sent, message.id));
     await orm.transaction(tx => handlePostfixEvent(tx as unknown as EventDb, sent, message.id));
     await orm.transaction(tx => handlePostfixEvent(tx as unknown as EventDb, sent.replace("status=sent", "status=deferred"), message.id));
-    assert.equal((await pg.query<{status:string}>("select status from messages")).rows[0].status, "delivered");
+    assert.equal((await pg.query<{status:string}>("select status from messages where id=$1", [message.id])).rows[0].status, "delivered");
     assert.equal((await pg.query("select * from message_events")).rows.length, 1);
     assert.equal((await pg.query("select * from webhook_events")).rows.length, 1);
     const [dynamic] = await orm.insert(lists).values({ name: "Dynamic", isDynamic: true }).returning();
