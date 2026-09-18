@@ -34,14 +34,14 @@ export default async function InboxPlacementPage() {
   for (const result of results) byTest.set(result.testId, [...(byTest.get(result.testId) || []), result]);
 
   return <AppShell session={session}>
-    <div className="mb-7">
-      <p className="mb-2 text-xs font-extrabold uppercase tracking-[.18em] text-zinc-400">Deliverability</p>
-      <h1 className="text-3xl font-black tracking-[-.035em] sm:text-4xl">Inbox placement</h1>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">These are <b>seed-test placement</b> observations only—not guaranteed inbox percentages for your real audience. NexiMail records only results actually observed in configured seed inboxes.</p>
+    <div className="mb-5">
+      <p className="page-eyebrow mb-1.5">Deliverability</p>
+      <h1 className="page-title">Inbox placement</h1>
+      <p className="page-description">These are <b>seed-test placement</b> observations only—not guaranteed inbox percentages for your real audience. NexiMail records only results actually observed in configured seed inboxes.</p>
     </div>
 
-    <div className="mb-5 grid gap-4 lg:grid-cols-2">
-      <section className="premium-panel p-5">
+    <div className="mb-4 grid gap-3 lg:grid-cols-2">
+      <section className="premium-panel p-4">
         <div className="flex items-center justify-between">
           <div><h2 className="font-black">Seed inboxes</h2><p className="mt-1 text-sm text-zinc-500">Gmail / Outlook test mailboxes.</p></div>
           <ResourceCreate disabled={!usable || session.role !== "owner"} endpoint="/api/resources/seed-inboxes" title="Add seed inbox" buttonLabel="Add seed" fields={[{ name: "email", label: "Email", required: true }, { name: "provider", label: "Provider", type: "select", options: ["gmail", "outlook", "other"], required: true }, { name: "label", label: "Label" }]} />
@@ -52,7 +52,7 @@ export default async function InboxPlacementPage() {
         </div>
       </section>
 
-      <section className="premium-panel p-5">
+      <section className="premium-panel p-4">
         <div className="flex items-center justify-between">
           <div><h2 className="font-black">New seed test</h2><p className="mt-1 text-sm text-zinc-500">Choose a campaign, send it to your seed inboxes, then let the seed agent report the observed folders.</p></div>
           <ResourceCreate disabled={!usable || !seeds.length} endpoint="/api/resources/inbox-tests" title="Create seed test" buttonLabel="New test" fields={[{ name: "name", label: "Test name", required: true }, { name: "campaignId", label: "Campaign ID", placeholder: "Campaign UUID", required: true }]} />
@@ -68,14 +68,14 @@ export default async function InboxPlacementPage() {
       {tests.length ? <div className="overflow-x-auto">
         <table className="w-full min-w-[920px] text-left text-sm">
           <thead className="bg-zinc-50 text-[11px] font-extrabold uppercase tracking-[.12em] text-zinc-400 dark:bg-zinc-900/70">
-            <tr><th className="px-5 py-3.5">Test</th><th>Status</th><th>Observed</th><th>Placement</th><th>Created</th><th className="px-5 py-3.5 text-right">Action</th></tr>
+            <tr><th className="px-4 py-3">Test</th><th>Status</th><th>Observed</th><th>Placement</th><th>Created</th><th className="px-5 py-3.5 text-right">Action</th></tr>
           </thead>
           <tbody>
             {tests.map((test) => {
               const rows = byTest.get(test.id) || [];
               const counts = rows.reduce<Record<string, number>>((acc, row) => (acc[row.category] = (acc[row.category] || 0) + 1, acc), {});
               return <tr key={test.id} className="border-t border-zinc-100 dark:border-zinc-900">
-                <td className="px-5 py-4 font-black">{test.name}</td>
+                <td className="px-4 py-3 font-black">{test.name}</td>
                 <td className="capitalize font-bold">{test.status}</td>
                 <td>{rows.length}/{seeds.length}</td>
                 <td className="text-xs text-zinc-500">{Object.entries(counts).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(" · ") || "No observations yet"}</td>
