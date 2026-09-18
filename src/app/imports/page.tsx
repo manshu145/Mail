@@ -6,7 +6,7 @@ import { ImportWizard } from "@/components/import-wizard";
 import { ImportJobActions } from "@/components/import-job-actions";
 import { ImportLiveRefresh } from "@/components/import-live-refresh";
 import { db, databaseConfigured } from "@/db";
-import { importJobs, lists } from "@/db/schema";
+import { contacts, importJobs, lists } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 
 type ImportJobRow = typeof importJobs.$inferSelect & {
@@ -39,6 +39,7 @@ export default async function ImportsPage() {
 
   let rows: ImportJobRow[] = [];
   let listRows: { id: string; name: string }[] = [];
+  let uniqueContacts = 0;
   let dbError = false;
 
   if (databaseConfigured) {
@@ -68,7 +69,12 @@ export default async function ImportsPage() {
         limit 100
       `)).rows as unknown as ImportJobRow[];
 
-      listRows = await db.select({ id: lists.id, name: lists.name }).from(lists).orderBy(lists.name);
+      const [audiences, contactCount] = await Promise.all([
+        db.select({ id: lists.id, name: lists.name }).from(lists).orderBy(lists.name),
+        db.select({ value: sql<number>`count(*)::int` }).from(contacts),
+      ]);
+      listRows = audiences;
+      uniqueContacts = Number(contactCount[0]?.value || 0);
     } catch (error) {
       console.error("[imports-page] failed to load import workspace", error);
       dbError = true;
@@ -78,13 +84,13 @@ export default async function ImportsPage() {
   const usable = databaseConfigured && !dbError;
   const active = rows.filter((row) => row.status === "pending" || row.status === "processing").length;
   const processed = rows.reduce((sum, row) => sum + (row.status === "completed" ? row.totalRows : row.importedRows + row.duplicateRows + row.invalidRows + Number(row.suppressedRows || 0)), 0);
-  const accepted = rows.reduce((sum, row) => sum + Number(row.validRows || 0), 0);
+  const duplicateRows = rows.reduce((sum, row) => sum + Number(row.duplicateRows || 0), 0);
   const rejected = rows.reduce((sum, row) => sum + row.invalidRows + Number(row.validationInvalidRows || 0) + Number(row.suppressedRows || 0), 0);
   const kpis = [
-    { label: "Active jobs", value: active, icon: FileClock },
-    { label: "Rows processed", value: processed, icon: Database },
-    { label: "Validated / accepted", value: accepted, icon: FileCheck2 },
-    { label: "Non-valid / suppressed", value: rejected, icon: ShieldAlert },
+    { label: "Unique contacts", value: uniqueContacts, note: "Current contacts in database", icon: FileCheck2 },
+    { label: "Rows processed", value: processed, note: "Cumulative rows across import jobs", icon: Database },
+    { label: "Duplicate rows", value: duplicateRows, note: "Repeated rows/emails seen during import", icon: FileClock },
+    { label: "Rejected / suppressed", value: rejected, note: "Rows that did not become sendable contacts", icon: ShieldAlert },
   ];
 
   return <AppShell session={session}>
@@ -109,7 +115,7 @@ export default async function ImportsPage() {
 
     {usable ? <ImportWizard lists={listRows} /> : null}
 
-    <section className="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{kpis.map(({ label, value, icon: Icon }) => <article key={label} className="compact-stat"><div className="flex items-start justify-between gap-4"><div><p className="compact-stat-label">{label}</p><p className="compact-stat-value">{value.toLocaleString()}</p></div><div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}</section>
+    <section className="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{kpis.map(({ label, value, note, icon: Icon }) => <article key={label} className="compact-stat"><div className="flex items-start justify-between gap-4"><div><p className="compact-stat-label">{label}</p><p className="compact-stat-value">{value.toLocaleString()}</p><p className="mt-1 text-[9.5px] leading-4 text-[var(--muted)]">{note}</p></div><div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}</section>
 
     <section className="premium-panel overflow-hidden">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3.5"><div><p className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--muted)]">History</p><h2 className="mt-1 text-lg font-black">Import jobs</h2><p className="mt-1 text-xs text-[var(--muted)]">Completed/failed job metadata is retained for 30 days. Active jobs are never cleaned.</p></div><FileUp className="h-5 w-5 text-[var(--muted)]" /></div>
