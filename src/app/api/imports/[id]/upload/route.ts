@@ -64,10 +64,22 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (handle) await handle.close().catch(() => {});
     await unlink(tempPath).catch(() => {});
     const reason = error instanceof Error ? error.message : "upload_failed";
-    await db.update(importJobs).set({ status: "failed", errorMessage: reason === "import_too_large" ? "CSV is larger than 300 MB." : reason === "empty_import" ? "CSV upload was empty." : "CSV upload failed." }).where(eq(importJobs.id, id)).catch(() => {});
-    console.error("[imports.upload]", error);
-    if (reason === "import_too_large") return NextResponse.json({ error: "CSV is larger than 300 MB." }, { status: 413 });
-    if (reason === "empty_import") return NextResponse.json({ error: "CSV upload was empty." }, { status: 400 });
-    return NextResponse.json({ error: "CSV upload failed." }, { status: 500 });
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code || "") : "";
+    const userMessage =
+      reason === "import_too_large" ? "CSV is larger than 300 MB." :
+      reason === "empty_import" ? "CSV upload was empty." :
+      code === "EACCES" || code === "EPERM" ? "CSV storage is not writable on the server. An administrator must repair the import volume permissions." :
+      code === "ENOSPC" ? "CSV upload could not be saved because the server disk is full." :
+      code === "EROFS" ? "CSV storage is mounted read-only on the server." :
+      "CSV upload failed while writing the file to server storage. Please retry once; if it fails again, check the import job error or server storage.";
+
+    await db.update(importJobs).set({ status: "failed", errorMessage: userMessage }).where(eq(importJobs.id, id)).catch(() => {});
+    console.error("[imports.upload]", { jobId: id, code, reason, error });
+    if (reason === "import_too_large") return NextResponse.json({ error: userMessage, code: "file_too_large" }, { status: 413 });
+    if (reason === "empty_import") return NextResponse.json({ error: userMessage, code: "empty_file" }, { status: 400 });
+    if (code === "EACCES" || code === "EPERM") return NextResponse.json({ error: userMessage, code: "storage_permission" }, { status: 500 });
+    if (code === "ENOSPC") return NextResponse.json({ error: userMessage, code: "storage_full" }, { status: 507 });
+    if (code === "EROFS") return NextResponse.json({ error: userMessage, code: "storage_read_only" }, { status: 500 });
+    return NextResponse.json({ error: userMessage, code: "storage_write_failed" }, { status: 500 });
   }
 }
