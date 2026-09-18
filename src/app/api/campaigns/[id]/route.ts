@@ -59,7 +59,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const normalizedFromEmail =
     accountFromEmail && requestedFromEmail && isValidEmail(requestedFromEmail) && requestedDomain === accountDomain
       ? requestedFromEmail
-      : accountFromEmail || requestedFromEmail;
+      : accountFromEmail;
 
   if (wantsDelivery) {
     if (!list || !template || !account) return NextResponse.json({ error: "Select a list, template and sending account first." }, { status: 400 });
@@ -122,5 +122,5 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const auditAction = action === "send_now" ? "campaign.send_now_queued" : action === "schedule" ? "campaign.scheduled" : action === "queue" ? "campaign.queued" : "campaign.updated";
   await audit(auditAction, session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount } : null, runtimeMode: policy.mode });
-  return NextResponse.json({ ok: true, status: nextStatus, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount, validCount: audiencePreflight.validCount, pendingCount: audiencePreflight.pendingCount, unknownCount: audiencePreflight.unknownCount } : null });
+  return NextResponse.json({ ok: true, status: nextStatus, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount, validCount: audiencePreflight.validCount, pendingCount: audiencePreflight.pendingCount, unknownCount: audiencePreflight.unknownCount, awaitingValidationCount: audiencePreflight.awaitingValidationCount } : null });
 }
