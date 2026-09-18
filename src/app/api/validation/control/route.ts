@@ -5,6 +5,7 @@ import { contacts, importJobs, systemSettings, validationJobs } from "@/db/schem
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { isValidEmail, normalizeEmail } from "@/lib/contact-utils";
+import { decryptWorkspaceSecret } from "@/lib/secure-setting";
 
 const gmailSql = sql`lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'`;
 const unresolved = inArray(contacts.validationStatus, ["pending","unknown","error"]);
@@ -19,6 +20,12 @@ async function activeJob() {
 async function setPaused(paused: boolean) {
   await db.insert(systemSettings).values({ key: "validation_paused", value: paused })
     .onConflictDoUpdate({ target: systemSettings.key, set: { value: paused, updatedAt: new Date() } });
+}
+
+async function validationProviderConfigured() {
+  const [row] = await db.select({ value: systemSettings.value }).from(systemSettings)
+    .where(eq(systemSettings.key, "validation.supersend_api_key")).limit(1);
+  return Boolean(decryptWorkspaceSecret(row?.value) || String(process.env.SUPERSEND_API_KEY || "").trim());
 }
 
 export async function POST(request: NextRequest) {
@@ -42,6 +49,10 @@ export async function POST(request: NextRequest) {
     await setPaused(false);
     await audit("validation.resumed", session, "validation", undefined, {});
     return NextResponse.json({ ok: true, paused: false });
+  }
+
+  if (!(await validationProviderConfigured())) {
+    return NextResponse.json({ error: "Configure the Supersend API key in Validation before starting a validation job." }, { status: 409 });
   }
 
   const active = await activeJob();
