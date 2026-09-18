@@ -77,6 +77,11 @@ postconf -e "non_smtpd_milters = inet:127.0.0.1:8891"
 postconf -e "milter_protocol = 6"
 postconf -e "milter_default_action = tempfail"
 
+# Alpine/Postfix defaults reference /etc/postfix/aliases via LMDB. Build the
+# database explicitly so smtpd never logs alias lookup errors on first use.
+touch /etc/postfix/aliases
+newaliases
+
 if [ -n "$BOUNCE_DOMAIN" ]; then
   case "$BOUNCE_DOMAIN" in
     *[!a-zA-Z0-9.-]*|'') echo "Invalid BOUNCE_DOMAIN" >&2; exit 1 ;;
