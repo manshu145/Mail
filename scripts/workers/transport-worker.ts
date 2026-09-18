@@ -207,12 +207,8 @@ async function runOnce() {
     }
 
     const subject = headerValue(personalize(campaign.subject || template.subject || "", contact));
-    const fromName = headerValue(campaign.fromName || account.fromName);
-    const accountFromEmail = headerValue(account.fromEmail).toLowerCase();
-    const accountDomain = accountFromEmail.split("@")[1] || "";
-    const campaignFromEmail = headerValue(campaign.fromEmail || "").toLowerCase();
-    const campaignDomain = campaignFromEmail.split("@")[1] || "";
-    const fromEmail = campaignFromEmail && campaignDomain === accountDomain ? campaignFromEmail : accountFromEmail;
+    const fromName = headerValue(account.fromName);
+    const fromEmail = headerValue(account.fromEmail).toLowerCase();
     const replyTo = headerValue(account.replyTo || account.fromEmail);
     const recipient = headerValue(contact.email);
     const envelopeFrom = bounceEnabled ? makeBounceAddress(message.id) : fromEmail;
