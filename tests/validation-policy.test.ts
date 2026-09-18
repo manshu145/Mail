@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyGmailRcptResponse } from "../src/lib/validation-policy";
+import { classifyGmailRcptResponse, validationAllowsSend } from "../src/lib/validation-policy";
 
 test("Gmail 250 acceptance is recorded as accepted, not unknown", () => {
   assert.equal(classifyGmailRcptResponse(250, "250 2.1.5 OK").status, "accepted");
@@ -20,4 +20,16 @@ test("temporary Gmail response remains unknown", () => {
 
 test("ambiguous negative response remains unknown", () => {
   assert.equal(classifyGmailRcptResponse(550, "550 5.7.1 Policy rejection").status, "unknown");
+});
+
+
+test("pending direct Gmail is held until validation completes", () => {
+  assert.equal(validationAllowsSend("person@gmail.com", "pending"), false);
+  assert.equal(validationAllowsSend("person@googlemail.com", "pending"), false);
+});
+
+test("accepted Gmail and non-Gmail pending follow current policy", () => {
+  assert.equal(validationAllowsSend("person@gmail.com", "accepted"), true);
+  assert.equal(validationAllowsSend("person@example.com", "pending"), true);
+  assert.equal(validationAllowsSend("person@example.com", "invalid"), false);
 });
