@@ -1,39 +1,114 @@
-import { ShieldCheck, Workflow } from "lucide-react";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
-import { desc, sql } from "drizzle-orm";
 import { AppShell } from "@/components/app-shell";
-import { ResourceCreate } from "@/components/resource-create";
-import { db, databaseConfigured } from "@/db";
-import { contacts, validationJobs } from "@/db/schema";
+import { ValidationControls } from "@/components/validation-controls";
+import { db, databaseConfigured, pool } from "@/db";
+import { contacts, importJobs, systemSettings, validationJobs, validationResults } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 
 const gmailScope = sql`lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'`;
 
+function resultClass(status: string) {
+  if (status === "accepted" || status === "valid") return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  if (status === "invalid") return "bg-rose-500/10 text-rose-700 dark:text-rose-300";
+  if (status === "pending") return "bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  return "bg-orange-500/10 text-orange-700 dark:text-orange-300";
+}
+
 export default async function ValidationPage() {
   const session = await getSession(); if (!session) redirect("/login");
+
   let jobs: typeof validationJobs.$inferSelect[] = [];
-  let gmail = 0; let accepted = 0; let invalid = 0; let unknown = 0; let pending = 0; let dbError = false;
+  let results: typeof validationResults.$inferSelect[] = [];
+  let gmail = 0, accepted = 0, invalid = 0, unresolved = 0;
+  let paused = false;
+  let activeJob: typeof validationJobs.$inferSelect | null = null;
+  let imports: Array<{ id: string; filename: string; unresolved: number }> = [];
+  let dbError = false;
+
   if (databaseConfigured) {
     try {
-      const [jobRows, gmailRows, acceptedRows, invalidRows, unknownRows, pendingRows] = await Promise.all([
-        db.select().from(validationJobs).orderBy(desc(validationJobs.createdAt)).limit(50),
+      const [jobRows, resultRows, gmailRows, acceptedRows, invalidRows, unresolvedRows, pauseRows, activeRows, importRows] = await Promise.all([
+        db.select().from(validationJobs).orderBy(desc(validationJobs.createdAt)).limit(30),
+        db.select().from(validationResults).orderBy(desc(validationResults.createdAt)).limit(80),
         db.select({value:sql<number>`count(*)::int`}).from(contacts).where(gmailScope),
-        db.select({value:sql<number>`count(*)::int`}).from(contacts).where(sql`${gmailScope} and ${contacts.validationStatus}='accepted'`),
+        db.select({value:sql<number>`count(*)::int`}).from(contacts).where(sql`${gmailScope} and ${contacts.validationStatus} in ('accepted','valid')`),
         db.select({value:sql<number>`count(*)::int`}).from(contacts).where(sql`${gmailScope} and ${contacts.validationStatus}='invalid'`),
-        db.select({value:sql<number>`count(*)::int`}).from(contacts).where(sql`${gmailScope} and ${contacts.validationStatus} in ('unknown','error')`),
-        db.select({value:sql<number>`count(*)::int`}).from(contacts).where(sql`${gmailScope} and ${contacts.validationStatus}='pending'`),
+        db.select({value:sql<number>`count(*)::int`}).from(contacts).where(sql`${gmailScope} and ${contacts.validationStatus} in ('pending','unknown','error') and ${contacts.status}='active'`),
+        db.select({value:systemSettings.value}).from(systemSettings).where(eq(systemSettings.key,"validation_paused")).limit(1),
+        db.select().from(validationJobs).where(inArray(validationJobs.status,["pending","processing"])).orderBy(validationJobs.createdAt).limit(1),
+        pool.query<{id:string;filename:string;unresolved:number}>(`
+          select j.id,j.filename,count(distinct c.id)::int as unresolved
+          from import_jobs j
+          join import_staging_rows s on s.job_id=j.id
+          join contacts c on c.id=s.contact_id
+          where c.status='active'
+            and c.validation_status in ('pending','unknown','error')
+            and lower(c.normalized_email) ~ '@(gmail|googlemail)\\.com$'
+          group by j.id,j.filename,j.created_at
+          having count(distinct c.id) > 0
+          order by j.created_at desc
+          limit 20
+        `),
       ]);
-      jobs=jobRows; gmail=gmailRows[0]?.value??0; accepted=acceptedRows[0]?.value??0; invalid=invalidRows[0]?.value??0; unknown=unknownRows[0]?.value??0; pending=pendingRows[0]?.value??0;
+      jobs = jobRows;
+      results = resultRows;
+      gmail = gmailRows[0]?.value ?? 0;
+      accepted = acceptedRows[0]?.value ?? 0;
+      invalid = invalidRows[0]?.value ?? 0;
+      unresolved = unresolvedRows[0]?.value ?? 0;
+      paused = pauseRows[0]?.value === true;
+      activeJob = activeRows[0] || null;
+      imports = importRows.rows.map((row) => ({ id: row.id, filename: row.filename, unresolved: Number(row.unresolved || 0) }));
     } catch (error) {
       console.error("[validation-page] failed to read validation state", error);
-      dbError=true;
+      dbError = true;
     }
   }
+
   const usable = databaseConfigured && !dbError;
+
   return <AppShell session={session}>
-    <div className="mb-7 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="mb-2 text-xs font-extrabold uppercase tracking-[.18em] text-zinc-400">Deliverability</p><h1 className="text-3xl font-black tracking-[-.035em] sm:text-4xl">Validation</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">Gmail validation keeps provider outcomes explicit: <b>Accepted</b> means Gmail accepted the RCPT check, <b>Invalid</b> means an explicit mailbox-not-found response, and <b>Unknown</b> means temporary, policy, timeout or otherwise inconclusive. Newly imported pending Gmail contacts are picked up automatically.</p></div><ResourceCreate disabled={!usable} endpoint="/api/resources/validation-jobs" title="Queue Gmail validation" buttonLabel="Queue validation" fields={[]} /></div>
-    {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Validation state unavailable.</b> The database could not be read, so NexiMail will not display synthetic zero results.</div> : null}
-    <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[{l:"Gmail contacts",v:gmail},{l:"Accepted",v:accepted},{l:"Invalid",v:invalid},{l:"Unknown / retry",v:unknown},{l:"Pending",v:pending}].map((x)=><article key={x.l} className="premium-panel p-5"><p className="text-sm font-bold text-zinc-500">{x.l}</p><p className="mt-2 text-3xl font-black tracking-[-.04em]">{usable ? x.v.toLocaleString() : "—"}</p></article>)}</section>
-    <section className="premium-panel overflow-hidden">{!usable ? <div className="grid min-h-72 place-items-center p-8 text-center text-sm text-[var(--muted)]">Validation data is unavailable until the database connection recovers.</div> : jobs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-zinc-50 text-[11px] font-extrabold uppercase tracking-[.12em] text-zinc-400 dark:bg-zinc-900/70"><tr><th className="px-5 py-3.5">Job</th><th className="px-5 py-3.5">Scope</th><th className="px-5 py-3.5">Status</th><th className="px-5 py-3.5">Progress</th><th className="px-5 py-3.5">Created</th></tr></thead><tbody className="divide-y divide-zinc-100 dark:divide-zinc-900">{jobs.map((job)=><tr key={job.id}><td className="px-5 py-4 font-mono text-xs">{job.id.slice(0,8)}</td><td className="px-5 py-4 font-bold">{job.scope.startsWith("import:") ? `Import ${job.scope.slice(7,15)}` : job.scope === "gmail:pending" ? "Auto · pending Gmail" : "All Gmail contacts"}</td><td className="px-5 py-4 text-xs font-bold capitalize text-zinc-500">{job.status}</td><td className="px-5 py-4 text-xs text-zinc-500">{job.processedRows.toLocaleString()}/{job.totalRows.toLocaleString()}</td><td className="px-5 py-4 text-xs text-zinc-400">{new Intl.DateTimeFormat("en",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}).format(job.createdAt)}</td></tr>)}</tbody></table></div> : <div className="grid min-h-72 place-items-center p-8 text-center"><div><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-300"><ShieldCheck className="h-5 w-5" /></div><h2 className="mt-4 font-black">No validation jobs yet</h2><p className="mt-1 text-sm text-zinc-500">New pending Gmail contacts are queued automatically; manual full re-check remains available above.</p><div className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-zinc-400"><Workflow className="h-4 w-4" /> Worker-backed processing only</div></div></div>}</section>
+    <div className="mb-7">
+      <p className="page-eyebrow mb-2">Deliverability</p>
+      <h1 className="page-title">Gmail validation</h1>
+      <p className="page-description">Validate only unresolved Gmail contacts, run a single-contact check, or validate one specific CSV import without rechecking final mailbox verdicts.</p>
+    </div>
+
+    {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Validation state unavailable.</b> The database could not be read.</div> : null}
+
+    <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {[
+        {l:"Gmail contacts",v:gmail,n:"All Gmail / Googlemail contacts"},
+        {l:"Accepted / valid",v:accepted,n:"Final positive verdicts"},
+        {l:"Invalid",v:invalid,n:"Suppressed from sending"},
+        {l:"Needs validation",v:unresolved,n:"Pending, unknown or error"},
+      ].map((x)=><article key={x.l} className="metric-card p-5"><p className="text-xs font-extrabold text-[var(--muted)]">{x.l}</p><p className="mt-3 text-3xl font-black tracking-[-.04em]">{usable ? x.v.toLocaleString() : "—"}</p><p className="mt-1 text-[11px] text-[var(--muted)]">{x.n}</p></article>)}
+    </section>
+
+    {usable ? <ValidationControls
+      paused={paused}
+      activeJob={activeJob ? { id:activeJob.id, scope:activeJob.scope, status:activeJob.status, processedRows:activeJob.processedRows, totalRows:activeJob.totalRows } : null}
+      unresolved={unresolved}
+      imports={imports}
+    /> : null}
+
+    <div className="mt-5 grid gap-5 xl:grid-cols-[.95fr_1.05fr]">
+      <section className="premium-panel overflow-hidden">
+        <div className="border-b border-[var(--border)] px-5 py-4">
+          <h2 className="font-black">Validation jobs</h2>
+          <p className="mt-1 text-xs text-[var(--muted)]">Recent queued, active and completed runs.</p>
+        </div>
+        {!usable ? <div className="p-8 text-center text-sm text-[var(--muted)]">Validation data unavailable.</div> : jobs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-5 py-3">Scope</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead><tbody className="divide-y divide-[var(--border)]">{jobs.map((job)=><tr key={job.id} className="hover:bg-[var(--surface-soft)]"><td className="px-5 py-3.5"><div className="font-bold">{job.scope.startsWith("import:") ? "CSV import" : job.scope.startsWith("contact:") ? "Single contact" : job.scope === "gmail:unresolved" ? "Unresolved Gmail" : job.scope === "gmail:pending" ? "Pending Gmail" : job.scope}</div><div className="mt-0.5 font-mono text-[10px] text-[var(--muted)]">{job.id.slice(0,8)}</div></td><td><span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold capitalize ${job.status==="completed"?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":job.status==="failed"?"bg-rose-500/10 text-rose-700 dark:text-rose-300":"bg-blue-500/10 text-blue-700 dark:text-blue-300"}`}>{paused && activeJob?.id===job.id ? "paused" : job.status}</span></td><td className="text-xs font-bold text-[var(--muted)]">{job.processedRows.toLocaleString()} / {job.totalRows.toLocaleString()}</td><td className="text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short"}).format(job.createdAt)}</td></tr>)}</tbody></table></div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation jobs yet.</div>}
+      </section>
+
+      <section className="premium-panel overflow-hidden">
+        <div className="border-b border-[var(--border)] px-5 py-4">
+          <h2 className="font-black">Result log</h2>
+          <p className="mt-1 text-xs text-[var(--muted)]">Latest mailbox-level results and probe details.</p>
+        </div>
+        {!usable ? <div className="p-8 text-center text-sm text-[var(--muted)]">Validation data unavailable.</div> : results.length ? <div className="max-h-[620px] divide-y divide-[var(--border)] overflow-auto">{results.map((row)=><div key={row.id} className="p-4 transition hover:bg-[var(--surface-soft)]"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="break-all text-sm font-black">{row.email}</div><div className="mt-2 flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-[10px] font-extrabold capitalize ${resultClass(row.status)}`}>{row.status}</span>{row.detail ? <span className="rounded-full bg-[var(--surface-soft)] px-2 py-1 font-mono text-[10px] text-[var(--muted)]">{row.detail}</span> : null}</div></div><time className="shrink-0 text-[11px] text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short"}).format(row.createdAt)}</time></div></div>)}</div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation results yet.</div>}
+      </section>
+    </div>
   </AppShell>;
 }
