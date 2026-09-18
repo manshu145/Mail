@@ -17,8 +17,9 @@ export default async function ReportsPage(){
   let recent:typeof messages.$inferSelect[]=[];
   let campaigns:Awaited<ReturnType<typeof getCampaignMetricsList>>=[];
   let providerRows:Record<string,unknown>[]=[]; let daily:Record<string,unknown>[]=[]; let links:Record<string,unknown>[]=[]; let cooldowns:typeof providerCooldowns.$inferSelect[]=[];
+  const supplementalErrors:string[]=[];
   if(databaseConfigured)try{
-    const [summary,engagement,r,cm,p,d,l,cd]=await Promise.all([
+    const [summary,engagement,r,cm]=await Promise.all([
       db.execute(sql`select count(*)::int total,
         count(*) filter(where status='delivered')::int delivered,
         count(*) filter(where status='bounced')::int bounced,
@@ -37,6 +38,13 @@ export default async function ReportsPage(){
         from message_events`),
       db.select().from(messages).orderBy(desc(messages.queuedAt)).limit(30),
       getCampaignMetricsList(30),
+    ]);
+    const s=(summary.rows[0]||{}) as Record<string,unknown>; const e=(engagement.rows[0]||{}) as Record<string,unknown>;
+    total=Number(s.total||0);delivered=Number(s.delivered||0);bounced=Number(s.bounced||0);deferred=Number(s.deferred||0);accepted=Number(s.accepted||0);failed=Number(s.failed||0);inFlight=Number(s.in_flight||0);
+    opens=Number(e.opens||0);clicks=Number(e.clicks||0);automatedOpens=Number(e.automated_opens||0);automatedClicks=Number(e.automated_clicks||0);complaints=Number(e.complaints||0);unsubs=Number(e.unsubs||0);
+    recent=r;campaigns=cm;
+
+    const supplemental=await Promise.allSettled([
       db.execute(sql`select lower(split_part(recipient_email,'@',2)) domain,
         count(*)::int total,
         count(*) filter(where status='delivered')::int delivered,
@@ -56,10 +64,11 @@ export default async function ReportsPage(){
         group by 1 order by clicks desc limit 20`),
       db.select().from(providerCooldowns).orderBy(desc(providerCooldowns.updatedAt)).limit(50),
     ]);
-    const s=(summary.rows[0]||{}) as Record<string,unknown>; const e=(engagement.rows[0]||{}) as Record<string,unknown>;
-    total=Number(s.total||0);delivered=Number(s.delivered||0);bounced=Number(s.bounced||0);deferred=Number(s.deferred||0);accepted=Number(s.accepted||0);failed=Number(s.failed||0);inFlight=Number(s.in_flight||0);
-    opens=Number(e.opens||0);clicks=Number(e.clicks||0);automatedOpens=Number(e.automated_opens||0);automatedClicks=Number(e.automated_clicks||0);complaints=Number(e.complaints||0);unsubs=Number(e.unsubs||0);
-    recent=r;campaigns=cm;providerRows=p.rows as Record<string,unknown>[];daily=d.rows as Record<string,unknown>[];links=l.rows as Record<string,unknown>[];cooldowns=cd;
+    if(supplemental[0].status==="fulfilled")providerRows=supplemental[0].value.rows as Record<string,unknown>[];else supplementalErrors.push("provider performance");
+    if(supplemental[1].status==="fulfilled")daily=supplemental[1].value.rows as Record<string,unknown>[];else supplementalErrors.push("delivery trend");
+    if(supplemental[2].status==="fulfilled")links=supplemental[2].value.rows as Record<string,unknown>[];else supplementalErrors.push("top links");
+    if(supplemental[3].status==="fulfilled")cooldowns=supplemental[3].value;else supplementalErrors.push("provider cooldowns");
+    supplemental.forEach((result,index)=>{if(result.status==="rejected")console.error("[reports] supplemental query failed",index,result.reason)});
   }catch(error){console.error("[reports]",error);dbError=true}
   const usable=databaseConfigured&&!dbError;
   const finalized=delivered+bounced+failed;
@@ -72,6 +81,7 @@ export default async function ReportsPage(){
   return <AppShell session={session}>
     <div className="mb-7"><p className="mb-2 text-xs font-extrabold uppercase tracking-[.18em] text-zinc-400">Analytics</p><h1 className="text-3xl font-black tracking-[-.035em] sm:text-4xl">Reports</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">Delivery, provider health, verified engagement and recipient-level transport truth. Known automated scanners/previews remain separated from human activity.</p></div>
     {!usable?<div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>{databaseConfigured ? "Reports could not be loaded." : "Database is not configured."}</b> {databaseConfigured ? "A reporting query failed. Check the application logs for details; unavailable metrics are not shown as zero." : "Configure the database connection to load analytics."}</div>:null}
+    {usable && supplementalErrors.length ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Some supplemental analytics are unavailable:</b> {supplementalErrors.join(", ")}. Core delivery and engagement metrics are still live.</div> : null}
     {usable && <>
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(({l,v,icon:Icon})=><article key={l} className="premium-panel p-5"><div className="flex justify-between"><p className="text-sm font-bold text-zinc-500">{l}</p><Icon className="h-5 w-5 text-zinc-400"/></div><p className="mt-3 text-3xl font-black">{v.toLocaleString()}</p></article>)}</section>
     <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[["Delivery rate (finalized)",deliveryRate],["Open rate",openRate],["Click rate",clickRate],["Bounce rate (finalized)",bounceRate]].map(([l,v])=><article key={String(l)} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4"><p className="text-xs font-bold text-[var(--muted)]">{l}</p><p className="mt-1 text-2xl font-black">{Number(v).toFixed(2)}%</p></article>)}</section>
