@@ -4,6 +4,7 @@ import { contacts,messages,suppressions } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { hasConfirmedConsent } from "../../src/lib/consent-policy";
 import { readDeliverySettings } from "../../src/lib/delivery-settings";
+import { validationAllowsSend } from "../../src/lib/validation-policy";
 
 const intervalMs=Math.max(1000,Number(process.env.POLICY_WORKER_INTERVAL_MS||"3000"));
 async function heartbeat(meta:Record<string,unknown>={}){await db.insert(workerHeartbeats).values({workerName:"policy",metadata:meta}).onConflictDoUpdate({target:workerHeartbeats.workerName,set:{lastSeenAt:new Date(),metadata:meta}})}
@@ -21,7 +22,10 @@ async function runOnce(){
   if(!hasConfirmedConsent(contact)){await db.update(messages).set({status:"cancelled",lastError:"marketing_consent_missing"}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
   const [suppressed]=await db.select({id:suppressions.id,reason:suppressions.reason}).from(suppressions).where(eq(suppressions.normalizedEmail,contact.normalizedEmail)).limit(1);
   if(suppressed){await db.update(messages).set({status:"cancelled",lastError:`suppressed:${suppressed.reason}`}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
-  if(contact.validationStatus==="invalid"){await db.update(messages).set({status:"cancelled",lastError:"validation_invalid"}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
+  if(!validationAllowsSend(contact.normalizedEmail, contact.validationStatus)){
+   const reason=contact.validationStatus==="invalid"?"validation_invalid":"awaiting_gmail_validation";
+   await db.update(messages).set({status:"cancelled",lastError:reason}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue
+  }
   await db.update(messages).set({status:"ready_for_transport",lastError:null}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));ready++
  }
  await heartbeat({state:"online",evaluated:queued.length,ready,cancelled,activeBefore:active,maxActiveQueued:settings.maxActiveQueued,source:"database_control_plane"})
