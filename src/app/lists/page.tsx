@@ -32,7 +32,8 @@ export default async function ListsPage() {
         {name:"name",label:"Name",required:true},
         {name:"description",label:"Description",type:"textarea"},
         {name:"type",label:"Type",type:"select",options:[{label:"Static list",value:"static"},{label:"Dynamic segment",value:"dynamic"}]},
-        {name:"field",label:"Dynamic rule field",type:"select",options:[{label:"Email domain",value:"email_domain"},{label:"Validation status",value:"validation_status"},{label:"Contact status",value:"contact_status"}]},
+        {name:"field",label:"Dynamic rule field",type:"select",options:[{label:"Email domain",value:"email_domain"},{label:"Validation status",value:"validation_status"},{label:"Contact status",value:"contact_status"},{label:"Custom attribute",value:"custom_attribute"}]},
+        {name:"attributeKey",label:"Custom attribute key",placeholder:"city / category / industry"},
         {name:"operator",label:"Operator",type:"select",options:["equals","not_equals"]},
         {name:"value",label:"Rule value",placeholder:"gmail.com / valid / active"},
       ]}/>
