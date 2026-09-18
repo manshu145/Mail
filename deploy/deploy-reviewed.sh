@@ -16,6 +16,15 @@ for tool in git docker curl sha256sum tar python3; do command -v "$tool" >/dev/n
 docker compose version >/dev/null
 [[ -d "$APP_DIR/.git" && -f "$APP_DIR/.env" ]] || { echo 'Existing /opt/neximail-next checkout and .env are required.'; exit 1; }
 
+env_value() {
+  local key="$1"
+  awk -v k="$key" 'index($0,k"=")==1 {v=substr($0,length(k)+2); gsub(/^["'\'' ]+|["'\'' ]+$/,"",v); print v; exit}' "$APP_DIR/.env"
+}
+APP_URL="$(env_value APP_URL)"
+[[ "$APP_URL" =~ ^https?:// ]] || { echo 'APP_URL must be configured in .env with http:// or https://'; exit 1; }
+HEALTH_URL="${APP_URL%/}/api/health"
+LOGIN_URL="${APP_URL%/}/login"
+
 # Resolve the requested branch once, then pin the entire rollout to that immutable commit.
 git -C "$APP_DIR" fetch origin "$BRANCH"
 REVISION=${NEXIMAIL_DEPLOY_REVISION:-$(git -C "$APP_DIR" rev-parse "origin/$BRANCH")}
@@ -131,7 +140,7 @@ fi
 "${dc[@]}" exec -T app node --import tsx scripts/check-reports.ts
 
 for attempt in $(seq 1 40); do
-  if curl -fsS --max-time 10 https://mail.groundsreport.com/api/health > "$BACKUP_DIR/health.json"; then
+  if curl -fsS --max-time 10 "$HEALTH_URL" > "$BACKUP_DIR/health.json"; then
     ready=1
     for service in "${services[@]}"; do
       [[ -n "$("${dc[@]}" ps --status running -q "$service")" ]] || ready=0
@@ -142,7 +151,7 @@ for attempt in $(seq 1 40); do
       expected=$(sha256sum "$RELEASE_DIR/scripts/workers/transport-worker.ts" | cut -d ' ' -f1)
       actual=$("${dc[@]}" exec -T app sha256sum scripts/workers/transport-worker.ts | cut -d ' ' -f1)
       [[ "$actual" == "$expected" ]] || { echo 'Running app revision mismatch.'; exit 1; }
-      printf '\nDEPLOYED %s\nURL: https://mail.groundsreport.com/login\nRelease: %s\nBackup: %s\n' "$REVISION" "$RELEASE_DIR" "$BACKUP_DIR"
+      printf '\nDEPLOYED %s\nURL: %s\nRelease: %s\nBackup: %s\n' "$REVISION" "$LOGIN_URL" "$RELEASE_DIR" "$BACKUP_DIR"
       "${dc[@]}" ps
       cat "$BACKUP_DIR/health.json"
       exit 0
