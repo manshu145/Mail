@@ -63,7 +63,6 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
         count(distinct message_id) filter(where type='open' and ${humanEvent})::int unique_opens,
         count(distinct (
           message_id::text || ':' ||
-          coalesce(payload->>'ipHash','') || ':' ||
           coalesce(payload->>'userAgent','') || ':' ||
           floor(extract(epoch from created_at) / 300)::text
         )) filter(where type='open' and ${humanEvent})::int total_opens,
@@ -108,7 +107,6 @@ export async function getCampaignMetricsList(limit = 50): Promise<CampaignMetric
       count(distinct case when e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false then e.message_id end)::int unique_opens,
       count(distinct (
         e.message_id::text || ':' ||
-        coalesce(e.payload->>'ipHash','') || ':' ||
         coalesce(e.payload->>'userAgent','') || ':' ||
         floor(extract(epoch from e.created_at) / 300)::text
       )) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false)::int total_opens,
