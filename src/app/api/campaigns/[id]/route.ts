@@ -108,7 +108,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     name: value(body.name) || campaign.name,
     subject: value(body.subject) || campaign.subject,
     preheader: value(body.preheader),
-    fromName: value(body.fromName),
+    fromName: account?.fromName || null,
     fromEmail: normalizedFromEmail,
     listId, templateId, sendingAccountId,
     trackOpens: body.trackOpens !== false,
