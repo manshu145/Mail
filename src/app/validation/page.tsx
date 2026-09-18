@@ -72,7 +72,7 @@ export default async function ValidationPage() {
     <div className="mb-7">
       <p className="page-eyebrow mb-2">Deliverability</p>
       <h1 className="page-title">Gmail validation</h1>
-      <p className="page-description">Validate only unresolved Gmail contacts, run a single-contact check, or validate one specific CSV import without rechecking final mailbox verdicts.</p>
+      <p className="page-description">Optional Gmail/Googlemail validation via Supersend. Campaign sending is independent from validation; only contacts already marked invalid are excluded from sending.</p>
     </div>
 
     {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Validation state unavailable.</b> The database could not be read.</div> : null}
@@ -105,7 +105,7 @@ export default async function ValidationPage() {
       <section className="premium-panel overflow-hidden">
         <div className="border-b border-[var(--border)] px-5 py-4">
           <h2 className="font-black">Result log</h2>
-          <p className="mt-1 text-xs text-[var(--muted)]">Latest mailbox-level results and probe details.</p>
+          <p className="mt-1 text-xs text-[var(--muted)]">Latest Gmail validation results returned by the configured validation provider.</p>
         </div>
         {!usable ? <div className="p-8 text-center text-sm text-[var(--muted)]">Validation data unavailable.</div> : results.length ? <div className="max-h-[620px] divide-y divide-[var(--border)] overflow-auto">{results.map((row)=><div key={row.id} className="p-4 transition hover:bg-[var(--surface-soft)]"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="break-all text-sm font-black">{row.email}</div><div className="mt-2 flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-[10px] font-extrabold capitalize ${resultClass(row.status)}`}>{row.status}</span>{row.detail ? <span className="rounded-full bg-[var(--surface-soft)] px-2 py-1 font-mono text-[10px] text-[var(--muted)]">{row.detail}</span> : null}</div></div><time className="shrink-0 text-[11px] text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short"}).format(row.createdAt)}</time></div></div>)}</div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation results yet.</div>}
       </section>
