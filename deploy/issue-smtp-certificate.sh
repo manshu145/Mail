@@ -2,8 +2,16 @@
 set -Eeuo pipefail
 umask 077
 
-HOST="${MTA_TLS_HOSTNAME:-smtp.groundsreport.com}"
-EMAIL="${CERTBOT_EMAIL:-admin@groundsreport.com}"
+APP_DIR=${NEXIMAIL_APP_DIR:-/opt/neximail-next}
+env_value() {
+  local key="$1"
+  [[ -f "$APP_DIR/.env" ]] || return 0
+  awk -v k="$key" 'index($0,k"=")==1 {v=substr($0,length(k)+2); gsub(/^["'\'' ]+|["'\'' ]+$/,"",v); print v; exit}' "$APP_DIR/.env"
+}
+HOST="${MTA_TLS_HOSTNAME:-$(env_value MTA_HOSTNAME)}"
+EMAIL="${CERTBOT_EMAIL:-$(env_value OWNER_EMAIL)}"
+[[ -n "$HOST" ]] || { echo "[FAIL] MTA_HOSTNAME is not configured."; exit 2; }
+[[ -n "$EMAIL" ]] || { echo "[FAIL] OWNER_EMAIL or CERTBOT_EMAIL is not configured."; exit 2; }
 PROJECT_NAME="${NEXIMAIL_PROJECT_NAME:-neximail-next}"
 MTA_CONTAINER="${NEXIMAIL_MTA_CONTAINER:-neximail-next-mta-1}"
 VOLUME="${PROJECT_NAME}_mta_tls"
