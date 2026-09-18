@@ -28,8 +28,6 @@ function scheduledValue(formData: FormData) {
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? raw : date.toISOString();
 }
-function domainOf(email: string | null | undefined) { return (email || "").split("@")[1]?.toLowerCase() || ""; }
-
 export function CampaignEditor({ campaign, lists, templates, accounts, runtimePolicy }: { campaign: Campaign; lists: Option[]; templates: Option[]; accounts: AccountOption[]; runtimePolicy: RuntimePolicyView }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -45,9 +43,8 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const [previewMode, setPreviewMode] = useState<"desktop"|"mobile">("desktop");
   const selectedAccount = useMemo(() => accounts.find((x) => x.id === accountId) || null, [accounts, accountId]);
   const initialAccount = accounts.find((x) => x.id === campaign.sendingAccountId) || null;
-  const campaignOverrideAllowed = Boolean(campaign.fromEmail && initialAccount && domainOf(campaign.fromEmail) === domainOf(initialAccount.fromEmail));
-  const [fromName, setFromName] = useState(campaign.fromName || initialAccount?.fromName || "");
-  const [fromEmail, setFromEmail] = useState(campaignOverrideAllowed ? campaign.fromEmail! : initialAccount?.fromEmail || "");
+  const [fromName, setFromName] = useState(initialAccount?.fromName || "");
+  const [fromEmail, setFromEmail] = useState(initialAccount?.fromEmail || "");
   const [schedule, setSchedule] = useState(toLocalDateTimeInput(campaign.scheduledAt));
   const deliveryReady = Boolean(listId && templateId && accountId && runtimePolicy.sendingEnabled);
   const reviewReady = Boolean(preview && preview.audience.eligibleCount > 0 && (runtimePolicy.maxRecipientsPerCampaign === null || preview.audience.eligibleCount <= runtimePolicy.maxRecipientsPerCampaign));
