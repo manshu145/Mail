@@ -16,7 +16,7 @@ import { getSession } from "@/lib/auth";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
 import { getCampaignMetrics } from "@/lib/campaign-reporting";
 
-const fmt=(value:Date|string|null|undefined)=>value?new Intl.DateTimeFormat("en",{dateStyle:"short",timeStyle:"short"}).format(new Date(value)):"—";
+const fmt=(value:Date|string|null|undefined)=>value?new Intl.DateTimeFormat("en",{dateStyle:"short",timeStyle:"short", timeZone:"Asia/Kolkata"}).format(new Date(value)):"—";
 type DrillView="targeted"|"delivered"|"opens"|"clicks"|"bounce_failed";
 
 function one(value:string|string[]|undefined){return Array.isArray(value)?value[0]:value}
