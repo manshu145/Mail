@@ -188,10 +188,24 @@ async function runJob() {
   await heartbeat({ state: "idle", lastJobId: job.id, scope: job.scope, processed: total, resumed });
 }
 
+async function runWithWorkerLock() {
+  const client = await pool.connect();
+  let locked = false;
+  try {
+    const result = await client.query<{ locked: boolean }>(`select pg_try_advisory_lock(hashtext('neximail-validation-worker')) as locked`);
+    locked = Boolean(result.rows[0]?.locked);
+    if (!locked) return;
+    await runJob();
+  } finally {
+    if (locked) await client.query(`select pg_advisory_unlock(hashtext('neximail-validation-worker'))`).catch(() => {});
+    client.release();
+  }
+}
+
 async function main() {
   console.log("[validation-worker] started; restart-safe Gmail validation with automatic pending sweep");
   while (true) {
-    try { await runJob(); }
+    try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
