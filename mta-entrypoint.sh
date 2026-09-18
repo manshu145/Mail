@@ -8,6 +8,7 @@ BOUNCE_DOMAIN="${BOUNCE_DOMAIN:-}"
 BOUNCE_RECEIVER_HOST="${BOUNCE_RECEIVER_HOST:-bounce-receiver}"
 BOUNCE_RECEIVER_PORT="${BOUNCE_RECEIVER_PORT:-2526}"
 DKIM_DIR="${DKIM_KEY_DIR:-/var/lib/neximail/dkim}"
+TLS_DIR="${MTA_TLS_DIR:-/etc/postfix/tls}"
 
 mkdir -p /var/log/mta /var/spool/postfix /etc/postfix /run/opendkim "$DKIM_DIR"
 chmod 0755 /var/log/mta "$DKIM_DIR"
@@ -54,6 +55,18 @@ postconf -e "maillog_file = /var/log/mta/mail.log"
 postconf -e "smtp_tls_security_level = may"
 postconf -e "smtp_tls_loglevel = 0"
 postconf -e "smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt"
+
+if [ -s "${TLS_DIR}/fullchain.pem" ] && [ -s "${TLS_DIR}/privkey.pem" ]; then
+  postconf -e "smtpd_tls_cert_file = ${TLS_DIR}/fullchain.pem"
+  postconf -e "smtpd_tls_key_file = ${TLS_DIR}/privkey.pem"
+  postconf -e "smtpd_tls_security_level = may"
+  postconf -e "smtpd_tls_loglevel = 1"
+  postconf -e "smtpd_tls_received_header = yes"
+  echo "Inbound SMTP STARTTLS enabled using ${TLS_DIR}/fullchain.pem"
+else
+  postconf -e "smtpd_tls_security_level = none"
+  echo "Inbound SMTP STARTTLS disabled: certificate/key not present in ${TLS_DIR}" >&2
+fi
 postconf -e "smtp_connection_cache_on_demand = yes"
 postconf -e "maximal_queue_lifetime = 5d"
 postconf -e "bounce_queue_lifetime = 5d"
