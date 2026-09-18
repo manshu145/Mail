@@ -75,7 +75,12 @@ export default async function CampaignDetailPage({
         m.delivered_at,
         m.bounced_at,
         m.last_error,
-        count(e.id) filter(where e.type='open' and ${human})::int opens,
+        count(distinct case when e.type='open' and ${human} then
+          e.message_id::text || ':' ||
+          coalesce(e.payload->>'ipHash','') || ':' ||
+          coalesce(e.payload->>'userAgent','') || ':' ||
+          floor(extract(epoch from e.created_at) / 300)::text
+        end)::int opens,
         count(e.id) filter(where e.type='click' and ${human})::int clicks,
         min(e.created_at) filter(where e.type='open' and ${human}) first_open,
         max(e.created_at) filter(where e.type='open' and ${human}) last_open,
@@ -190,7 +195,7 @@ export default async function CampaignDetailPage({
         </div>
       </div>
 
-      {recipientRows.length?<div className="overflow-x-auto"><table className="w-full min-w-[1160px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-4 py-2.5 sm:px-5">Recipient</th><th>Status</th><th>Opens</th><th>Clicks</th><th>First / last open</th><th>First / last click</th><th>Delivered</th><th className="pr-4 sm:pr-5">Detail</th></tr></thead><tbody>{recipientRows.map((m)=>{
+      {recipientRows.length?<div className="overflow-x-auto"><table className="w-full min-w-[1160px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-4 py-2.5 sm:px-5">Recipient</th><th>Status</th><th>Open sessions</th><th>Clicks</th><th>First / last open</th><th>First / last click</th><th>Delivered</th><th className="pr-4 sm:pr-5">Detail</th></tr></thead><tbody>{recipientRows.map((m)=>{
         const messageId=String(m.id);
         const rowQuery=new URLSearchParams({view,page:String(page),message:messageId});
         if(clickUrl)rowQuery.set("url",clickUrl);
