@@ -4,8 +4,10 @@ import { Pencil, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+type SegmentField = "email_domain" | "validation_status" | "contact_status" | "custom_attribute";
+
 type Rule = {
-  field: "email_domain" | "validation_status" | "contact_status" | "custom_attribute";
+  field: SegmentField;
   attributeKey?: string | null;
   operator: "equals" | "not_equals";
   value: string;
@@ -24,7 +26,7 @@ export function AudienceActions({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [field, setField] = useState<Rule extends infer _ ? "email_domain" | "validation_status" | "contact_status" | "custom_attribute" : never>(rule?.field || "email_domain");
+  const [field, setField] = useState<SegmentField>(rule?.field || "email_domain");
 
   async function save(formData: FormData) {
     setBusy(true);
