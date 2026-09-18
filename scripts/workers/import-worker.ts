@@ -238,6 +238,20 @@ async function runOnce() {
   await heartbeat({ state: remaining ? "processing" : "idle", jobId: job.id, listId, imported, duplicates, invalid, suppressed, remaining, stagedTotal });
 }
 
-async function main() { console.log(`[import-worker] started, batch=${batchSize}, stageBatch=${stageBatchSize}, retention=${retentionDays}d, maxRows=${maxImportRows}`); while (true) { try { await runOnce(); } catch (error) { console.error("[import-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); } await sleep(intervalMs); } }
+async function runWithWorkerLock() {
+  const client = await pool.connect();
+  let locked = false;
+  try {
+    const result = await client.query<{ locked: boolean }>(`select pg_try_advisory_lock(hashtext('neximail-import-worker')) as locked`);
+    locked = Boolean(result.rows[0]?.locked);
+    if (!locked) return;
+    await runOnce();
+  } finally {
+    if (locked) await client.query(`select pg_advisory_unlock(hashtext('neximail-import-worker'))`).catch(() => {});
+    client.release();
+  }
+}
+
+async function main() { console.log(`[import-worker] started, batch=${batchSize}, stageBatch=${stageBatchSize}, retention=${retentionDays}d, maxRows=${maxImportRows}`); while (true) { try { await runWithWorkerLock(); } catch (error) { console.error("[import-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); } await sleep(intervalMs); } }
 main().catch(console.error);
 process.on("SIGTERM", async () => { await pool.end(); process.exit(0); });
