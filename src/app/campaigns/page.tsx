@@ -3,10 +3,19 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { desc } from "drizzle-orm";
 import { AppShell } from "@/components/app-shell";
+import { LiveRefresh } from "@/components/live-refresh";
 import { ResourceCreate } from "@/components/resource-create";
 import { db, databaseConfigured } from "@/db";
 import { campaigns } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+
+function statusClass(status:string){
+  if(status==="completed") return "border-emerald-500/15 bg-emerald-500/[0.08] text-emerald-700 dark:text-emerald-300";
+  if(status==="sending"||status==="queued") return "border-blue-500/15 bg-blue-500/[0.08] text-blue-700 dark:text-blue-300";
+  if(status==="paused"||status==="scheduled") return "border-amber-500/15 bg-amber-500/[0.08] text-amber-700 dark:text-amber-300";
+  if(status==="cancelled") return "border-rose-500/15 bg-rose-500/[0.08] text-rose-700 dark:text-rose-300";
+  return "border-violet-500/15 bg-violet-500/[0.08] text-violet-700 dark:text-violet-300";
+}
 
 export default async function CampaignsPage() {
   const session = await getSession();
@@ -70,7 +79,7 @@ export default async function CampaignsPage() {
             <p className="text-sm font-extrabold">Campaign workspace</p>
             <p className="mt-1 text-xs text-[var(--muted)]">{rows.length ? `${rows.length} recent campaign${rows.length === 1 ? "" : "s"}` : "No campaigns yet"}</p>
           </div>
-          <span className="status-pill"><TimerReset className="h-3.5 w-3.5" /> Delivery status</span>
+          <div className="flex items-center gap-2"><LiveRefresh intervalMs={10000} label="Live"/><span className="status-pill"><TimerReset className="h-3.5 w-3.5" /> Delivery status</span></div>
         </div>
 
         {rows.length ? (
@@ -84,7 +93,7 @@ export default async function CampaignsPage() {
                   <tr key={row.id} className="transition hover:bg-[var(--surface-soft)]">
                     <td className="px-5 py-4 font-extrabold"><Link href={`/campaigns/${row.id}`} className="hover:text-violet-700 dark:hover:text-violet-300">{row.name}</Link></td>
                     <td className="max-w-[320px] truncate px-5 py-4 text-[var(--muted)]">{row.subject}</td>
-                    <td className="px-5 py-4"><span className="rounded-full border border-violet-500/10 bg-violet-500/[0.08] px-2.5 py-1 text-[11px] font-extrabold capitalize text-violet-700 dark:text-violet-300">{row.status}</span></td>
+                    <td className="px-5 py-4"><span className={`rounded-full border px-2.5 py-1 text-[11px] font-extrabold capitalize ${statusClass(row.status)}`}>{row.status}</span></td>
                     <td className="px-5 py-4 text-xs text-[var(--muted)]">{row.scheduledAt ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(row.scheduledAt) : "Not scheduled"}</td>
                     <td className="px-5 py-4 text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en", { day: "2-digit", month: "short", year: "numeric" }).format(row.createdAt)}</td>
                     <td className="px-5 py-4 text-right"><Link href={`/campaigns/${row.id}`} aria-label={`Open ${row.name}`} className="inline-grid h-8 w-8 place-items-center rounded-lg border border-[var(--border)] text-[var(--muted)] transition hover:border-violet-500/20 hover:text-violet-700"><ArrowRight className="h-4 w-4" /></Link></td>
