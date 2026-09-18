@@ -118,7 +118,7 @@ async function main(){
   const [job]=await db.insert(importJobs).values({filename:`acceptance-${stamp}.csv`,createdBy:owner.id}).returning({id:importJobs.id});
   created.importJobId=job.id;
   await db.insert(importUploads).values({
-    jobId:job.id,content:csv,headers:["email","first_name"],mapping:{},
+    jobId:job.id,content:csv,headers:["email","first_name"],mapping:{email:"email",first_name:"first_name"},
     options:{consentSource:"production_acceptance",consentStatus:"confirmed",defaultSource:"production_acceptance",queueValidation:canValidate},
     sizeBytes:Buffer.byteLength(csv)
   });
