@@ -9,6 +9,7 @@ BRANCH=${NEXIMAIL_DEPLOY_BRANCH:-main}
 BACKUP_DIR="/opt/neximail-backups/$(date -u +%Y%m%dT%H%M%SZ)"
 workers=(import-worker campaign-worker policy-worker transport-worker bounce-receiver event-worker postfix-event-worker dkim-worker validation-worker domain-health-worker reputation-worker webhook-worker)
 services=(app "${workers[@]}")
+build_services=(mta "${services[@]}")
 
 [[ $EUID -eq 0 ]] || { echo 'Run this script as root.'; exit 1; }
 for tool in git docker curl sha256sum tar python3; do command -v "$tool" >/dev/null || { echo "$tool is required"; exit 1; }; done
@@ -45,7 +46,7 @@ dc=(docker compose --project-directory "$RELEASE_DIR" -p "$PROJECT_NAME" -f "$RE
 # Preserve inspectable rollback information without dumping container secrets.
 "${old_dc[@]}" ps > "$BACKUP_DIR/services-before.txt"
 git -C "$APP_DIR" rev-parse HEAD > "$BACKUP_DIR/source-before.txt"
-for service in "${services[@]}"; do
+for service in "${build_services[@]}"; do
   id=$("${old_dc[@]}" ps -q "$service")
   if [[ -n "$id" ]]; then
     image=$(docker inspect --format '{{.Image}}' "$id")
@@ -55,7 +56,7 @@ for service in "${services[@]}"; do
 done
 
 # Build first. Existing processes continue serving until all builds succeed.
-"${dc[@]}" build "${services[@]}"
+"${dc[@]}" build "${build_services[@]}"
 "${old_dc[@]}" exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$BACKUP_DIR/database.dump"
 [[ -s "$BACKUP_DIR/database.dump" ]] || { echo 'Database backup is empty; stopping.'; exit 1; }
 
