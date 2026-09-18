@@ -94,8 +94,8 @@ export default async function CampaignsPage() {
                     <td className="px-4 py-3 font-extrabold"><Link href={`/campaigns/${row.id}`} className="hover:text-violet-700 dark:hover:text-violet-300">{row.name}</Link></td>
                     <td className="max-w-[320px] truncate px-5 py-4 text-[var(--muted)]">{row.subject}</td>
                     <td className="px-5 py-4"><span className={`rounded-full border px-2.5 py-1 text-[11px] font-extrabold capitalize ${statusClass(row.status)}`}>{row.status}</span></td>
-                    <td className="px-5 py-4 text-xs text-[var(--muted)]">{row.scheduledAt ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(row.scheduledAt) : "Not scheduled"}</td>
-                    <td className="px-5 py-4 text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en", { day: "2-digit", month: "short", year: "numeric" }).format(row.createdAt)}</td>
+                    <td className="px-5 py-4 text-xs text-[var(--muted)]">{row.scheduledAt ? new Intl.DateTimeFormat("en",{dateStyle: "medium", timeStyle: "short", timeZone:"Asia/Kolkata"}).format(row.scheduledAt) : "Not scheduled"}</td>
+                    <td className="px-5 py-4 text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en",{day: "2-digit", month: "short", year: "numeric", timeZone:"Asia/Kolkata"}).format(row.createdAt)}</td>
                     <td className="px-5 py-4 text-right"><Link href={`/campaigns/${row.id}`} aria-label={`Open ${row.name}`} className="inline-grid h-8 w-8 place-items-center rounded-lg border border-[var(--border)] text-[var(--muted)] transition hover:border-violet-500/20 hover:text-violet-700"><ArrowRight className="h-4 w-4" /></Link></td>
                   </tr>
                 ))}
