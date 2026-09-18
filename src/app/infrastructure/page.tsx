@@ -22,15 +22,22 @@ export default async function InfrastructurePage() {
 
   if (databaseConfigured) {
     try {
-      [rows, warmups, snapshots, heartbeats] = await Promise.all([
-        db.select().from(sendingAccounts),
-        db.select().from(sendingAccountWarmups),
-        db.select().from(reputationSnapshots).orderBy(desc(reputationSnapshots.createdAt)).limit(200),
-        db.select().from(workerHeartbeats),
-      ]);
-    } catch {
+      rows = await db.select().from(sendingAccounts);
+    } catch (error) {
+      console.error("Infrastructure sending-account query failed", error);
       dbError = true;
     }
+    const telemetry = await Promise.allSettled([
+      db.select().from(sendingAccountWarmups),
+      db.select().from(reputationSnapshots).orderBy(desc(reputationSnapshots.createdAt)).limit(200),
+      db.select().from(workerHeartbeats),
+    ]);
+    if (telemetry[0].status === "fulfilled") warmups = telemetry[0].value;
+    else console.error("Infrastructure warmup query failed", telemetry[0].reason);
+    if (telemetry[1].status === "fulfilled") snapshots = telemetry[1].value;
+    else console.error("Infrastructure reputation query failed", telemetry[1].reason);
+    if (telemetry[2].status === "fulfilled") heartbeats = telemetry[2].value;
+    else console.error("Infrastructure heartbeat query failed", telemetry[2].reason);
   }
 
   const usable = databaseConfigured && !dbError;

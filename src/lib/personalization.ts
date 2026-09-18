@@ -29,12 +29,12 @@ function valueForToken(contact: ContactLike, token: string) {
   return "";
 }
 
-export function personalizeContactText(value: string, contact: ContactLike) {
+function personalize(value: string, contact: ContactLike, escape: (value: string) => string) {
   return String(value || "").replace(/{{\s*([a-zA-Z0-9_ -]+?)(?:\|([^{}]*))?\s*}}/g, (_match, rawToken: string, rawFallback?: string) => {
     const token = rawToken.trim();
     if (token.toLowerCase() === "unsubscribe_url") return _match;
     const resolved = valueForToken(contact, token);
-    return resolved || String(rawFallback || "").trim();
+    return escape(resolved || String(rawFallback || "").trim());
   });
 }
 
@@ -56,4 +56,11 @@ export function samplePersonalization(value: string, recipient: string) {
       industry: "General",
     },
   });
+}
+
+export function personalizeContactText(value: string, contact: ContactLike) {
+  return personalize(value, contact, (text) => text);
+}
+export function personalizeContactHtml(value: string, contact: ContactLike) {
+  return personalize(value, contact, (text) => text.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!));
 }

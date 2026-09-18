@@ -58,6 +58,7 @@ services:
       - "${MTA_SMTP_BIND:-127.0.0.1}:25:25"
     volumes:
       - mta_logs:/var/log/mta
+      - mta_spool:/var/spool/postfix
       - dkim_keys:/var/lib/neximail/dkim
     healthcheck:
       test: ["CMD-SHELL", "postfix status && test -f /run/opendkim/opendkim.pid && kill -0 $(cat /run/opendkim/opendkim.pid)"]
@@ -115,10 +116,7 @@ services:
     <<: *runtime
     volumes:
       - mta_logs:/var/log/mta:ro
-    # Replay a bounded durable tail before following new lines. The worker treats
-    # terminal provider events idempotently, so restarts recover outcomes that
-    # happened while this consumer was down instead of leaving messages stuck.
-    command: ["sh", "-c", "while [ ! -f /var/log/mta/mail.log ]; do sleep 1; done; tail -n 20000 -F /var/log/mta/mail.log | npm run worker:postfix-events"]
+    command: ["npm", "run", "worker:postfix-events"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -158,5 +156,6 @@ volumes:
   postgres_data:
   redis_data:
   mta_logs:
+  mta_spool:
   dkim_keys:
   import_uploads:

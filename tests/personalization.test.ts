@@ -26,3 +26,10 @@ test("sample personalization gives preview-safe values", () => {
   const result = samplePersonalization("Hi {{first_name|Customer}} in {{city}}", "manshu.test@example.com");
   assert.equal(result, "Hi Manshu in Raipur");
 });
+
+test("HTML personalization escapes imported markup and attribute quotes", async () => {
+  const { personalizeContactHtml } = await import("../src/lib/personalization");
+  const contact = { email: "a@example.com", firstName: '<img src=x onerror="alert(1)">', attributes: { city: "A&B" } };
+  assert.equal(personalizeContactHtml('<p title="{{first_name}}">{{city}}</p>', contact), '<p title="&lt;img src=x onerror=&quot;alert(1)&quot;&gt;">A&amp;B</p>');
+  assert.equal(personalizeContactText("{{first_name}}", contact), contact.firstName);
+});

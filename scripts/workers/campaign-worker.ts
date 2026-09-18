@@ -1,15 +1,15 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { campaignPreflights } from "../../src/db/campaign-ops-schema";
 import { auditLogs, campaigns, lists, messages } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
+import { audienceSelection } from "../../src/lib/audience";
 import { preflightAudience } from "../../src/lib/audience-preflight";
 import { readDeliverySettings } from "../../src/lib/delivery-settings";
 import { getRuntimePolicy } from "../../src/lib/runtime-policy";
 
 const intervalMs = Math.max(1000, Number(process.env.CAMPAIGN_WORKER_INTERVAL_MS || "5000"));
 const claimBatch = Math.max(1, Math.min(25, Number(process.env.CAMPAIGN_CLAIM_BATCH || "5")));
-const messageInsertBatch = Math.max(100, Math.min(2000, Number(process.env.CAMPAIGN_MESSAGE_INSERT_BATCH || "1000")));
 
 async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "campaign", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
@@ -17,7 +17,7 @@ async function heartbeat(meta: Record<string, unknown> = {}) {
 
 async function blockCampaign(campaignId: string, reason: string, metadata: Record<string, unknown>) {
   await db.transaction(async (tx) => {
-    await tx.update(campaigns).set({ status: "paused", lastError: reason, updatedAt: new Date() }).where(eq(campaigns.id, campaignId));
+    await tx.update(campaigns).set({ status: "paused", lastError: reason, updatedAt: new Date() }).where(and(eq(campaigns.id, campaignId), eq(campaigns.status, "sending")));
     await tx.insert(auditLogs).values({ action: reason, entityType: "campaign", entityId: campaignId, metadataJson: JSON.stringify(metadata) });
   });
 }
@@ -29,7 +29,7 @@ async function recoverAbandonedClaims() {
     where status='sending'
       and coalesce(message_count,0)=0
       and started_at is not null
-      and started_at < now() - interval '10 minutes'
+      and updated_at < now() - interval '10 minutes'
     returning id::text
   `);
   return result.rowCount || 0;
@@ -122,20 +122,17 @@ async function runOnce() {
       }
 
       await db.transaction(async (tx) => {
-        // Never submit a huge values(...) statement for a large campaign. PostgreSQL
-        // has practical parameter/query-size limits and million-row audiences would
-        // otherwise fail during snapshot creation before the transport queue starts.
-        for (let offset = 0; offset < preflight.eligibleRecipients.length; offset += messageInsertBatch) {
-          const chunk = preflight.eligibleRecipients.slice(offset, offset + messageInsertBatch).map((recipient) => ({
-            campaignId: campaign.id,
-            contactId: recipient.contactId,
-            recipientEmail: recipient.email,
-            status: "queued" as const,
-          }));
-          if (chunk.length) await tx.insert(messages).values(chunk).onConflictDoNothing({ target: [messages.campaignId, messages.contactId] });
-        }
+        const [current] = await tx.select({ status: campaigns.status }).from(campaigns).where(eq(campaigns.id, campaign.id)).for("update");
+        if (current?.status !== "sending") return;
+        const selection = await audienceSelection(list);
+        await tx.execute(sql`insert into messages(campaign_id,contact_id,recipient_email,status)
+          select ${campaign.id}::uuid, contact_id, email, 'queued'::message_status from (${selection}) audience
+          where not suppressed and validation_status<>'invalid'
+          on conflict(campaign_id,contact_id) do nothing`);
         const [counts] = await tx.select({ count: sql<number>`count(*)::int` }).from(messages).where(eq(messages.campaignId, campaign.id));
-        await tx.update(campaigns).set({ audienceCount: preflight.eligibleCount, messageCount: Number(counts?.count || 0), lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
+        if (!Number(counts?.count || 0)) throw new Error("No eligible recipients remain at snapshot time");
+        if (Number(counts?.count || 0) > campaignLimit) throw new Error("Audience grew beyond campaign limit during snapshot");
+        await tx.update(campaigns).set({ audienceCount: Number(counts?.count || 0), messageCount: Number(counts?.count || 0), lastError: null, updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
         await tx.insert(auditLogs).values({
           action: "campaign.audience_snapshotted",
           entityType: "campaign",
@@ -151,7 +148,6 @@ async function runOnce() {
             unknownCount: preflight.unknownCount,
             messageCount: Number(counts?.count || 0),
             campaignLimit,
-            messageInsertBatch,
           }),
         });
       });
@@ -166,7 +162,7 @@ async function runOnce() {
     }
   }
 
-  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked, recovered, maxRecipientsPerCampaign: campaignLimit, messageInsertBatch, source: "database_control_plane" });
+  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked, recovered, maxRecipientsPerCampaign: campaignLimit, source: "database_control_plane" });
 }
 
 async function main() {

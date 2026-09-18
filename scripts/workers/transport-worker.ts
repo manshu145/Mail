@@ -1,4 +1,4 @@
-import net from "node:net";
+import { submitToMta, SmtpSubmissionUncertainError, SmtpResponseError } from "../../src/lib/smtp-submit";
 import { and, eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { campaigns, contacts, messageEvents, messages, sendingAccounts, templates } from "../../src/db/schema";
@@ -9,9 +9,11 @@ import { loadTemplateAttachments } from "../../src/lib/template-attachments";
 import { buildMimeContent } from "../../src/lib/mime-email";
 import { makeBounceAddress } from "../../src/lib/bounce-address";
 import { injectPreheader } from "../../src/lib/email-preheader";
+import { hasConfirmedConsent } from "../../src/lib/consent-policy";
+import { getRuntimePolicy } from "../../src/lib/runtime-policy";
 import { providerForEmail } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
-import { personalizeContactText } from "../../src/lib/personalization";
+import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -26,7 +28,6 @@ function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve,
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
 function headerValue(value: string) { return value.replace(/[\r\n]+/g, " ").trim(); }
 function retryDelaySeconds(attempt: number, settings: DeliverySettings) { return Math.min(settings.retryMaxSeconds, Math.max(settings.retryInitialSeconds, Math.round(settings.retryInitialSeconds * settings.retryBackoffMultiplier ** Math.max(0, attempt - 1)))); }
-function dotStuff(raw: string) { return raw.replace(/\r?\n/g, "\r\n").split("\r\n").map((line) => line.startsWith(".") ? `.${line}` : line).join("\r\n"); }
 function ensureUnsubscribe(html: string, text: string, unsubscribeUrl: string) {
   let nextHtml = html;
   let nextText = text;
@@ -49,36 +50,6 @@ async function rewriteLinks(html: string, messageId: string) {
   return output;
 }
 
-async function submitToMta(raw: string, envelopeFrom: string, recipient: string) {
-  return new Promise<{ queueId: string | null }>((resolve, reject) => {
-    const socket = net.createConnection({ host: mtaHost, port: mtaPort });
-    socket.setTimeout(smtpTimeoutMs);
-    let buffer = "";
-    let stage: "banner" | "ehlo" | "mail" | "rcpt" | "data" | "body" | "done" = "banner";
-    let settled = false;
-    const finish = (error?: Error, queueId: string | null = null) => { if (settled) return; settled = true; socket.end(); socket.destroy(); if (error) reject(error); else resolve({ queueId }); };
-    const command = (value: string) => socket.write(`${value}\r\n`);
-    const failCode = (code: number, line: string) => finish(new Error(`MTA SMTP ${code}: ${line.slice(0, 800)}`));
-    socket.on("timeout", () => finish(new Error("MTA SMTP timeout")));
-    socket.on("error", (error) => finish(error));
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        const match = line.match(/^(\d{3})([ -])(.*)$/);
-        if (!match || match[2] === "-") continue;
-        const code = Number(match[1]);
-        if (stage === "banner") { if (code !== 220) return failCode(code, line); stage = "ehlo"; command("EHLO neximail-app"); continue; }
-        if (stage === "ehlo") { if (code < 200 || code >= 300) return failCode(code, line); stage = "mail"; command(`MAIL FROM:<${envelopeFrom}>`); continue; }
-        if (stage === "mail") { if (code < 200 || code >= 300) return failCode(code, line); stage = "rcpt"; command(`RCPT TO:<${recipient}>`); continue; }
-        if (stage === "rcpt") { if (code < 200 || code >= 300) return failCode(code, line); stage = "data"; command("DATA"); continue; }
-        if (stage === "data") { if (code !== 354) return failCode(code, line); stage = "body"; socket.write(`${dotStuff(raw)}\r\n.\r\n`); continue; }
-        if (stage === "body") { if (code < 200 || code >= 300) return failCode(code, line); const queueId = line.match(/queued as\s+([A-Z0-9]+)/i)?.[1] || line.match(/queue id[=:]?\s*([A-Z0-9]+)/i)?.[1] || null; stage = "done"; command("QUIT"); return finish(undefined, queueId); }
-      }
-    });
-  });
-}
 
 function warmupLimit(warmup: typeof sendingAccountWarmups.$inferSelect | null, accountDaily: number) {
   if (!warmup?.enabled || !warmup.startedAt) return accountDaily;
@@ -136,7 +107,7 @@ async function claimMessages(): Promise<Claimed[]> {
 }
 async function markDeferred(id: string, attempt: number, error: unknown, settings: DeliverySettings) {
   const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error";
-  if (attempt >= settings.retryMaxAttempts) {
+  if ((error instanceof SmtpResponseError && error.code >= 500) || attempt >= settings.retryMaxAttempts) {
     await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [id, detail]);
     await event(id,"transport_failed",{attempt,error:detail});
     return "failed" as const;
@@ -161,6 +132,10 @@ async function runOnce() {
   // MTA may already have accepted them before the worker lost state; retrying
   // could create duplicate mail.
   const recoveredStale = await recoverStaleClaims();
+  if (!getRuntimePolicy().sendingEnabled) {
+    await heartbeat({ state: "online", sendingEnabled: false, recoveredStale });
+    return;
+  }
   const settings = await readDeliverySettings();
   const delayMs = Math.ceil(1000 / settings.maxPerSecond);
   const claimed = await claimMessages();
@@ -175,7 +150,11 @@ async function runOnce() {
 
     const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, message.campaignId)).limit(1);
     const [contact] = await db.select().from(contacts).where(eq(contacts.id, message.contactId)).limit(1);
-    if (!campaign || !contact || !campaign.sendingAccountId || !campaign.templateId || campaign.status !== "sending") {
+    if (campaign && campaign.status !== "sending") {
+      await pool.query(`update messages set status=$2,last_error='campaign_not_sending',attempt_count=greatest(attempt_count-1,0),next_attempt_at=null where id=$1 and status='sending'`, [message.id, campaign.status === "cancelled" ? "cancelled" : "ready_for_transport"]);
+      continue;
+    }
+    if (!campaign || !contact || !campaign.sendingAccountId || !campaign.templateId) {
       await pool.query(`update messages set status='failed',last_error='campaign_transport_configuration_incomplete',next_attempt_at=null where id=$1 and status='sending'`, [message.id]);
       await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"campaign_transport_configuration_incomplete"});
       failed++; continue;
@@ -210,7 +189,7 @@ async function runOnce() {
 
     const unsubscribeToken = await signPublicToken({ email: contact.email, messageId: message.id }, "90d");
     const unsubscribeUrl = `${appUrl}/unsubscribe/${unsubscribeToken}`;
-    let html = personalize(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
+    let html = personalizeContactHtml(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
     let text = personalize(template.textBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
     const preheader = personalize(campaign.preheader || "", contact);
     html = injectPreheader(html, preheader);
@@ -234,13 +213,42 @@ async function runOnce() {
       `List-Unsubscribe: <${unsubscribeUrl}>`, "List-Unsubscribe-Post: List-Unsubscribe=One-Click", mime.contentTypeHeader, "", ...mime.bodyLines,
     ].join("\r\n");
 
+    // Recheck after rendering: a queued contact may have unsubscribed or been
+    // suppressed since the policy worker approved this message.
+    const eligibility = await pool.query<{ status: string; contact_status: string; validation_status: string; email: string; consent_status: string; consent_source: string | null; suppressed: boolean }>(`
+      select c.status, ct.status as contact_status, ct.validation_status, ct.email, ct.consent_status, ct.consent_source,
+        exists(select 1 from suppressions s where s.normalized_email=ct.normalized_email) as suppressed
+      from messages m join campaigns c on c.id=m.campaign_id join contacts ct on ct.id=m.contact_id
+      where m.id=$1 and m.status='sending'`, [message.id]);
+    const latest = eligibility.rows[0];
+    if (!latest) continue;
+    if (latest.status !== "sending") {
+      await pool.query(`update messages set status=$2,last_error='campaign_not_sending',attempt_count=greatest(attempt_count-1,0),next_attempt_at=null where id=$1 and status='sending'`, [message.id, latest.status === "cancelled" ? "cancelled" : "ready_for_transport"]);
+      continue;
+    }
+    if (latest.contact_status !== "active" || latest.validation_status === "invalid" || latest.suppressed || latest.email !== contact.email || !hasConfirmedConsent({ consentStatus: latest.consent_status, consentSource: latest.consent_source })) {
+      await pool.query(`update messages set status='cancelled',last_error='recipient_no_longer_eligible',next_attempt_at=null where id=$1 and status='sending'`, [message.id]);
+      await event(message.id, "transport_cancelled", { reason: "recipient_no_longer_eligible" });
+      continue;
+    }
+
+    let mtaAccepted = false;
     try {
-      const result = await submitToMta(raw, envelopeFrom, recipient);
-      if (!result.queueId) throw new Error("MTA accepted message without returning a queue id");
+      const result = await submitToMta(raw, envelopeFrom, recipient, { host: mtaHost, port: mtaPort, timeoutMs: smtpTimeoutMs });
+      mtaAccepted = true;
+      if (!result.queueId) throw new SmtpSubmissionUncertainError("MTA accepted message without returning a queue id");
       await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]);
       await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled,provider:gate.provider,providerProbe:gate.probe});
       accepted++;
     } catch (error) {
+      if (mtaAccepted || error instanceof SmtpSubmissionUncertainError) {
+        // Never resubmit mail which may already be in Postfix. Delivery events can
+        // still reconcile its final outcome using X-NexiMail-Message-ID.
+        await pool.query(`update messages set status='failed',next_attempt_at=null,last_error='transport_submission_uncertain' where id=$1 and status='sending'`, [message.id]);
+        await event(message.id, "transport_submission_uncertain", { attempt: claim.attempt_count, error: error instanceof Error ? error.message.slice(0, 1000) : "unknown_error" });
+        failed++;
+        continue;
+      }
       const state = await markDeferred(message.id, claim.attempt_count, error, settings);
       if (state === "deferred") deferred++; else failed++;
     }
@@ -252,9 +260,18 @@ async function runOnce() {
 
 async function main() {
   if (!appUrl) throw new Error("APP_URL is required");
-  await recoverStaleClaims();
   while (true) {
-    try { await runOnce(); }
+    try {
+      // Serialize transport across replicas so account quotas and provider probes
+      // cannot race. The dedicated session owns the lock until this batch settles.
+      const lock = await pool.connect();
+      try {
+        const result = await lock.query("select pg_try_advisory_lock(734201, 1) as acquired");
+        if (result.rows[0].acquired) {
+          try { await runOnce(); } finally { await lock.query("select pg_advisory_unlock(734201, 1)"); }
+        }
+      } finally { lock.release(); }
+    }
     catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort, bounceTracking: bounceEnabled }).catch(() => {}); }
     await sleep(intervalMs);
   }
