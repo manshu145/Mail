@@ -52,7 +52,7 @@ async function main(){
   record("Owner account","PASS",`active owner present (${owner.email})`);
 
   const heartbeats=await db.select().from(workerHeartbeats);
-  const expected=["import","campaign","policy","transport","bounce-receiver","event","postfix-event","dkim","validation","domain-health","reputation","webhook"];
+  const expected=["import","campaign","policy","transport","bounce-receiver","event","postfix-events","dkim","validation","domain-health","reputation","webhook"];
   const hbMap=new Map(heartbeats.map(h=>[h.workerName,h]));
   const missing:string[]=[]; const stale:string[]=[];
   for(const name of expected){
@@ -146,7 +146,7 @@ async function main(){
   } else record("Gmail validation","WARN","no active Gmail seed inbox configured; validation probe skipped rather than inventing a mailbox");
 
   const [account]=await db.select().from(sendingAccounts).where(eq(sendingAccounts.status,"active")).limit(1);
-  if(seed && account && created.contactId){
+  if(canValidate && seed && account && created.contactId){
     const [list]=await db.insert(lists).values({name:`__acceptance_${stamp}`,description:"Automated production acceptance test"}).returning({id:lists.id});
     created.listId=list.id;
     await db.insert(contactLists).values({contactId:created.contactId,listId:list.id});
@@ -188,7 +188,7 @@ async function main(){
       record("Tracking + unsubscribe",ok?"PASS":"FAIL",`HTTP open=${openRes.status},click=${clickRes.status},unsubGET=${unsubGet.status},unsubPOST=${unsubPost.status}; events=${[...types].join(",")}; suppression=${sup.rows[0]?.reason||"none"}`);
     }
   } else {
-    record("Campaign -> transport","WARN",`requires active seed inbox + active sending account + imported test contact (seed=${Boolean(seed)}, account=${Boolean(account)}, contact=${Boolean(created.contactId)})`);
+    record("Campaign -> transport","WARN",`requires active Gmail seed inbox + active sending account + imported test contact (seed=${Boolean(seed)}, account=${Boolean(account)}, contact=${Boolean(created.contactId)})`);
   }
 
   const bounceCode=await runBounceSmoke();
