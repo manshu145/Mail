@@ -33,11 +33,7 @@ else
       dig +short TXT "$domain" | grep -i 'v=spf1' || echo "[WARN] SPF not found"
       echo "DMARC:"
       dig +short TXT "_dmarc.$domain" | grep -i 'v=dmarc1' || echo "[WARN] DMARC not found"
-      selector=$(docker exec "$PG_CONTAINER" sh -lc "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"select dkim_selector from sending_domains where domain='${domain//\'/\'\'}' limit 1\"" 2>/dev/null || true)
-      if [[ -n "$selector" ]]; then
-        echo "DKIM (${selector}):"
-        dig +short TXT "${selector}._domainkey.$domain" || echo "[WARN] DKIM record lookup empty"
-      fi
+      echo "DKIM: checked by the in-app domain-health worker above using the configured selector/key."
     else
       echo "[WARN] dig is not installed on the VPS; in-app domain-health result above remains authoritative."
     fi
