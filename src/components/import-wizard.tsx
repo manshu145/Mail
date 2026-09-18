@@ -57,7 +57,7 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
   const [defaultCategory, setDefaultCategory] = useState("");
   const [defaultTags, setDefaultTags] = useState("");
   const [listId, setListId] = useState("");
-  const [queueValidation, setQueueValidation] = useState(true);
+  const [queueValidation, setQueueValidation] = useState(false);
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [message, setMessage] = useState("");
@@ -132,7 +132,7 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
         <label><span className="mb-1 block text-xs font-bold">Optional list</span><select className={fieldClass} value={listId} onChange={(e)=>setListId(e.target.value)}><option value="">Create no extra assignment</option>{lists.map((l)=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
         <label><span className="mb-1 block text-xs font-bold">Default category</span><input className={fieldClass} value={defaultCategory} onChange={(e)=>setDefaultCategory(e.target.value)} placeholder="Students|NEET" /></label>
         <label><span className="mb-1 block text-xs font-bold">Default tags</span><input className={fieldClass} value={defaultTags} onChange={(e)=>setDefaultTags(e.target.value)} placeholder="neet|medical|raipur" /><span className="mt-1 block text-[11px] text-[var(--muted)]">Use | for multiple tags/categories.</span></label>
-        <label className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3 text-sm font-bold"><input type="checkbox" checked={queueValidation} onChange={(e)=>setQueueValidation(e.target.checked)} /> Queue background validation after import</label>
+        <label className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3 text-sm font-bold"><input type="checkbox" checked={queueValidation} onChange={(e)=>setQueueValidation(e.target.checked)} /> Optional: validate unresolved Gmail/Googlemail contacts after import</label>
         {preview.length ? <div className="overflow-hidden rounded-xl border border-[var(--border)]"><div className="bg-[var(--surface-soft)] px-3 py-2 text-xs font-black">Preview · first {preview.length} rows</div><div className="max-h-36 overflow-auto text-[11px]">{preview.map((row,i)=><div key={i} className="border-t border-[var(--border)] px-3 py-2 text-[var(--muted)]">{row.slice(0,4).join(" · ")}</div>)}</div></div> : null}
         {message ? <p className="rounded-xl bg-violet-500/[.08] px-3 py-2 text-xs font-bold text-violet-600 dark:text-violet-300">{message}</p> : null}
         <button disabled={busy || !file || !mapping.email || !consentSource.trim()} onClick={()=>void submit()} className="btn-primary w-full">{busy ? <><Loader2 className="h-4 w-4 animate-spin"/> {uploadProgress && uploadProgress > 0 ? `Uploading ${uploadProgress}%` : "Preparing upload…"}</> : <><FileUp className="h-4 w-4"/> Queue import</>}</button>
