@@ -28,7 +28,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
               and type='open'
               and created_at >= now() - (${DEDUPE_MINUTES}::int * interval '1 minute')
               and coalesce(payload->>'automated','false') = ${String(classification.automated)}
-              and coalesce(payload->>'ipHash','') = ${classification.ipHash || ""}
               and coalesce(payload->>'userAgent','') = ${classification.userAgent || ""}
           )
           returning id
