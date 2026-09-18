@@ -10,33 +10,49 @@ type Mapping = Record<string, string>;
 const fieldClass = "w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-3 text-sm outline-none focus:border-violet-400 dark:border-zinc-800 dark:bg-zinc-900";
 const MAX_FILE_BYTES = 300 * 1024 * 1024;
 
-function uploadFile(url: string, file: File, onProgress: (value: number) => void) {
-  return new Promise<{ bytes?: number }>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", "text/csv");
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && event.total > 0) onProgress(Math.min(100, Math.round(event.loaded / event.total * 100)));
-    };
-    xhr.onerror = () => reject(new Error("CSV upload could not reach the server. Check the connection and retry."));
-    xhr.onabort = () => reject(new Error("CSV upload was cancelled before completion."));
-    xhr.ontimeout = () => reject(new Error("CSV upload timed out before the server finished receiving it."));
-    xhr.onload = () => {
-      let data: { error?: string; bytes?: number } = {};
-      try { data = JSON.parse(xhr.responseText || "{}"); } catch {}
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const fallback = xhr.status === 413
-          ? "The server or reverse proxy rejected this CSV as too large. NexiMail supports up to 300 MB, but the web proxy upload limit may need to be increased."
-          : xhr.status === 401 ? "Your login session expired. Sign in again and retry the import."
-          : xhr.status === 403 ? "You do not have permission to upload this CSV."
-          : `CSV upload failed with HTTP ${xhr.status || "network error"}.`;
-        reject(new Error(data.error || fallback)); return;
-      }
-      onProgress(100);
-      resolve(data);
-    };
-    xhr.send(file);
-  });
+async function uploadFile(url: string, file: File, onProgress: (value: number) => void) {
+  const chunkBytes = 512 * 1024;
+  let offset = 0;
+
+  while (offset < file.size) {
+    const end = Math.min(file.size, offset + chunkBytes);
+    const chunk = file.slice(offset, end);
+    const isFinal = end === file.size;
+
+    const result = await new Promise<{ bytes?: number; nextOffset?: number }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", url);
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      xhr.setRequestHeader("X-NexiMail-Upload-Offset", String(offset));
+      xhr.setRequestHeader("X-NexiMail-Upload-Total", String(file.size));
+      xhr.setRequestHeader("X-NexiMail-Upload-Final", isFinal ? "1" : "0");
+      xhr.onerror = () => reject(new Error(`CSV upload lost connection near ${Math.round((offset / file.size) * 100)}%. Retry the import; no contacts were processed.`));
+      xhr.onabort = () => reject(new Error("CSV upload was cancelled before completion."));
+      xhr.ontimeout = () => reject(new Error("CSV upload timed out while transferring a file chunk."));
+      xhr.onload = () => {
+        let data: { error?: string; bytes?: number; nextOffset?: number; code?: string } = {};
+        try { data = JSON.parse(xhr.responseText || "{}"); } catch {}
+        if (xhr.status < 200 || xhr.status >= 300) {
+          const fallback = xhr.status === 413
+            ? "The server or reverse proxy rejected an upload chunk as too large."
+            : xhr.status === 401 ? "Your login session expired. Sign in again and retry the import."
+            : xhr.status === 403 ? "You do not have permission to upload this CSV."
+            : `CSV upload failed with HTTP ${xhr.status || "network error"}.`;
+          reject(new Error(data.error || fallback));
+          return;
+        }
+        resolve(data);
+      };
+      xhr.send(chunk);
+    });
+
+    const nextOffset = Number(result.nextOffset ?? end);
+    if (!Number.isFinite(nextOffset) || nextOffset <= offset) throw new Error("Server returned an invalid CSV upload offset.");
+    offset = nextOffset;
+    onProgress(Math.min(100, Math.round((offset / file.size) * 100)));
+  }
+
+  return { bytes: file.size };
 }
 
 export function ImportWizard({ lists }: { lists: ListOption[] }) {
