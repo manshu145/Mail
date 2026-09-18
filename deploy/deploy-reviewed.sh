@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Update the existing isolated NexiMail deployment; preserve database and MTA containers.
+# Update the existing NexiMail stack and migrate its live Postfix spool without dropping queued mail.
 set -Eeuo pipefail
 umask 077
 
 APP_DIR=/opt/neximail-next
 PROJECT_NAME=neximail-next
-REVISION=b3a84976c77ea723af747156fb3b194f2dfceba3
+REVISION=390dd54289301f695f9ad5b979391f7eba98aa1f
 BRANCH=fix/transport-delivery-safety
 RELEASE_DIR="/opt/neximail-releases/$REVISION"
 BACKUP_DIR="/opt/neximail-backups/$(date -u +%Y%m%dT%H%M%SZ)"
@@ -13,7 +13,7 @@ workers=(import-worker campaign-worker policy-worker transport-worker bounce-rec
 services=(app "${workers[@]}")
 
 [[ $EUID -eq 0 ]] || { echo 'Run this script as root.'; exit 1; }
-for tool in git docker curl sha256sum; do command -v "$tool" >/dev/null || { echo "$tool is required"; exit 1; }; done
+for tool in git docker curl sha256sum tar python3; do command -v "$tool" >/dev/null || { echo "$tool is required"; exit 1; }; done
 docker compose version >/dev/null
 [[ -d "$APP_DIR/.git" && -f "$APP_DIR/.env" ]] || { echo 'Existing /opt/neximail-next checkout and .env are required.'; exit 1; }
 
@@ -57,11 +57,64 @@ done
 "${old_dc[@]}" exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$BACKUP_DIR/database.dump"
 [[ -s "$BACKUP_DIR/database.dump" ]] || { echo 'Database backup is empty; stopping.'; exit 1; }
 
-trap 'echo "Deployment stopped at line $LINENO. Backup and previous images: $BACKUP_DIR. Do not reset volumes or rerun sends."' ERR
+on_error() {
+  echo "Deployment stopped at line $1. Backup and previous images: $BACKUP_DIR. Do not reset volumes or rerun sends."
+  if [[ -n "${mta_id:-}" ]] && docker inspect "$mta_id" >/dev/null 2>&1; then
+    docker start "$mta_id" >/dev/null || true
+  fi
+}
+trap 'on_error "$LINENO"' ERR
 "${old_dc[@]}" stop --timeout 120 "${workers[@]}"
 "${dc[@]}" run --rm --no-deps app npm run db:migrate
-# --no-deps deliberately preserves Postgres, Redis, Postfix and its queued mail.
+# Persist the CURRENT queue before replacing the MTA container. Never mount an empty
+# volume over its writable-layer queue. Reuse its image to preserve Postfix UIDs.
+mta_id=$("${old_dc[@]}" ps -aq mta)
+[[ -n "$mta_id" ]] || { echo 'Existing MTA container missing; stopping.'; exit 1; }
+spool_volume="${PROJECT_NAME}_mta_spool"
+spool_mount=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/spool/postfix"}}{{.Name}}{{end}}{{end}}' "$mta_id")
+if [[ -z "$spool_mount" ]]; then
+  if docker volume inspect "$spool_volume" >/dev/null 2>&1; then
+    echo "Unattached spool volume $spool_volume already exists. Preserve it and inspect the previous migration before proceeding."; exit 1
+  fi
+  mta_image=$(docker inspect --format '{{.Image}}' "$mta_id")
+  docker image tag "$mta_image" "neximail-rollback-mta:$(basename "$BACKUP_DIR" | tr '[:upper:]' '[:lower:]')"
+  "${old_dc[@]}" exec -T mta postqueue -j > "$BACKUP_DIR/postfix-queue-before.jsonl"
+  docker stop --time 120 "$mta_id"
+  docker cp -a "$mta_id:/var/spool/postfix/." - > "$BACKUP_DIR/postfix-spool.tar"
+  [[ -s "$BACKUP_DIR/postfix-spool.tar" ]] || { echo 'Postfix spool backup is empty; stopping.'; exit 1; }
+  tar -tf "$BACKUP_DIR/postfix-spool.tar" > "$BACKUP_DIR/postfix-spool-files.txt"
+  docker volume create --label "com.docker.compose.project=$PROJECT_NAME" --label com.docker.compose.volume=mta_spool "$spool_volume" >/dev/null
+  helper=$(docker create --mount "type=volume,source=$spool_volume,target=/var/spool/postfix" --entrypoint /bin/true "$mta_image")
+  docker cp -a - "$helper:/var/spool/postfix" < "$BACKUP_DIR/postfix-spool.tar"
+  docker cp -a "$helper:/var/spool/postfix/." - > "$BACKUP_DIR/postfix-spool-copied.tar"
+  python3 - "$BACKUP_DIR/postfix-spool.tar" "$BACKUP_DIR/postfix-spool-copied.tar" <<'VERIFY_SPOOL'
+import hashlib, os, sys, tarfile
+with tarfile.open(sys.argv[1]) as original, tarfile.open(sys.argv[2]) as copied:
+    target = {os.path.normpath(m.name): m for m in copied.getmembers()}
+    for entry in original.getmembers():
+        name = os.path.normpath(entry.name)
+        other = target.get(name)
+        assert other is not None, f"Missing spool entry: {name}"
+        assert (entry.uid, entry.gid, entry.mode, entry.type, entry.linkname) == (other.uid, other.gid, other.mode, other.type, other.linkname), f"Spool metadata mismatch: {name}"
+        if entry.isfile():
+            def digest(archive, member):
+                h = hashlib.sha256()
+                with archive.extractfile(member) as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b''): h.update(block)
+                return h.digest()
+            assert digest(original, entry) == digest(copied, other), f"Spool contents mismatch: {name}"
+print("Postfix queue copy verified, including ownership and file contents.")
+VERIFY_SPOOL
+  docker rm "$helper" >/dev/null
+elif [[ "$spool_mount" != "$spool_volume" ]]; then
+  echo "Existing MTA spool is mounted from $spool_mount; refusing to replace it."; exit 1
+fi
+"${dc[@]}" up -d --no-deps mta
+# Postgres and Redis are deliberately preserved.
 "${dc[@]}" up -d --no-deps "${services[@]}"
+
+# Exercise the reports SQL inside the deployed app image against the real database.
+"${dc[@]}" exec -T app node --import tsx scripts/check-reports.ts
 
 for attempt in $(seq 1 40); do
   if curl -fsS --max-time 10 https://mail.groundsreport.com/api/health > "$BACKUP_DIR/health.json"; then
@@ -69,6 +122,8 @@ for attempt in $(seq 1 40); do
     for service in "${services[@]}"; do
       [[ -n "$("${dc[@]}" ps --status running -q "$service")" ]] || ready=0
     done
+    mta_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$("${dc[@]}" ps -q mta)")
+    [[ "$mta_state" == healthy ]] || ready=0
     if [[ "$ready" == 1 ]]; then
       expected=$(sha256sum "$RELEASE_DIR/scripts/workers/transport-worker.ts" | cut -d ' ' -f1)
       actual=$("${dc[@]}" exec -T app sha256sum scripts/workers/transport-worker.ts | cut -d ' ' -f1)
