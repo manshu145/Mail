@@ -5,9 +5,7 @@ umask 077
 
 APP_DIR=/opt/neximail-next
 PROJECT_NAME=neximail-next
-REVISION=390dd54289301f695f9ad5b979391f7eba98aa1f
-BRANCH=fix/transport-delivery-safety
-RELEASE_DIR="/opt/neximail-releases/$REVISION"
+BRANCH=${NEXIMAIL_DEPLOY_BRANCH:-main}
 BACKUP_DIR="/opt/neximail-backups/$(date -u +%Y%m%dT%H%M%SZ)"
 workers=(import-worker campaign-worker policy-worker transport-worker bounce-receiver event-worker postfix-event-worker dkim-worker validation-worker domain-health-worker reputation-worker webhook-worker)
 services=(app "${workers[@]}")
@@ -17,6 +15,12 @@ for tool in git docker curl sha256sum tar python3; do command -v "$tool" >/dev/n
 docker compose version >/dev/null
 [[ -d "$APP_DIR/.git" && -f "$APP_DIR/.env" ]] || { echo 'Existing /opt/neximail-next checkout and .env are required.'; exit 1; }
 
+# Resolve the requested branch once, then pin the entire rollout to that immutable commit.
+git -C "$APP_DIR" fetch origin "$BRANCH"
+REVISION=${NEXIMAIL_DEPLOY_REVISION:-$(git -C "$APP_DIR" rev-parse "origin/$BRANCH")}
+git -C "$APP_DIR" cat-file -e "$REVISION^{commit}"
+RELEASE_DIR="/opt/neximail-releases/$REVISION"
+
 # Read only the established stack. Do not create a replacement database.
 old_dc=(docker compose --project-directory "$APP_DIR" -p "$PROJECT_NAME" -f "$APP_DIR/docker-compose.prod.yml")
 [[ -n "$("${old_dc[@]}" ps --status running -q postgres)" ]] || { echo 'Existing PostgreSQL service is not running; stopping.'; exit 1; }
@@ -24,8 +28,6 @@ old_dc=(docker compose --project-directory "$APP_DIR" -p "$PROJECT_NAME" -f "$AP
 schema_ok=$("${old_dc[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from information_schema.columns where table_schema = '\''public'\'' and table_name = '\''contacts'\'' and column_name = '\''normalized_email'\''"')
 [[ "$schema_ok" == 1 ]] || { echo 'Database schema does not match the current NexiMail stack; stopping.'; exit 1; }
 
-git -C "$APP_DIR" fetch origin "$BRANCH"
-git -C "$APP_DIR" cat-file -e "$REVISION^{commit}"
 mkdir -p /opt/neximail-releases "$BACKUP_DIR"
 if [[ ! -d "$RELEASE_DIR" ]]; then
   git -C "$APP_DIR" worktree add --detach "$RELEASE_DIR" "$REVISION"
