@@ -9,7 +9,7 @@ BRANCH=${NEXIMAIL_DEPLOY_BRANCH:-main}
 BACKUP_DIR="/opt/neximail-backups/$(date -u +%Y%m%dT%H%M%SZ)"
 workers=(import-worker campaign-worker policy-worker transport-worker bounce-receiver event-worker postfix-event-worker dkim-worker validation-worker domain-health-worker reputation-worker webhook-worker)
 services=(app "${workers[@]}")
-build_services=(mta "${services[@]}")
+build_services=(mta app)
 
 [[ $EUID -eq 0 ]] || { echo 'Run this script as root.'; exit 1; }
 for tool in git docker curl sha256sum tar python3; do command -v "$tool" >/dev/null || { echo "$tool is required"; exit 1; }; done
