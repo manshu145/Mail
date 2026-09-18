@@ -38,6 +38,12 @@ jobs:
         with:
           node-version: 20
       - run: npm install
+      - name: Validate deployment script syntax
+        run: |
+          bash -n deploy/deploy-reviewed.sh
+          bash -n deploy/run-production-acceptance.sh
+          bash -n deploy/provision-mta-tls.sh
+          bash -n deploy/issue-smtp-certificate.sh
       - run: npm run db:migrate
       - run: npm run test
       - run: npm run typecheck
