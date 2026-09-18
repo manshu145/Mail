@@ -50,6 +50,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const [fromEmail, setFromEmail] = useState(campaignOverrideAllowed ? campaign.fromEmail! : initialAccount?.fromEmail || "");
   const [schedule, setSchedule] = useState(toLocalDateTimeInput(campaign.scheduledAt));
   const deliveryReady = Boolean(listId && templateId && accountId && runtimePolicy.sendingEnabled);
+  const reviewReady = Boolean(preview && preview.audience.eligibleCount > 0 && (runtimePolicy.maxRecipientsPerCampaign === null || preview.audience.eligibleCount <= runtimePolicy.maxRecipientsPerCampaign));
   const testReady = Boolean(templateId && accountId && runtimePolicy.sendingEnabled);
 
   function chooseAccount(id: string) {
@@ -102,6 +103,10 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     setError(""); setNotice("");
     if (action !== "save" && !deliveryReady) {
       setError("Select an audience list, template and active sending account before delivery.");
+      return;
+    }
+    if (action !== "save" && !reviewReady) {
+      setError("Review the latest template preview and final audience estimate before sending or scheduling.");
       return;
     }
     if (action === "schedule") {
@@ -161,8 +166,8 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     <label><span className="mb-1.5 block text-sm font-bold">Preheader</span><input name="preheader" defaultValue={campaign.preheader || ""} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none" /></label>
 
     <div className="grid gap-4 lg:grid-cols-3">
-      <label><span className="mb-1.5 block text-sm font-bold">Audience list</span><select name="listId" value={listId} onChange={(e)=>setListId(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select list</option>{lists.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-      <label><span className="mb-1.5 block text-sm font-bold">Template</span><select name="templateId" value={templateId} onChange={(e)=>setTemplateId(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select template</option>{templates.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+      <label><span className="mb-1.5 block text-sm font-bold">Audience list</span><select name="listId" value={listId} onChange={(e)=>{setListId(e.target.value);setPreview(null)}} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select list</option>{lists.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+      <label><span className="mb-1.5 block text-sm font-bold">Template</span><select name="templateId" value={templateId} onChange={(e)=>{setTemplateId(e.target.value);setPreview(null)}} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select template</option>{templates.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
       <label><span className="mb-1.5 block text-sm font-bold">Sending account</span><select name="sendingAccountId" value={accountId} onChange={(e)=>chooseAccount(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select account</option>{accounts.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
     </div>
 
@@ -205,7 +210,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     </section>
 
     <div className={`rounded-2xl border px-4 py-3 text-xs font-semibold ${deliveryReady ? "border-emerald-500/15 bg-emerald-500/[0.05] text-emerald-700 dark:text-emerald-300" : "border-amber-500/15 bg-amber-500/[0.06] text-amber-800 dark:text-amber-200"}`}>
-      {deliveryReady ? "Delivery setup is complete. Audience, domain health and policy are rechecked again when you send." : "Delivery setup incomplete: choose an audience list, template and active sending account."}
+      {deliveryReady ? (reviewReady ? "Review complete. Audience, domain health and policy are rechecked again when you send." : "Delivery setup is complete. Wait for the latest Review & preview before sending.") : "Delivery setup incomplete: choose an audience list, template and active sending account."}
     </div>
 
     <CampaignAttachments campaignId={campaign.id} />
@@ -230,7 +235,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
 
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-5">
       <div className="flex flex-wrap gap-2"><button disabled={busy} className="btn-secondary" type="submit">Save draft</button><button disabled={busy || !testReady} className="btn-secondary" type="button" onClick={()=>setShowTest(true)}>Send test</button></div>
-      <div className="flex flex-wrap gap-2"><button disabled={busy || !deliveryReady || !schedule} className="btn-secondary" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"schedule")}}>Schedule</button><button disabled={busy || !deliveryReady} className="btn-primary" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"send_now")}}>{busy ? "Working…" : preview ? `Send to ~${preview.audience.eligibleCount.toLocaleString()}` : "Send now"}</button></div>
+      <div className="flex flex-wrap gap-2"><button disabled={busy || !deliveryReady || !reviewReady || !schedule} className="btn-secondary" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"schedule")}}>Schedule</button><button disabled={busy || !deliveryReady || !reviewReady} className="btn-primary" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"send_now")}}>{busy ? "Working…" : preview ? `Send to ~${preview.audience.eligibleCount.toLocaleString()}` : "Send now"}</button></div>
     </div>
   </form>;
 }
