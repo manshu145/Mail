@@ -15,17 +15,17 @@ type PreviewData = {
   template: { name:string; subject:string|null; html:string; text:string };
 };
 
-function toLocalDateTimeInput(iso: string | null) {
+function toKolkataDateTimeInput(iso: string | null) {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+  const ist = new Date(date.getTime() + 330 * 60 * 1000);
+  return ist.toISOString().slice(0, 16);
 }
 function scheduledValue(formData: FormData) {
   const raw = String(formData.get("scheduledAt") || "").trim();
   if (!raw) return null;
-  const date = new Date(raw);
+  const date = new Date(`${raw}:00+05:30`);
   return Number.isNaN(date.getTime()) ? raw : date.toISOString();
 }
 export function CampaignEditor({ campaign, lists, templates, accounts, runtimePolicy }: { campaign: Campaign; lists: Option[]; templates: Option[]; accounts: AccountOption[]; runtimePolicy: RuntimePolicyView }) {
@@ -45,7 +45,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const initialAccount = accounts.find((x) => x.id === campaign.sendingAccountId) || null;
   const [fromName, setFromName] = useState(initialAccount?.fromName || "");
   const [fromEmail, setFromEmail] = useState(initialAccount?.fromEmail || "");
-  const [schedule, setSchedule] = useState(toLocalDateTimeInput(campaign.scheduledAt));
+  const [schedule, setSchedule] = useState(toKolkataDateTimeInput(campaign.scheduledAt));
   const deliveryReady = Boolean(listId && templateId && accountId && runtimePolicy.sendingEnabled);
   const reviewReady = Boolean(preview && preview.audience.eligibleCount > 0 && (runtimePolicy.maxRecipientsPerCampaign === null || preview.audience.eligibleCount <= runtimePolicy.maxRecipientsPerCampaign));
   const testReady = Boolean(templateId && accountId && runtimePolicy.sendingEnabled);
@@ -218,7 +218,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
       <div className="grid gap-4 lg:grid-cols-3">
         <label><span className="mb-1.5 block text-sm font-bold">From name</span><div className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-muted)] px-3.5 py-3 text-sm font-bold text-[var(--foreground)]">{fromName || "Select a sending identity"}</div><input type="hidden" name="fromName" value={fromName} /></label>
         <label><span className="mb-1.5 block text-sm font-bold">From email</span><div className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-muted)] px-3.5 py-3 text-sm font-bold text-[var(--foreground)]">{fromEmail || "Select a sending identity"}</div><input type="hidden" name="fromEmail" value={fromEmail} /></label>
-        <label><span className="mb-1.5 block text-sm font-bold">Schedule for later</span><input name="scheduledAt" type="datetime-local" value={schedule} onChange={(e)=>setSchedule(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm" /></label>
+        <label><span className="mb-1.5 block text-sm font-bold">Schedule for later (IST)</span><input name="scheduledAt" type="datetime-local" value={schedule} onChange={(e)=>setSchedule(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm" /></label>
       </div>
       {selectedAccount ? <p className="mt-3 text-xs text-[var(--muted)]">Identity: {selectedAccount.fromName} &lt;{selectedAccount.fromEmail}&gt;{selectedAccount.replyTo ? ` · Reply-to: ${selectedAccount.replyTo}` : ""}</p> : null}
     </div>
