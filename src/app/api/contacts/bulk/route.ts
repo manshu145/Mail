@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
 import { contactLists, contacts, lists, messages } from "@/db/schema";
 import { audit } from "@/lib/audit";
@@ -47,13 +47,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, count: existingIds.length });
   }
 
-  const historyRows = await db.execute(sql`
-    select distinct contact_id::text as id
-    from messages
-    where contact_id = any(${existingIds}::uuid[])
-    limit 501
-  `);
-  const blocked = historyRows.rows.map((row) => String((row as Record<string, unknown>).id));
+  const historyRows = await db.selectDistinct({ id: messages.contactId }).from(messages).where(inArray(messages.contactId, existingIds));
+  const blocked = historyRows.map((row) => row.id);
   if (blocked.length) {
     return NextResponse.json({
       error: `${blocked.length} selected contact${blocked.length === 1 ? " has" : "s have"} campaign/message history. Archive instead to preserve reporting.`,
