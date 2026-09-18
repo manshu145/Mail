@@ -127,13 +127,13 @@ async function main(){
     if(j.rows[0]?.status==="failed") throw new Error(`Import failed: ${j.rows[0].error_message}`);
     if(j.rows[0]?.status!=="completed") return null;
     const c=await pool.query("select id,email,consent_status,consent_source,validation_status from contacts where normalized_email=lower($1)",[testEmail]);
-    if(!c.rows[0]) throw new Error("Import completed without contact");
+    if(!c.rows[0]) { record("CSV import","FAIL","import job completed but contact was not created"); return {job:j.rows[0],contact:null}; }
     created.contactId=c.rows[0].id;
     return {job:j.rows[0],contact:c.rows[0]};
   });
-  if(imported) record("CSV import","PASS",`contact created with consent=${imported.contact.consent_status}, validation=${imported.contact.validation_status}`);
+  if(imported?.contact) record("CSV import","PASS",`contact created with consent=${imported.contact.consent_status}, validation=${imported.contact.validation_status}`);
 
-  if(canValidate && imported){
+  if(canValidate && imported?.contact){
     const validation=await waitFor("Gmail validation",150000,async()=>{
       const j=await pool.query("select validation_job_id from import_jobs where id=$1",[job.id]);
       const id=j.rows[0]?.validation_job_id; if(!id) return null;
