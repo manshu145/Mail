@@ -58,11 +58,17 @@ fi
 
 if command -v openssl >/dev/null 2>&1; then
   echo "SMTP STARTTLS:"
-  if timeout 15 openssl s_client -starttls smtp -connect 127.0.0.1:25 -servername mail.groundsreport.com </dev/null 2>&1 | grep -Eq 'Protocol *: TLS|New, TLSv|Cipher is'; then
-    echo "[PASS] STARTTLS handshake succeeded on port 25"
+  TLS_HOST="${MTA_TLS_HOSTNAME:-smtp.groundsreport.com}"
+  TLS_OUT=$(mktemp)
+  if timeout 15 openssl s_client -starttls smtp -connect 127.0.0.1:25 -servername "$TLS_HOST" -verify_hostname "$TLS_HOST" </dev/null >"$TLS_OUT" 2>&1 \
+    && grep -Eq 'Protocol *: TLS|New, TLSv|Cipher is|Ciphersuite:' "$TLS_OUT" \
+    && grep -q 'Verify return code: 0 (ok)' "$TLS_OUT"; then
+    echo "[PASS] STARTTLS handshake and certificate hostname verification succeeded for $TLS_HOST"
   else
-    echo "[WARN] STARTTLS handshake did not verify from host loopback; inspect MTA TLS configuration."
+    echo "[WARN] STARTTLS/certificate verification failed for $TLS_HOST."
+    grep -E 'Verify return code|verify error|hostname mismatch|subject=' "$TLS_OUT" || true
   fi
+  rm -f "$TLS_OUT"
 else
   echo "[WARN] openssl not available; STARTTLS probe skipped."
 fi
