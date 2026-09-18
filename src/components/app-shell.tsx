@@ -20,21 +20,21 @@ const navGroups: NavGroup[] = [
   { label: "Overview", items: [
     { href: "/dashboard", label: "Dashboard", icon: Gauge },
   ]},
+  { label: "Audience", items: [
+    { href: "/contacts", label: "Contacts", icon: ContactRound },
+    { href: "/lists", label: "Lists & segments", icon: Layers3 },
+    { href: "/segments", label: "Engagement segments", icon: Blocks },
+    { href: "/imports", label: "Imports", icon: FileUp },
+    { href: "/validation", label: "Validation", icon: MailCheck },
+  ]},
   { label: "Campaigns", items: [
     { href: "/campaigns", label: "Campaigns", icon: Send },
     { href: "/templates", label: "Templates", icon: Mail },
   ]},
-  { label: "Audience", items: [
-    { href: "/contacts", label: "Contacts", icon: ContactRound },
-    { href: "/imports", label: "Imports", icon: FileUp },
-    { href: "/lists", label: "Lists", icon: Layers3 },
-    { href: "/segments", label: "Segments", icon: Blocks },
-    { href: "/validation", label: "Validation", icon: MailCheck },
-  ]},
   { label: "Delivery", items: [
+    { href: "/reports", label: "Reports", icon: BarChart3 },
     { href: "/messages", label: "Message log", icon: ListOrdered },
     { href: "/queue", label: "Delivery queue", icon: CircleGauge },
-    { href: "/reports", label: "Reports", icon: BarChart3 },
   ]},
   { label: "Deliverability", items: [
     { href: "/domains", label: "Sending domains", icon: Globe2 },
@@ -54,7 +54,7 @@ const navGroups: NavGroup[] = [
     { href: "/audit-log", label: "Audit log", icon: History },
     { href: "/settings", label: "Settings", icon: Settings },
   ]},
-];
+]
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -66,7 +66,7 @@ export function AppShell({ session, children }: { session: SessionView; children
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => Object.fromEntries(navGroups.map((group) => [group.label, true])));
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({ Overview:true, Audience:true, Campaigns:true, Delivery:true, Deliverability:false, Platform:false }));
 
   const visibleGroups = useMemo(() => navGroups.map((group) => ({
     ...group,
@@ -82,6 +82,7 @@ export function AppShell({ session, children }: { session: SessionView; children
     try {
       const stored = window.localStorage.getItem("neximail.sidebar.groups");
       if (stored) setOpenGroups((current) => ({ ...current, ...JSON.parse(stored) }));
+      setCollapsed(window.localStorage.getItem("neximail.sidebar.collapsed") === "1");
     } catch {}
   }, []);
 
@@ -124,7 +125,7 @@ export function AppShell({ session, children }: { session: SessionView; children
     {mobileOpen&&<div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Close navigation" className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={()=>setMobileOpen(false)}/><aside className="relative h-full w-[286px] max-w-[88vw] shadow-2xl"><button aria-label="Close navigation" className="absolute right-3 top-4 z-10 rounded-xl border border-[var(--sidebar-border)] bg-[var(--sidebar-hover)] p-2 text-[var(--sidebar-fg)]" onClick={()=>setMobileOpen(false)}><X className="h-4.5 w-4.5"/></button>{sidebar}</aside></div>}
     <div className={`transition-[padding] duration-200 ${collapsed?"lg:pl-[76px]":"lg:pl-[244px]"}`}>
       <header className="sticky top-0 z-20 flex h-[70px] items-center justify-between border-b border-[var(--border)] bg-[color:var(--header-bg)] px-4 backdrop-blur-xl sm:px-6 lg:px-7">
-        <div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu className="h-[18px] w-[18px]"/></button><button className="icon-button hidden lg:grid" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"} onClick={()=>setCollapsed(v=>!v)}>{collapsed?<PanelLeftOpen className="h-[17px] w-[17px]"/>:<PanelLeftClose className="h-[17px] w-[17px]"/>}</button><div className="min-w-0"><p className="truncate text-[9px] font-black uppercase tracking-[0.16em] text-[var(--muted)]">Workspace</p><p className="truncate text-[13px] font-extrabold tracking-[-0.01em]">{current.label}</p></div></div>
+        <div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu className="h-[18px] w-[18px]"/></button><button className="icon-button hidden lg:grid" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"} onClick={()=>setCollapsed(v=>{const next=!v;try{window.localStorage.setItem("neximail.sidebar.collapsed",next?"1":"0")}catch{}return next})}>{collapsed?<PanelLeftOpen className="h-[17px] w-[17px]"/>:<PanelLeftClose className="h-[17px] w-[17px]"/>}</button><div className="min-w-0"><p className="truncate text-[9px] font-black uppercase tracking-[0.16em] text-[var(--muted)]">Workspace</p><p className="truncate text-[13px] font-extrabold tracking-[-0.01em]">{current.label}</p></div></div>
         <div className="flex items-center gap-2"><PwaStatus/><ThemeToggle/></div>
       </header>
       <main className="mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 lg:px-7 lg:py-7">{children}</main>
