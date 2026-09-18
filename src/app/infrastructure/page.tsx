@@ -9,6 +9,7 @@ import { db, databaseConfigured } from "@/db";
 import { sendingAccounts } from "@/db/schema";
 import { reputationSnapshots, sendingAccountWarmups, workerHeartbeats } from "@/db/operations-schema";
 import { getSession } from "@/lib/auth";
+import { EXPECTED_WORKERS, isWorkerHeartbeatFresh } from "@/lib/worker-health";
 
 export default async function InfrastructurePage() {
   const session = await getSession();
@@ -45,7 +46,7 @@ export default async function InfrastructurePage() {
   const repMap = new Map<string, typeof reputationSnapshots.$inferSelect>();
   for (const snapshot of snapshots) if (snapshot.sendingAccountId && !repMap.has(snapshot.sendingAccountId)) repMap.set(snapshot.sendingAccountId, snapshot);
 
-  const expectedWorkers = ["campaign", "policy", "transport", "postfix-events", "bounce-receiver", "dkim", "domain-health", "reputation", "webhook", "validation", "import"];
+  const expectedWorkers = EXPECTED_WORKERS;
   const heartbeatMap = new Map(heartbeats.map((heartbeat) => [heartbeat.workerName, heartbeat]));
   const now = Date.now();
 
@@ -93,7 +94,7 @@ export default async function InfrastructurePage() {
         {expectedWorkers.map((name) => {
           const heartbeat = heartbeatMap.get(name);
           const ageMs = heartbeat ? now - heartbeat.lastSeenAt.getTime() : Number.POSITIVE_INFINITY;
-          const healthy = ageMs <= 5 * 60 * 1000;
+          const healthy = isWorkerHeartbeatFresh(heartbeat?.lastSeenAt, now);
           const age = heartbeat ? ageMs < 60000 ? `${Math.max(0, Math.floor(ageMs / 1000))}s ago` : `${Math.floor(ageMs / 60000)}m ago` : "No heartbeat";
           return <div key={name} className="rounded-xl border border-zinc-100 p-3.5 dark:border-zinc-800">
             <div className="flex items-center justify-between gap-3"><span className="text-sm font-black">{name}</span><span className={`h-2.5 w-2.5 rounded-full ${healthy ? "bg-emerald-500" : "bg-rose-500"}`}/></div>
