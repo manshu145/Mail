@@ -4,7 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/neximail-next}"
 PROJECT_NAME="${PROJECT_NAME:-neximail-next}"
 REPO_URL="${REPO_URL:-https://github.com/manshu145/Mail.git}"
-BRANCH="${BRANCH:-main}"
+RELEASE_REF="${NEXIMAIL_RELEASE_REF:-release/v1.0.0}"
 
 if [ "${EUID}" -ne 0 ]; then
   echo "Run as root."
@@ -21,12 +21,12 @@ if [ -e "$APP_DIR" ] && [ ! -d "$APP_DIR/.git" ]; then
 fi
 
 if [ ! -d "$APP_DIR/.git" ]; then
-  git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$APP_DIR"
-else
-  git -C "$APP_DIR" fetch origin "$BRANCH"
-  git -C "$APP_DIR" checkout "$BRANCH"
-  git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
+  git clone --no-checkout "$REPO_URL" "$APP_DIR"
 fi
+
+git -C "$APP_DIR" fetch --depth=1 origin "$RELEASE_REF"
+git -C "$APP_DIR" checkout --detach FETCH_HEAD
+echo "Installing NexiMail release: $RELEASE_REF ($(git -C "$APP_DIR" rev-parse --short=12 HEAD))"
 
 cd "$APP_DIR"
 
