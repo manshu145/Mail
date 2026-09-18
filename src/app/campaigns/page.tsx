@@ -34,7 +34,7 @@ export default async function CampaignsPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="page-eyebrow mb-2">Messaging</p>
           <h1 className="page-title">Campaigns</h1>
@@ -60,21 +60,21 @@ export default async function CampaignsPage() {
         </div>
       ) : null}
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <div className="mb-3 grid gap-2 sm:grid-cols-3">
         {[
           ["Build", "Create campaigns with subject, preheader, audience and content."],
           ["Schedule", "Send immediately or choose the exact delivery time."],
           ["Monitor", "Track campaign and recipient delivery status in one place."],
         ].map(([title, copy]) => (
-          <div key={title} className="panel-soft px-4 py-3.5">
-            <p className="text-xs font-extrabold">{title}</p>
-            <p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">{copy}</p>
+          <div key={title} className="panel-soft px-3.5 py-3">
+            <p className="text-[11px] font-extrabold">{title}</p>
+            <p className="mt-1 text-[10px] leading-4 text-[var(--muted)]">{copy}</p>
           </div>
         ))}
       </div>
 
       <section className="premium-panel overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3.5">
           <div>
             <p className="text-sm font-extrabold">Campaign workspace</p>
             <p className="mt-1 text-xs text-[var(--muted)]">{rows.length ? `${rows.length} recent campaign${rows.length === 1 ? "" : "s"}` : "No campaigns yet"}</p>
@@ -84,14 +84,14 @@ export default async function CampaignsPage() {
 
         {rows.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[840px] text-left text-sm">
+            <table className="w-full min-w-[800px] text-left text-xs">
               <thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.13em] text-[var(--muted)]">
-                <tr><th className="px-5 py-3.5">Campaign</th><th className="px-5 py-3.5">Subject</th><th className="px-5 py-3.5">Status</th><th className="px-5 py-3.5">Schedule</th><th className="px-5 py-3.5">Created</th><th className="px-5 py-3.5" /></tr>
+                <tr><th className="px-4 py-3">Campaign</th><th className="px-5 py-3.5">Subject</th><th className="px-5 py-3.5">Status</th><th className="px-5 py-3.5">Schedule</th><th className="px-5 py-3.5">Created</th><th className="px-5 py-3.5" /></tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
                 {rows.map((row) => (
                   <tr key={row.id} className="transition hover:bg-[var(--surface-soft)]">
-                    <td className="px-5 py-4 font-extrabold"><Link href={`/campaigns/${row.id}`} className="hover:text-violet-700 dark:hover:text-violet-300">{row.name}</Link></td>
+                    <td className="px-4 py-3 font-extrabold"><Link href={`/campaigns/${row.id}`} className="hover:text-violet-700 dark:hover:text-violet-300">{row.name}</Link></td>
                     <td className="max-w-[320px] truncate px-5 py-4 text-[var(--muted)]">{row.subject}</td>
                     <td className="px-5 py-4"><span className={`rounded-full border px-2.5 py-1 text-[11px] font-extrabold capitalize ${statusClass(row.status)}`}>{row.status}</span></td>
                     <td className="px-5 py-4 text-xs text-[var(--muted)]">{row.scheduledAt ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(row.scheduledAt) : "Not scheduled"}</td>
@@ -103,7 +103,7 @@ export default async function CampaignsPage() {
             </table>
           </div>
         ) : (
-          <div className="grid min-h-72 place-items-center p-8 text-center">
+          <div className="grid min-h-52 place-items-center p-8 text-center">
             <div className="max-w-sm">
               <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-violet-500/10 text-violet-700 dark:text-violet-300"><Send className="h-6 w-6" /></div>
               <h2 className="mt-4 text-lg font-black">No campaigns yet</h2>
