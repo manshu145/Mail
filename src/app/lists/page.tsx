@@ -6,20 +6,24 @@ import { AudienceActions } from "@/components/audience-actions";
 import { ResourceCreate } from "@/components/resource-create";
 import { db, databaseConfigured } from "@/db";
 import { contactLists, lists } from "@/db/schema";
+import { sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
 export default async function ListsPage() {
   const session = await getSession(); if (!session) redirect("/login");
-  let listRows: typeof lists.$inferSelect[] = [], memberships: typeof contactLists.$inferSelect[] = [];
+  let listRows: typeof lists.$inferSelect[] = [];
+  let countRows: Array<{ listId: string; count: number }> = [];
   let dbError = false;
   if (databaseConfigured) {
     try {
-      [listRows, memberships] = await Promise.all([db.select().from(lists), db.select().from(contactLists)]);
+      [listRows, countRows] = await Promise.all([
+        db.select().from(lists),
+        db.select({ listId: contactLists.listId, count: sql<number>`count(*)::int` }).from(contactLists).groupBy(contactLists.listId),
+      ]);
     } catch { dbError = true; }
   }
   const usable = databaseConfigured && !dbError;
-  const counts = new Map<string, number>();
-  memberships.forEach((r) => counts.set(r.listId, (counts.get(r.listId) || 0) + 1));
+  const counts = new Map(countRows.map((row) => [row.listId, Number(row.count || 0)]));
 
   return <AppShell session={session}>
     <div className="mb-7 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
