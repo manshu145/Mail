@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { CircleGauge, MailCheck, Search, ShieldAlert, Send } from "lucide-react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
@@ -17,19 +17,29 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
   const { q = "", status = "" } = await searchParams;
 
   let rows: typeof messages.$inferSelect[] = [];
+  let inFlight = 0, delivered = 0, failed = 0;
   let dbError = false;
   if (databaseConfigured) {
     try {
       const clauses = [];
       if (q.trim()) clauses.push(or(ilike(messages.recipientEmail, `%${q.trim()}%`), ilike(messages.providerMessageId, `%${q.trim()}%`))!);
       if (statuses.includes(status as (typeof statuses)[number])) clauses.push(eq(messages.status, status as (typeof statuses)[number]));
-      rows = await db.select().from(messages).where(clauses.length ? and(...clauses) : undefined).orderBy(desc(messages.queuedAt)).limit(250);
+      const [data, summary] = await Promise.all([
+        db.select().from(messages).where(clauses.length ? and(...clauses) : undefined).orderBy(desc(messages.queuedAt)).limit(250),
+        db.execute(sql`select
+          count(*) filter(where status in ('queued','ready_for_transport','sending','mta_accepted','deferred'))::int as in_flight,
+          count(*) filter(where status='delivered')::int as delivered,
+          count(*) filter(where status in ('failed','bounced'))::int as failed
+          from messages`),
+      ]);
+      rows = data;
+      const totals = (summary.rows[0] || {}) as Record<string, unknown>;
+      inFlight = Number(totals.in_flight || 0);
+      delivered = Number(totals.delivered || 0);
+      failed = Number(totals.failed || 0);
     } catch { dbError = true; }
   }
   const usable = databaseConfigured && !dbError;
-  const queued = rows.filter((row) => ["queued","ready_for_transport","sending","mta_accepted","deferred"].includes(row.status)).length;
-  const delivered = rows.filter((row) => row.status === "delivered").length;
-  const failed = rows.filter((row) => ["failed","bounced"].includes(row.status)).length;
 
   return (
     <AppShell session={session}>
@@ -42,7 +52,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
       {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Message data is unavailable.</b> Connect PostgreSQL to inspect real delivery events and message controls.</div> : null}
 
       <section className="mb-5 grid gap-3 sm:grid-cols-3">
-        {[{label:"In flight",value:queued,icon:CircleGauge},{label:"Delivered",value:delivered,icon:MailCheck},{label:"Bounce / failed",value:failed,icon:ShieldAlert}].map(({label,value,icon:Icon}) => <article key={label} className="metric-card p-5"><div className="flex items-start justify-between"><div><p className="text-[12px] font-extrabold text-[var(--muted)]">{label}</p><p className="mt-3 text-3xl font-black tracking-[-0.04em]">{value.toLocaleString()}</p></div><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}
+        {[{label:"In flight",value:inFlight,icon:CircleGauge},{label:"Delivered",value:delivered,icon:MailCheck},{label:"Bounce / failed",value:failed,icon:ShieldAlert}].map(({label,value,icon:Icon}) => <article key={label} className="metric-card p-5"><div className="flex items-start justify-between"><div><p className="text-[12px] font-extrabold text-[var(--muted)]">{label}</p><p className="mt-3 text-3xl font-black tracking-[-0.04em]">{usable ? value.toLocaleString() : "—"}</p></div><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}
       </section>
 
       <section className="premium-panel overflow-hidden">
