@@ -52,6 +52,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let audienceSize: number | null = null;
   let audiencePreflight: Awaited<ReturnType<typeof preflightAudience>> | null = null;
 
+  const requestedFromEmail = value(body.fromEmail)?.toLowerCase() || null;
+  const accountFromEmail = account?.fromEmail?.trim().toLowerCase() || null;
+  const accountDomain = accountFromEmail?.split("@")[1] || null;
+  const requestedDomain = requestedFromEmail?.split("@")[1] || null;
+  const normalizedFromEmail =
+    accountFromEmail && requestedFromEmail && isValidEmail(requestedFromEmail) && requestedDomain === accountDomain
+      ? requestedFromEmail
+      : accountFromEmail || requestedFromEmail;
+
   if (wantsDelivery) {
     if (!list || !template || !account) return NextResponse.json({ error: "Select a list, template and sending account first." }, { status: 400 });
     if (!policy.sendingEnabled) return NextResponse.json({ error: "Sending is disabled by runtime configuration." }, { status: 423 });
@@ -60,9 +69,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (account.status !== "active") return NextResponse.json({ error: "Selected sending account is not active." }, { status: 409 });
     if (!template.htmlBody && !template.textBody) return NextResponse.json({ error: "Template has no email body." }, { status: 409 });
 
-    const fromEmail = (value(body.fromEmail) || account.fromEmail).toLowerCase();
-    if (!isValidEmail(fromEmail)) return NextResponse.json({ error: "Sender email is invalid." }, { status: 400 });
-    const domain = fromEmail.split("@")[1];
+    if (!normalizedFromEmail || !isValidEmail(normalizedFromEmail) || !accountDomain) return NextResponse.json({ error: "Selected sending account has an invalid sender email." }, { status: 409 });
+    const domain = accountDomain;
     const [domainRow] = await db.select().from(sendingDomains).where(eq(sendingDomains.domain, domain)).limit(1);
     if (!domainRow || domainRow.status !== "ready" || !domainRow.spfOk || !domainRow.dkimOk || !domainRow.dmarcOk) return NextResponse.json({ error: `Sending domain ${domain} must pass SPF, DKIM and DMARC checks before sending.` }, { status: 409 });
 
@@ -101,7 +109,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     subject: value(body.subject) || campaign.subject,
     preheader: value(body.preheader),
     fromName: value(body.fromName),
-    fromEmail: value(body.fromEmail),
+    fromEmail: normalizedFromEmail,
     listId, templateId, sendingAccountId,
     trackOpens: body.trackOpens !== false,
     trackClicks: body.trackClicks !== false,
