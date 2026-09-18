@@ -219,7 +219,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4">
       <div className="mb-3"><p className="text-sm font-extrabold">Sender</p><p className="mt-0.5 text-xs text-[var(--muted)]">From email is locked to the approved sending identity selected above.</p></div>
       <div className="grid gap-4 lg:grid-cols-3">
-        <label><span className="mb-1.5 block text-sm font-bold">From name</span><input name="fromName" value={fromName} onChange={(e)=>setFromName(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm" /></label>
+        <label><span className="mb-1.5 block text-sm font-bold">From name</span><div className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-muted)] px-3.5 py-3 text-sm font-bold text-[var(--foreground)]">{fromName || "Select a sending identity"}</div><input type="hidden" name="fromName" value={fromName} /></label>
         <label><span className="mb-1.5 block text-sm font-bold">From email</span><div className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-muted)] px-3.5 py-3 text-sm font-bold text-[var(--foreground)]">{fromEmail || "Select a sending identity"}</div><input type="hidden" name="fromEmail" value={fromEmail} /></label>
         <label><span className="mb-1.5 block text-sm font-bold">Schedule for later</span><input name="scheduledAt" type="datetime-local" value={schedule} onChange={(e)=>setSchedule(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm" /></label>
       </div>
