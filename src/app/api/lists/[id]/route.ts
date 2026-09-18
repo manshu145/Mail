@@ -6,7 +6,7 @@ import { segmentDefinitions } from "@/db/segment-schema";
 import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
 
-const fields = new Set(["email_domain", "validation_status", "contact_status"]);
+const fields = new Set(["email_domain", "validation_status", "contact_status", "custom_attribute"]);
 const ops = new Set(["equals", "not_equals"]);
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -24,6 +24,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     field?: string;
     operator?: string;
     value?: string;
+    attributeKey?: string;
   } | null;
   if (!body) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
@@ -45,16 +46,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         const field = body.field || "";
         const operator = body.operator || "";
         const value = body.value?.trim().toLowerCase() || "";
-        if (!fields.has(field) || !ops.has(operator) || !value) throw new Error("invalid_rule");
+        const attributeKey = body.attributeKey?.trim() || null;
+        if (!fields.has(field) || !ops.has(operator) || !value || (field === "custom_attribute" && !attributeKey)) throw new Error("invalid_rule");
         await tx.insert(segmentDefinitions).values({
           listId: id,
-          field: field as "email_domain" | "validation_status" | "contact_status",
+          field: field as "email_domain" | "validation_status" | "contact_status" | "custom_attribute",
+          attributeKey: field === "custom_attribute" ? attributeKey : null,
           operator: operator as "equals" | "not_equals",
           value,
         }).onConflictDoUpdate({
           target: segmentDefinitions.listId,
           set: {
-            field: field as "email_domain" | "validation_status" | "contact_status",
+            field: field as "email_domain" | "validation_status" | "contact_status" | "custom_attribute",
+            attributeKey: field === "custom_attribute" ? attributeKey : null,
             operator: operator as "equals" | "not_equals",
             value,
             updatedAt: new Date(),
