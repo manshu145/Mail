@@ -34,7 +34,10 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     if (row.validation_job_id) await client.query(`delete from validation_jobs where id=$1`, [row.validation_job_id]);
     await client.query("commit");
 
-    if (storagePath) await unlink(storagePath).catch((error) => console.error("[imports.delete-spool]", error));
+    if (storagePath) {
+      await unlink(storagePath).catch(() => {});
+      await unlink(`${storagePath}.part`).catch(() => {});
+    }
     await audit("contact_import.deleted", session, "import_job", id, { filename: row.filename, status: row.status, validationJobId: row.validation_job_id, diskSpoolDeleted: Boolean(storagePath) });
     return NextResponse.json({ ok: true });
   } catch (error) {
