@@ -40,6 +40,11 @@ if ! openssl x509 -in "$TMP/fullchain.pem" -noout -checkend 86400 >/dev/null; th
   echo "Certificate expires within 24 hours or is already expired; refusing to install."
   exit 1
 fi
+if ! openssl x509 -in "$TMP/fullchain.pem" -noout -checkhost "$HOSTNAME" >/dev/null 2>&1; then
+  echo "Certificate in $SOURCE does not cover $HOSTNAME; refusing to install a hostname-mismatched SMTP certificate."
+  echo "Issue/renew a certificate containing $HOSTNAME, then rerun."
+  exit 4
+fi
 
 docker volume inspect "$VOLUME" >/dev/null 2>&1 ||   docker volume create --label "com.docker.compose.project=$PROJECT_NAME" --label com.docker.compose.volume=mta_tls "$VOLUME" >/dev/null
 
