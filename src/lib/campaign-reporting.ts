@@ -24,6 +24,7 @@ export type CampaignMetrics = {
   unsubscribes: number;
   complaints: number;
   deliveryRate: number;
+  deliveryProgressRate: number;
   bounceRate: number;
   openRate: number;
   clickRate: number;
@@ -81,7 +82,7 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
     campaignId: String(row.campaign_id), campaignName: String(row.campaign_name), campaignStatus: String(row.campaign_status),
     targeted, queued:n(row.queued), ready:n(row.ready), sending:n(row.sending), accepted:n(row.accepted), deferred:n(row.deferred),
     delivered, bounced, failed, cancelled:n(row.cancelled), uniqueOpens:opens, totalOpens:n(row.total_opens), uniqueClicks:clicks, totalClicks:n(row.total_clicks), automatedOpens:n(row.automated_opens), automatedClicks:n(row.automated_clicks),
-    unsubscribes:n(row.unsubscribes), complaints:n(row.complaints), deliveryRate:rates.deliveryRate, bounceRate:rates.bounceRate,
+    unsubscribes:n(row.unsubscribes), complaints:n(row.complaints), deliveryRate:rates.deliveryRate, deliveryProgressRate:pct(delivered,targeted), bounceRate:rates.bounceRate,
     openRate:pct(opens,delivered), clickRate:pct(clicks,delivered), ctor:pct(clicks,opens),
   };
 }
@@ -120,6 +121,6 @@ export async function getCampaignMetricsList(limit = 50): Promise<CampaignMetric
     const rates=outcomeRates(delivered,bounced,failed);
     return { campaignId:String(row.campaign_id),campaignName:String(row.campaign_name),campaignStatus:String(row.campaign_status),targeted,
       queued:n(row.queued),ready:n(row.ready),sending:n(row.sending),accepted:n(row.accepted),deferred:n(row.deferred),delivered,bounced,failed,cancelled:n(row.cancelled),
-      uniqueOpens:opens,totalOpens:n(row.total_opens),uniqueClicks:clicks,totalClicks:n(row.total_clicks),automatedOpens:n(row.automated_opens),automatedClicks:n(row.automated_clicks),unsubscribes:n(row.unsubscribes),complaints:n(row.complaints),deliveryRate:rates.deliveryRate,bounceRate:rates.bounceRate,openRate:pct(opens,delivered),clickRate:pct(clicks,delivered),ctor:pct(clicks,opens)};
+      uniqueOpens:opens,totalOpens:n(row.total_opens),uniqueClicks:clicks,totalClicks:n(row.total_clicks),automatedOpens:n(row.automated_opens),automatedClicks:n(row.automated_clicks),unsubscribes:n(row.unsubscribes),complaints:n(row.complaints),deliveryRate:rates.deliveryRate,deliveryProgressRate:pct(delivered,targeted),bounceRate:rates.bounceRate,openRate:pct(opens,delivered),clickRate:pct(clicks,delivered),ctor:pct(clicks,opens)};
   });
 }
