@@ -49,6 +49,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       validCount: audience.validCount,
       pendingCount: audience.pendingCount,
       unknownCount: audience.unknownCount,
+      awaitingValidationCount: audience.awaitingValidationCount,
     },
     template: {
       name: template.name,
