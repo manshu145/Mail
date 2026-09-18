@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 type Rule = {
-  field: "email_domain" | "validation_status" | "contact_status";
+  field: "email_domain" | "validation_status" | "contact_status" | "custom_attribute";
+  attributeKey?: string | null;
   operator: "equals" | "not_equals";
   value: string;
 } | null;
@@ -23,6 +24,7 @@ export function AudienceActions({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [field, setField] = useState<Rule extends infer _ ? "email_domain" | "validation_status" | "contact_status" | "custom_attribute" : never>(rule?.field || "email_domain");
 
   async function save(formData: FormData) {
     setBusy(true);
@@ -37,6 +39,7 @@ export function AudienceActions({
           field: formData.get("field"),
           operator: formData.get("operator"),
           value: formData.get("value"),
+          attributeKey: formData.get("attributeKey"),
         }),
       });
       const data = await response.json().catch(() => ({})) as { error?: string };
@@ -101,10 +104,11 @@ export function AudienceActions({
           </label>
           {audience.isDynamic ? <div className="grid gap-3 rounded-2xl border border-violet-500/15 bg-violet-500/[0.04] p-4 sm:grid-cols-2">
             <label className="text-xs font-bold">Rule field
-              <select name="field" defaultValue={rule?.field || "email_domain"} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm">
+              <select name="field" value={field} onChange={(e)=>setField(e.target.value as typeof field)} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm">
                 <option value="email_domain">Email domain</option>
                 <option value="validation_status">Validation status</option>
                 <option value="contact_status">Contact status</option>
+                <option value="custom_attribute">Custom attribute</option>
               </select>
             </label>
             <label className="text-xs font-bold">Operator
@@ -113,8 +117,11 @@ export function AudienceActions({
                 <option value="not_equals">Not equals</option>
               </select>
             </label>
+            {field==="custom_attribute"?<label className="text-xs font-bold sm:col-span-2">Attribute key
+              <input name="attributeKey" required defaultValue={rule?.attributeKey || ""} placeholder="city / category / industry" className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm" />
+            </label>:null}
             <label className="text-xs font-bold sm:col-span-2">Rule value
-              <input name="value" required defaultValue={rule?.value || ""} placeholder="gmail.com / valid / active" className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm" />
+              <input name="value" required defaultValue={rule?.value || ""} placeholder={field==="custom_attribute"?"Attribute value":"gmail.com / valid / active"} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm" />
             </label>
           </div> : <input type="hidden" name="field" value="" />}
           {error ? <p role="alert" className="text-sm font-bold text-rose-600">{error}</p> : null}
