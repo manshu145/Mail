@@ -69,9 +69,6 @@ export function analyzeCsvSample(text: string): CsvSampleAnalysis {
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!text.trim()) errors.push("The CSV file is empty.");
-  if (delimiter === "semicolon") errors.push("This file appears to use semicolons (;). NexiMail currently expects comma-separated CSV.");
-  if (delimiter === "tab") errors.push("This file appears to be tab-separated. Export it as comma-separated CSV.");
-  if (delimiter === "unknown") errors.push("Could not detect comma-separated columns in the header row.");
 
   const matrix = parseCsv(text);
   const headers = (matrix[0] || []).map((value) => value.replace(/^\uFEFF/, "").trim());
@@ -83,6 +80,10 @@ export function analyzeCsvSample(text: string): CsvSampleAnalysis {
   if (duplicates.length) errors.push("CSV contains duplicate column names after normalization.");
 
   const mapping = detectMapping(headers);
+  const singleColumnCsv = delimiter === "unknown" && headers.length === 1 && Boolean(mapping.email);
+  if (delimiter === "semicolon") errors.push("This file appears to use semicolons (;). NexiMail currently expects comma-separated CSV.");
+  if (delimiter === "tab") errors.push("This file appears to be tab-separated. Export it as comma-separated CSV.");
+  if (delimiter === "unknown" && !singleColumnCsv) errors.push("Could not detect comma-separated columns in the header row.");
   if (!mapping.email) {
     errors.push("No email column was detected. Use a header such as email, EMAILID, EMAIL_ID, E-MAIL or mail.");
   }
@@ -92,7 +93,7 @@ export function analyzeCsvSample(text: string): CsvSampleAnalysis {
   const mismatched = preview.filter((row) => row.length !== headers.length).length;
   if (mismatched) warnings.push(`${mismatched} preview row(s) have a different number of columns than the header.`);
 
-  return { delimiter, headers, preview, mapping, errors, warnings };
+  return { delimiter: singleColumnCsv ? "comma" : delimiter, headers, preview, mapping, errors, warnings };
 }
 
 export function detectMapping(headers: string[]): ImportMapping {
