@@ -93,15 +93,31 @@ export default async function ImportsPage() {
 
     {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Import engine unavailable.</b> Check the database connection.</div> : null}
 
-    <section className="premium-panel mb-5 p-5 sm:p-6">
-      <h2 className="font-black">CSV format & import guide</h2>
-      <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
-        <p><b>1</b> Email is mandatory. EMAILID, EMAIL_ID and E-MAIL aliases are auto-detected.</p>
-        <p><b>2</b> Use <code>|</code> for multiple categories/tags, for example <code>Students|NEET</code>.</p>
-        <p><b>3</b> Select a consent source, optional list, default source/category and tags before queueing.</p>
-        <p><b>4</b> Unmapped columns are preserved as custom fields for personalization.</p>
+    <section className="premium-panel mb-5 overflow-hidden">
+      <div className="border-b border-[var(--border)] p-5 sm:p-6">
+        <h2 className="font-black">CSV format & import guide</h2>
+        <p className="mt-1 text-xs leading-5 text-[var(--muted)]">Use a standard UTF-8, comma-separated <code>.csv</code> file. NexiMail validates the sample and shows a preview before upload.</p>
       </div>
-      <div className="mt-4 rounded-xl bg-[var(--surface-soft)] p-3 text-xs text-[var(--muted)]"><b>Capacity:</b> up to 1,000,000 data rows and 300 MB per CSV. Active jobs refresh every 4 seconds with progress, speed and ETA.</div>
+      <div className="grid gap-5 p-5 sm:p-6 xl:grid-cols-[.9fr_1.1fr]">
+        <div className="space-y-3 text-sm">
+          <p><b>1.</b> <b>Email is mandatory.</b> Accepted aliases include <code>email</code>, <code>EMAILID</code>, <code>EMAIL_ID</code>, <code>E-MAIL</code> and <code>mail</code>.</p>
+          <p><b>2.</b> The first row must contain unique column names. Blank or duplicate headers are rejected before upload.</p>
+          <p><b>3.</b> Multiple categories/tags use <code>|</code>, for example <code>Students|NEET</code>.</p>
+          <p><b>4.</b> Extra columns such as <code>FATHER NAME</code>, <code>ADDRESS 1</code> or <code>MOBILE 2</code> are preserved as custom fields.</p>
+          <p><b>5.</b> Semicolon-separated or tab-separated exports are detected and rejected with an exact format message.</p>
+        </div>
+        <div className="space-y-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3">
+            <p className="text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]">Recommended header</p>
+            <code className="mt-2 block overflow-x-auto whitespace-nowrap text-[11px]">email,name,first_name,last_name,phone,dob,gender,state,district,city,pincode,occupation,industry,audience_type,category,categories,tags,source</code>
+          </div>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3">
+            <p className="text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]">Example row</p>
+            <code className="mt-2 block overflow-x-auto whitespace-nowrap text-[11px]">person@example.com,Manshu Sinha,Manshu,Sinha,9876543210,1998-06-10,Male,Chhattisgarh,Raipur,Raipur,492001,Student,Education,Student,Students,Students|NEET,neet|medical,csv_import</code>
+          </div>
+          <div className="rounded-xl border border-blue-500/15 bg-blue-500/[0.05] p-3 text-xs text-blue-700 dark:text-blue-300"><b>Capacity:</b> up to 1,000,000 data rows and 300 MB per CSV. Large files stream to persistent disk and process in the background.</div>
+        </div>
+      </div>
     </section>
 
     {usable ? <ImportWizard lists={listRows} /> : null}
