@@ -45,6 +45,7 @@ if ! openssl x509 -in "$TMP/fullchain.pem" -noout -checkhost "$HOSTNAME" >/dev/n
   echo "Issue/renew a certificate containing $HOSTNAME, then rerun."
   exit 4
 fi
+echo "[PASS] Certificate covers $HOSTNAME."
 
 docker volume inspect "$VOLUME" >/dev/null 2>&1 ||   docker volume create --label "com.docker.compose.project=$PROJECT_NAME" --label com.docker.compose.volume=mta_tls "$VOLUME" >/dev/null
 
