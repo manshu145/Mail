@@ -69,21 +69,17 @@ export default async function ValidationPage() {
   const usable = databaseConfigured && !dbError;
 
   return <AppShell session={session}>
-    <div className="mb-7">
-      <p className="page-eyebrow mb-2">Deliverability</p>
-      <h1 className="page-title">Gmail validation</h1>
-      <p className="page-description">Optional Gmail/Googlemail validation via Supersend. Campaign sending is independent from validation; only contacts already marked invalid are excluded from sending.</p>
-    </div>
+    <div className="mb-5"><p className="page-eyebrow mb-1.5">Deliverability</p><h1 className="page-title">Gmail validation</h1><p className="page-description">Optional Gmail/Googlemail validation via Supersend. Campaign sending remains independent from this workflow.</p></div>
 
-    {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Validation state unavailable.</b> The database could not be read.</div> : null}
+    {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Validation state unavailable.</b> The database could not be read.</div> : null}
 
-    <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <section className="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
       {[
-        {l:"Gmail contacts",v:gmail,n:"All Gmail / Googlemail contacts"},
-        {l:"Accepted / valid",v:accepted,n:"Final positive verdicts"},
-        {l:"Invalid",v:invalid,n:"Suppressed from sending"},
-        {l:"Needs validation",v:unresolved,n:"Pending, unknown or error"},
-      ].map((x)=><article key={x.l} className="metric-card p-5"><p className="text-xs font-extrabold text-[var(--muted)]">{x.l}</p><p className="mt-3 text-3xl font-black tracking-[-.04em]">{usable ? x.v.toLocaleString() : "—"}</p><p className="mt-1 text-[11px] text-[var(--muted)]">{x.n}</p></article>)}
+        {l:"Gmail contacts",v:gmail,n:"Total scope"},
+        {l:"Accepted / valid",v:accepted,n:"Positive verdicts"},
+        {l:"Invalid",v:invalid,n:"Suppressed"},
+        {l:"Needs validation",v:unresolved,n:"Pending / unknown / error"},
+      ].map((x)=><article key={x.l} className="compact-stat"><div className="flex items-end justify-between gap-3"><div><p className="compact-stat-label">{x.l}</p><p className="compact-stat-value">{usable ? x.v.toLocaleString() : "—"}</p></div><p className="text-right text-[9.5px] font-semibold text-[var(--muted)]">{x.n}</p></div></article>)}
     </section>
 
     {usable ? <ValidationControls
@@ -93,13 +89,13 @@ export default async function ValidationPage() {
       imports={imports}
     /> : null}
 
-    <div className="mt-5 grid gap-5 xl:grid-cols-[.95fr_1.05fr]">
+    <div className="mt-4 grid gap-4 xl:grid-cols-[.95fr_1.05fr]">
       <section className="premium-panel overflow-hidden">
         <div className="border-b border-[var(--border)] px-5 py-4">
           <h2 className="font-black">Validation jobs</h2>
           <p className="mt-1 text-xs text-[var(--muted)]">Recent queued, active and completed runs.</p>
         </div>
-        {!usable ? <div className="p-8 text-center text-sm text-[var(--muted)]">Validation data unavailable.</div> : jobs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-5 py-3">Scope</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead><tbody className="divide-y divide-[var(--border)]">{jobs.map((job)=><tr key={job.id} className="hover:bg-[var(--surface-soft)]"><td className="px-5 py-3.5"><div className="font-bold">{job.scope.startsWith("import:") ? "CSV import" : job.scope.startsWith("contact:") ? "Single contact" : job.scope === "gmail:unresolved" ? "Unresolved Gmail" : job.scope === "gmail:pending" ? "Pending Gmail" : job.scope}</div><div className="mt-0.5 font-mono text-[10px] text-[var(--muted)]">{job.id.slice(0,8)}</div></td><td><span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold capitalize ${job.status==="completed"?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":job.status==="failed"?"bg-rose-500/10 text-rose-700 dark:text-rose-300":"bg-blue-500/10 text-blue-700 dark:text-blue-300"}`}>{paused && activeJob?.id===job.id ? "paused" : job.status}</span></td><td className="text-xs font-bold text-[var(--muted)]">{job.processedRows.toLocaleString()} / {job.totalRows.toLocaleString()}</td><td className="text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short"}).format(job.createdAt)}</td></tr>)}</tbody></table></div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation jobs yet.</div>}
+        {!usable ? <div className="p-6 text-center text-xs text-[var(--muted)]">Validation data unavailable.</div> : jobs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-5 py-3">Scope</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead><tbody className="divide-y divide-[var(--border)]">{jobs.map((job)=><tr key={job.id} className="hover:bg-[var(--surface-soft)]"><td className="px-5 py-3.5"><div className="font-bold">{job.scope.startsWith("import:") ? "CSV import" : job.scope.startsWith("contact:") ? "Single contact" : job.scope === "gmail:unresolved" ? "Unresolved Gmail" : job.scope === "gmail:pending" ? "Pending Gmail" : job.scope}</div><div className="mt-0.5 font-mono text-[10px] text-[var(--muted)]">{job.id.slice(0,8)}</div></td><td><span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold capitalize ${job.status==="completed"?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":job.status==="failed"?"bg-rose-500/10 text-rose-700 dark:text-rose-300":"bg-blue-500/10 text-blue-700 dark:text-blue-300"}`}>{paused && activeJob?.id===job.id ? "paused" : job.status}</span></td><td className="text-xs font-bold text-[var(--muted)]">{job.processedRows.toLocaleString()} / {job.totalRows.toLocaleString()}</td><td className="text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short"}).format(job.createdAt)}</td></tr>)}</tbody></table></div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation jobs yet.</div>}
       </section>
 
       <section className="premium-panel overflow-hidden">
