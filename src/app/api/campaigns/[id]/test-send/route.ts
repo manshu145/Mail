@@ -44,27 +44,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!template || !account || account.status !== "active") return NextResponse.json({ error: "Template or active sending account is unavailable." }, { status: 409 });
   if (!template.htmlBody && !template.textBody) return NextResponse.json({ error: "Template has no email body." }, { status: 409 });
 
-  const accountFromEmail = clean(account.fromEmail).toLowerCase();
-  const accountDomain = accountFromEmail.split("@")[1] || "";
-  const requestedFromEmail = (clean(body.fromEmail) || campaign.fromEmail || "").toLowerCase();
-  const requestedDomain = requestedFromEmail.split("@")[1] || "";
-
-  // The selected sending account is the authority for the sender domain.
-  // A campaign may use another mailbox/alias only on that same domain.
-  // Never let the test recipient or browser autofill turn into a sending domain.
-  const fromEmail =
-    requestedFromEmail &&
-    isValidEmail(requestedFromEmail) &&
-    requestedDomain === accountDomain
-      ? requestedFromEmail
-      : accountFromEmail;
-
-  const fromName = clean(body.fromName) || campaign.fromName || account.fromName;
-  if (!isValidEmail(fromEmail) || !accountDomain) return NextResponse.json({ error: "Selected sending account has an invalid sender email." }, { status: 409 });
-
-  const sendingDomain = accountDomain;
+  const fromEmail = clean(account.fromEmail).toLowerCase();
+  const fromName = clean(account.fromName);
+  if (!isValidEmail(fromEmail)) return NextResponse.json({ error: "Selected sending account has an invalid sender email." }, { status: 409 });
+  const sendingDomain = fromEmail.split("@")[1] || "";
   const [domain] = await db.select().from(sendingDomains).where(eq(sendingDomains.domain, sendingDomain)).limit(1);
-  if (!domain || domain.status !== "ready") return NextResponse.json({ error: `Sending domain ${sendingDomain} is not ready.` }, { status: 409 });
+  if (!domain || domain.status !== "ready" || !domain.spfOk || !domain.dkimOk || !domain.dmarcOk) {
+    return NextResponse.json({ error: `Sending domain ${sendingDomain} must pass SPF, DKIM and DMARC checks before sending.` }, { status: 409 });
+  }
 
   const subject = `[TEST] ${sample(clean(body.subject) || campaign.subject || template.subject || "NexiMail test", recipient)}`;
   const preheader = sample(clean(body.preheader) || campaign.preheader || "", recipient);
