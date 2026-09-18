@@ -117,7 +117,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
       const eligible = preview?.audience.eligibleCount;
       const message = eligible === undefined
         ? "Queue this campaign for immediate delivery? NexiMail will run one final audience preflight before queueing."
-        : `Send this campaign to approximately ${eligible.toLocaleString()} currently eligible recipients? NexiMail will recheck eligibility once more before queueing.`;
+        : `Send this campaign to approximately ${eligible.toLocaleString()} currently send-eligible recipients? NexiMail will recheck eligibility once more before queueing.`;
       if (!window.confirm(message)) return;
     }
 
@@ -184,7 +184,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
               ["Matched",preview.audience.rawCount,"violet"],
               ["Valid",preview.audience.validCount,"emerald"],
               ["Pending",preview.audience.pendingCount,"amber"],
-              ["Waiting Gmail validation",preview.audience.awaitingValidationCount,"amber"],
+              ["Gmail pending (optional)",preview.audience.awaitingValidationCount,"amber"],
               ["Unknown",preview.audience.unknownCount,"orange"],
               ["Suppressed",preview.audience.suppressedCount,"rose"],
               ["Invalid",preview.audience.invalidCount,"rose"],
