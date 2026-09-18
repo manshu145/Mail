@@ -38,8 +38,6 @@ export async function audienceSelection(list: typeof lists.$inferSelect, executo
     ${contacts.validationStatus} as validation_status,
     case
       when ${contacts.validationStatus}::text='invalid' then false
-      when lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'
-        and ${contacts.validationStatus}::text='pending' then false
       else true
     end as send_eligible,
     case
