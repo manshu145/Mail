@@ -6,9 +6,9 @@ import type { DeliverySettings } from "@/lib/delivery-settings";
 
 const fields: Array<{ key:keyof DeliverySettings; label:string; help:string; step?:string; display?:"percent" }> = [
   { key:"maxPerSecond", label:"Max per second", help:"Transport throttle applied by the transport worker." },
-  { key:"maxRecipientsPerCampaign", label:"Max recipients / campaign", help:"Campaign worker hard ceiling." },
-  { key:"maxRollingHour", label:"Max rolling hour", help:"Sending-account rolling one-hour ceiling." },
-  { key:"maxRolling24h", label:"Max rolling 24h", help:"Sending-account rolling 24-hour ceiling." },
+  { key:"maxRecipientsPerCampaign", label:"Max recipients / campaign", help:"0 = unlimited volume. Campaign worker enforces only when this is above 0." },
+  { key:"maxRollingHour", label:"Max rolling hour", help:"0 = unlimited global hourly volume. Sender-specific limits and safety controls can still apply." },
+  { key:"maxRolling24h", label:"Max rolling 24h", help:"0 = unlimited global 24-hour volume. Warm-up/reputation controls remain active." },
   { key:"maxActiveQueued", label:"Max active / queued", help:"Backpressure ceiling before policy release pauses." },
   { key:"retryMaxAttempts", label:"Maximum transport attempts", help:"Failed submissions stop after this many attempts." },
   { key:"retryInitialSeconds", label:"Initial retry wait (seconds)", help:"Base delay after a transport submission failure." },
