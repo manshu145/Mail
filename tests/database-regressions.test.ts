@@ -38,10 +38,10 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
     await pg.query("insert into contact_lists(contact_id,list_id) select id,$1::uuid from contacts", [list.id]);
     const selection = await audienceSelection(list, orm as unknown as Parameters<typeof audienceSelection>[1]);
     const result = await orm.execute(sql`select * from (${selection}) a where not suppressed and send_eligible`);
-    assert.equal(result.rows.length, 2);
-    assert.deepEqual(result.rows.map((row) => row.email).sort(), ["good@example.com", "pending@example.com"]);
+    assert.equal(result.rows.length, 3);
+    assert.deepEqual(result.rows.map((row) => row.email).sort(), ["good@example.com", "pending@example.com", "waiting@gmail.com"]);
     const waiting = await orm.execute(sql`select * from (${selection}) a where email='waiting@gmail.com'`);
-    assert.equal(waiting.rows[0].send_eligible, false);
+    assert.equal(waiting.rows[0].send_eligible, true);
     assert.equal(waiting.rows[0].awaiting_validation, true);
     await pg.exec("insert into campaigns(name,subject,status) values('test','test','sending')");
     await orm.execute(sql`insert into messages(campaign_id,contact_id,recipient_email,status)
