@@ -1,15 +1,14 @@
-import net from "node:net";
-import { resolveMx } from "node:dns/promises";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { contacts, suppressions, systemSettings, validationJobs, validationResults } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
-import { classifyGmailRcptResponse, type ValidationVerdict } from "../../src/lib/validation-policy";
+import { isDirectGmailAddress, type ValidationVerdict } from "../../src/lib/validation-policy";
 
 const intervalMs = Math.max(15000, Number(process.env.VALIDATION_INTERVAL_MS || "30000"));
-const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_SMTP_TIMEOUT_MS || "8000"));
-const helo = process.env.VALIDATION_HELO || "validator.local";
+const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_API_TIMEOUT_MS || "10000"));
+const supersendApiKey = String(process.env.SUPERSEND_API_KEY || "").trim();
+const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v1/verify-email").trim();
 
 type ExistingResult = {
   contact_id: string;
@@ -22,33 +21,62 @@ async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "validation", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
 }
 
-async function smtpProbe(email: string): Promise<ValidationVerdict> {
-  const domain = email.split("@")[1]?.toLowerCase();
-  if (!domain || !["gmail.com", "googlemail.com"].includes(domain)) return { status: "unknown", detail: "gmail_scope_only" };
-  let mx;
-  try { mx = (await resolveMx(domain)).sort((a,b)=>a.priority-b.priority)[0]; } catch { return { status: "error", detail: "mx_lookup_failed" }; }
-  if (!mx) return { status: "error", detail: "mx_not_found" };
+function classifySupersendMessage(message: string): ValidationVerdict {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) return { status: "unknown", detail: "supersend_empty_message" };
 
-  return new Promise((resolve) => {
-    const socket = net.createConnection({ host: mx.exchange, port: 25 });
-    let buffer = ""; let stage = 0; let settled = false;
-    const finish = (value: ValidationVerdict) => { if (settled) return; settled = true; socket.destroy(); resolve(value); };
-    socket.setTimeout(timeoutMs, () => finish({ status: "unknown", detail: "smtp_timeout" }));
-    socket.on("error", () => finish({ status: "unknown", detail: "smtp_unreachable" }));
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString();
-      const lines = buffer.split(/\r?\n/); buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!/^\d{3}[ -]/.test(line) || /^\d{3}-/.test(line)) continue;
-        const code = Number(line.slice(0,3));
-        if (stage === 0 && code === 220) { stage=1; socket.write(`EHLO ${helo}\r\n`); continue; }
-        if (stage === 1 && code >= 200 && code < 400) { stage=2; socket.write("MAIL FROM:<>\r\n"); continue; }
-        if (stage === 2 && code >= 200 && code < 400) { stage=3; socket.write(`RCPT TO:<${email}>\r\n`); continue; }
-        if (stage === 3) return finish(classifyGmailRcptResponse(code, line));
-        if (code >= 400) return finish({ status: "unknown", detail: `smtp_${code}` });
-      }
+  if (/(invalid|undeliverable|does not exist|not exist|user unknown|mailbox not found|rejected)/i.test(normalized)) {
+    return { status: "invalid", detail: `supersend:${message.slice(0, 300)}` };
+  }
+
+  if (/(valid|deliverable|verified|exists|safe to send)/i.test(normalized)) {
+    return { status: "valid", detail: `supersend:${message.slice(0, 300)}` };
+  }
+
+  return { status: "unknown", detail: `supersend:${message.slice(0, 300)}` };
+}
+
+async function verifyWithSupersend(email: string): Promise<ValidationVerdict> {
+  if (!isDirectGmailAddress(email)) return { status: "unknown", detail: "gmail_scope_only" };
+  if (!supersendApiKey) return { status: "error", detail: "supersend_api_key_missing" };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = new URL(supersendEndpoint);
+    url.searchParams.set("email", email);
+    url.searchParams.set("key", supersendApiKey);
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${supersendApiKey}`,
+      },
+      signal: controller.signal,
     });
-  });
+
+    const body = await response.json().catch(() => null) as { message?: unknown } | null;
+    const message = typeof body?.message === "string" ? body.message : "";
+
+    if (!response.ok) {
+      return {
+        status: response.status >= 500 || response.status === 429 ? "unknown" : "error",
+        detail: `supersend_http_${response.status}:${message.slice(0, 240)}`,
+      };
+    }
+
+    return classifySupersendMessage(message);
+  } catch (error) {
+    return {
+      status: "unknown",
+      detail: error instanceof Error && error.name === "AbortError"
+        ? "supersend_timeout"
+        : "supersend_request_failed",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function validationPaused() {
@@ -150,21 +178,6 @@ async function syncImportValidationCounters(scope: string, validationJobId: stri
   await pool.query(`update import_jobs set valid_rows=$2, risky_rows=$3, validation_invalid_rows=$4 where id=$1`, [importId, Number(row.valid || 0), Number(row.risky || 0), Number(row.invalid || 0)]);
 }
 
-async function queuePendingGmailIfNeeded() {
-  const active = await pool.query<{ count: number }>(`select count(*)::int count from validation_jobs where status in ('pending','processing')`);
-  if (Number(active.rows[0]?.count || 0) > 0) return false;
-  const pending = await pool.query<{ count: number }>(`
-    select count(*)::int count from contacts
-    where status='active' and validation_status='pending'
-      and lower(normalized_email) ~ '@(gmail|googlemail)\\.com$'
-  `);
-  const count = Number(pending.rows[0]?.count || 0);
-  if (!count) return false;
-  await db.insert(validationJobs).values({ scope: "gmail:pending", totalRows: count });
-  await heartbeat({ state: "auto_queued", scope: "gmail:pending", total: count });
-  return true;
-}
-
 async function selectWorkJob() {
   // A processing job means a previous worker execution was interrupted. Resume it
   // before accepting newer queued work so one stuck job cannot remain forever.
@@ -179,12 +192,10 @@ async function runJob() {
     await heartbeat({ state: "paused" });
     return;
   }
-  let job = await selectWorkJob();
+  const job = await selectWorkJob();
   if (!job) {
-    const queued = await queuePendingGmailIfNeeded();
-    if (!queued) { await heartbeat({ state: "idle" }); return; }
-    job = await selectWorkJob();
-    if (!job) return;
+    await heartbeat({ state: "idle", provider: "supersend", automaticValidation: false });
+    return;
   }
 
   const resumed = job.status === "processing";
@@ -209,7 +220,7 @@ async function runJob() {
       await heartbeat({ state: "paused", jobId: job.id, scope: job.scope, processed, total, remaining: total - processed });
       return;
     }
-    const result = await smtpProbe(contact.normalizedEmail);
+    const result = await verifyWithSupersend(contact.normalizedEmail);
     await db.insert(validationResults).values({ jobId: job.id, contactId: contact.id, email: contact.email, status: result.status, detail: result.detail });
     await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
     if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
@@ -238,7 +249,7 @@ async function runWithWorkerLock() {
 }
 
 async function main() {
-  console.log("[validation-worker] started; restart-safe Gmail validation with automatic pending sweep");
+  console.log("[validation-worker] started; optional Gmail validation via Supersend API");
   while (true) {
     try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
