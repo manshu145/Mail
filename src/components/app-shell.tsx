@@ -13,7 +13,7 @@ import { PwaStatus } from "./pwa-status";
 import { ThemeToggle } from "./theme-toggle";
 
 type SessionView = { name: string; email: string; role: "owner" | "admin" | "operator" };
-type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string; strokeWidth?: number }> };
+type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string; strokeWidth?: number }>; roles?: SessionView["role"][] };
 type NavGroup = { label: string; items: NavItem[] };
 
 const navGroups: NavGroup[] = [
@@ -36,8 +36,8 @@ const navGroups: NavGroup[] = [
     { href: "/delivery-integrity", label: "Delivery integrity", icon: Activity }, { href: "/reports", label: "Analytics", icon: BarChart3 },
   ]},
   { label: "Platform", items: [
-    { href: "/infrastructure", label: "Infrastructure", icon: ServerCog }, { href: "/api-keys", label: "API keys", icon: KeyRound },
-    { href: "/webhooks", label: "Webhooks", icon: Webhook }, { href: "/users", label: "Team access", icon: Users },
+    { href: "/infrastructure", label: "Infrastructure", icon: ServerCog }, { href: "/api-keys", label: "API keys", icon: KeyRound, roles: ["owner"] },
+    { href: "/webhooks", label: "Webhooks", icon: Webhook, roles: ["owner"] }, { href: "/users", label: "Team access", icon: Users, roles: ["owner"] },
     { href: "/audit-log", label: "Audit log", icon: History }, { href: "/system-health", label: "System health", icon: Activity },
     { href: "/settings", label: "Settings", icon: Settings },
   ]},
@@ -54,16 +54,21 @@ export function AppShell({ session, children }: { session: SessionView; children
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
+  const visibleGroups = useMemo(() => navGroups.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => !item.roles || item.roles.includes(session.role)),
+  })).filter((group) => group.items.length > 0), [session.role]);
+
   const current = useMemo(() => {
-    for (const group of navGroups) for (const item of group.items) if (pathname === item.href || pathname.startsWith(`${item.href}/`)) return item;
-    return navGroups[0].items[0];
-  }, [pathname]);
+    for (const group of visibleGroups) for (const item of group.items) if (pathname === item.href || pathname.startsWith(`${item.href}/`)) return item;
+    return visibleGroups[0]?.items[0] || navGroups[0].items[0];
+  }, [pathname, visibleGroups]);
 
   const sidebar = (
     <div className="flex h-full flex-col overflow-hidden bg-[var(--sidebar)] text-[var(--sidebar-fg)]">
       <div className={`flex h-[70px] items-center border-b border-[var(--sidebar-border)] ${collapsed ? "justify-center px-3" : "px-5"}`}><BrandMark compact={collapsed} /></div>
       <div className="flex-1 overflow-y-auto px-3 py-4 scrollbar-thin">
-        {navGroups.map((group) => <div key={group.label} className="mb-4 last:mb-1">
+        {visibleGroups.map((group) => <div key={group.label} className="mb-4 last:mb-1">
           {!collapsed && <div className="mb-1.5 px-2.5 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--sidebar-muted)]">{group.label}</div>}
           <nav className="space-y-1">{group.items.map((item) => { const Icon=item.icon; const active=pathname===item.href||pathname.startsWith(`${item.href}/`); return <Link key={item.href} href={item.href} title={collapsed?item.label:undefined} onClick={()=>setMobileOpen(false)} className={`group flex h-9 items-center rounded-[11px] border transition-all duration-150 ${collapsed?"justify-center px-2":"gap-2.5 px-2.5"} ${active?"border-violet-500/20 bg-violet-600 text-white shadow-[0_8px_20px_rgba(109,93,252,.22)]":"border-transparent text-[var(--sidebar-muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-fg)]"}`}><Icon className="h-4 w-4 shrink-0" strokeWidth={active?2.15:1.8}/>{!collapsed&&<span className="truncate text-[12.5px] font-bold">{item.label}</span>}</Link>})}</nav>
         </div>)}
