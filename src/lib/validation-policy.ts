@@ -12,3 +12,15 @@ export function classifyGmailRcptResponse(code: number, line: string): Validatio
   }
   return { status: "unknown", detail: `gmail_rcpt_${code || "ambiguous"}` };
 }
+
+
+export function isDirectGmailAddress(email: string) {
+  const domain = String(email || "").trim().toLowerCase().split("@")[1] || "";
+  return domain === "gmail.com" || domain === "googlemail.com";
+}
+
+export function validationAllowsSend(email: string, status: string) {
+  if (status === "invalid") return false;
+  if (isDirectGmailAddress(email) && status === "pending") return false;
+  return true;
+}
