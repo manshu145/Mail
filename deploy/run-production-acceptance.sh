@@ -13,6 +13,7 @@ docker inspect "$PG_CONTAINER" >/dev/null
 
 curl -fsSL "$SCRIPT_URL" -o "$TMP"
 docker cp "$TMP" "$APP_CONTAINER:/app/scripts/production-acceptance.ts" >/dev/null
+docker exec -u 0 "$APP_CONTAINER" chmod 0644 /app/scripts/production-acceptance.ts
 
 set +e
 docker exec "$APP_CONTAINER" node --import tsx scripts/production-acceptance.ts
