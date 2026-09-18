@@ -23,12 +23,13 @@ test("ambiguous negative response remains unknown", () => {
 });
 
 
-test("pending direct Gmail is held until validation completes", () => {
-  assert.equal(validationAllowsSend("person@gmail.com", "pending"), false);
-  assert.equal(validationAllowsSend("person@googlemail.com", "pending"), false);
+test("validation is optional for campaign sending", () => {
+  assert.equal(validationAllowsSend("person@gmail.com", "pending"), true);
+  assert.equal(validationAllowsSend("person@googlemail.com", "unknown"), true);
+  assert.equal(validationAllowsSend("person@example.com", "error"), true);
 });
 
-test("accepted Gmail and non-Gmail pending follow current policy", () => {
+test("known invalid validation verdict blocks sending", () => {
   assert.equal(validationAllowsSend("person@gmail.com", "accepted"), true);
   assert.equal(validationAllowsSend("person@example.com", "pending"), true);
   assert.equal(validationAllowsSend("person@example.com", "invalid"), false);
