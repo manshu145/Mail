@@ -1,4 +1,4 @@
-import { Gauge, Mail, ServerCog, ShieldCheck, Activity } from "lucide-react";
+import { Gauge, Mail, ServerCog, ShieldCheck } from "lucide-react";
 import { redirect } from "next/navigation";
 import { desc } from "drizzle-orm";
 import { AppShell } from "@/components/app-shell";
@@ -7,9 +7,8 @@ import { SendingAccountActions } from "@/components/sending-account-actions";
 import { WarmupControl } from "@/components/warmup-control";
 import { db, databaseConfigured } from "@/db";
 import { sendingAccounts } from "@/db/schema";
-import { reputationSnapshots, sendingAccountWarmups, workerHeartbeats } from "@/db/operations-schema";
+import { reputationSnapshots, sendingAccountWarmups } from "@/db/operations-schema";
 import { getSession } from "@/lib/auth";
-import { EXPECTED_WORKERS, isWorkerHeartbeatFresh } from "@/lib/worker-health";
 
 export default async function InfrastructurePage() {
   const session = await getSession();
@@ -18,7 +17,6 @@ export default async function InfrastructurePage() {
   let rows: typeof sendingAccounts.$inferSelect[] = [];
   let warmups: typeof sendingAccountWarmups.$inferSelect[] = [];
   let snapshots: typeof reputationSnapshots.$inferSelect[] = [];
-  let heartbeats: typeof workerHeartbeats.$inferSelect[] = [];
   let dbError = false;
 
   if (databaseConfigured) {
@@ -31,14 +29,11 @@ export default async function InfrastructurePage() {
     const telemetry = await Promise.allSettled([
       db.select().from(sendingAccountWarmups),
       db.select().from(reputationSnapshots).orderBy(desc(reputationSnapshots.createdAt)).limit(200),
-      db.select().from(workerHeartbeats),
     ]);
     if (telemetry[0].status === "fulfilled") warmups = telemetry[0].value;
     else console.error("Infrastructure warmup query failed", telemetry[0].reason);
     if (telemetry[1].status === "fulfilled") snapshots = telemetry[1].value;
     else console.error("Infrastructure reputation query failed", telemetry[1].reason);
-    if (telemetry[2].status === "fulfilled") heartbeats = telemetry[2].value;
-    else console.error("Infrastructure heartbeat query failed", telemetry[2].reason);
   }
 
   const usable = databaseConfigured && !dbError;
@@ -46,16 +41,13 @@ export default async function InfrastructurePage() {
   const repMap = new Map<string, typeof reputationSnapshots.$inferSelect>();
   for (const snapshot of snapshots) if (snapshot.sendingAccountId && !repMap.has(snapshot.sendingAccountId)) repMap.set(snapshot.sendingAccountId, snapshot);
 
-  const expectedWorkers = EXPECTED_WORKERS;
-  const heartbeatMap = new Map(heartbeats.map((heartbeat) => [heartbeat.workerName, heartbeat]));
-  const now = Date.now();
 
   return <AppShell session={session}>
     <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p className="mb-2 text-xs font-extrabold uppercase tracking-[.18em] text-zinc-400">Sending</p>
         <h1 className="text-3xl font-black tracking-[-.035em] sm:text-4xl">Infrastructure</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Account limits, warm-up ramps, worker health and real 24-hour reputation snapshots. Automatic thresholds can pause an account.</p>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Account limits, warm-up ramps and 24-hour reputation protection. Automatic thresholds can pause an account when needed.</p>
       </div>
       <ResourceCreate disabled={!usable || session.role !== "owner"} endpoint="/api/resources/sending-accounts" title="Add sending account" buttonLabel="Add account" fields={[{ name: "name", label: "Account name", required: true }, { name: "fromName", label: "From name", required: true }, { name: "fromEmail", label: "From email", type: "email", required: true }, { name: "replyTo", label: "Reply-to", type: "email" }]} />
     </div>
@@ -80,33 +72,10 @@ export default async function InfrastructurePage() {
         <p className="text-xs font-extrabold uppercase tracking-[.16em] text-zinc-400">Safety policy</p>
         <h2 className="mt-2 text-xl font-black">Automatic protection</h2>
         <div className="mt-5 space-y-3">{[["Web request", "Never bulk sends"], ["Local acceptance", "Not delivery"], ["Bounce stop", `${(Number(process.env.REPUTATION_BOUNCE_STOP_RATE || 0.05) * 100).toFixed(1)}%`], ["Complaint stop", `${(Number(process.env.REPUTATION_COMPLAINT_STOP_RATE || 0.003) * 100).toFixed(2)}%`], ["Minimum sample", process.env.REPUTATION_MIN_SAMPLE || "100"]].map(([a, b]) => <div key={a} className="flex justify-between rounded-xl border border-zinc-100 px-4 py-3 dark:border-zinc-800"><span className="text-sm font-bold">{a}</span><span className="text-xs font-bold text-zinc-400">{b}</span></div>)}</div>
-        <div className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-zinc-400"><ShieldCheck className="h-4 w-4"/> Reputation worker pauses risky accounts</div>
-        <div className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-zinc-400"><Gauge className="h-4 w-4"/> Warm-up daily ceiling is enforced in transport</div>
+        <div className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-zinc-400"><ShieldCheck className="h-4 w-4"/> Automatic protection pauses risky accounts</div>
+        <div className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-zinc-400"><Gauge className="h-4 w-4"/> Warm-up daily ceiling is enforced automatically</div>
       </aside>
     </section>
 
-    <section className="premium-panel mt-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-zinc-400">Runtime</p><h2 className="mt-1 text-xl font-black">Worker health</h2><p className="mt-1 text-sm text-zinc-500">A worker is marked healthy when its heartbeat is recent. Missing or stale workers need attention before a high-volume send.</p></div>
-        <div className="flex items-center gap-2 text-xs font-bold text-zinc-400"><Activity className="h-4 w-4"/> {heartbeats.length} heartbeats recorded</div>
-      </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {expectedWorkers.map((name) => {
-          const heartbeat = heartbeatMap.get(name);
-          const ageMs = heartbeat ? now - heartbeat.lastSeenAt.getTime() : Number.POSITIVE_INFINITY;
-          const healthy = isWorkerHeartbeatFresh(heartbeat?.lastSeenAt, now);
-          const age = heartbeat ? ageMs < 60000 ? `${Math.max(0, Math.floor(ageMs / 1000))}s ago` : `${Math.floor(ageMs / 60000)}m ago` : "No heartbeat";
-          return <div key={name} className="rounded-xl border border-zinc-100 p-3.5 dark:border-zinc-800">
-            <div className="flex items-center justify-between gap-3"><span className="text-sm font-black">{name}</span><span className={`h-2.5 w-2.5 rounded-full ${healthy ? "bg-emerald-500" : "bg-rose-500"}`}/></div>
-            <p className="mt-1 text-xs text-zinc-500">{age}</p>
-          </div>;
-        })}
-      </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900"><p className="text-[11px] font-bold text-zinc-400">Bounce tracking</p><p className="mt-1 text-sm font-black">{process.env.BOUNCE_DOMAIN && process.env.BOUNCE_SECRET ? "Configured" : "Not configured"}</p></div>
-        <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900"><p className="text-[11px] font-bold text-zinc-400">Inbound SMTP bind</p><p className="mt-1 text-sm font-black">{process.env.MTA_SMTP_BIND || "127.0.0.1"}</p></div>
-        <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900"><p className="text-[11px] font-bold text-zinc-400">Complaint ingestion</p><p className="mt-1 text-sm font-black">{process.env.FEEDBACK_INGEST_SECRET ? "Configured" : "Not configured"}</p></div>
-      </div>
-    </section>
   </AppShell>;
 }
