@@ -3,17 +3,24 @@ set -Eeuo pipefail
 
 APP_CONTAINER=${NEXIMAIL_APP_CONTAINER:-neximail-next-app-1}
 PG_CONTAINER=${NEXIMAIL_PG_CONTAINER:-neximail-next-postgres-1}
-SCRIPT_URL=${NEXIMAIL_ACCEPTANCE_SCRIPT_URL:-https://raw.githubusercontent.com/manshu145/Mail/main/scripts/production-acceptance.ts}
-TMP=$(mktemp)
-trap 'rm -f "$TMP"' EXIT
+SCRIPT_URL=${NEXIMAIL_ACCEPTANCE_SCRIPT_URL:-}
+TMP=""
+cleanup() { [[ -n "${TMP:-}" && -f "$TMP" ]] && rm -f "$TMP"; }
+trap cleanup EXIT
 
 echo "=== NexiMail production acceptance ==="
 docker inspect "$APP_CONTAINER" >/dev/null
 docker inspect "$PG_CONTAINER" >/dev/null
 
-curl -fsSL "$SCRIPT_URL" -o "$TMP"
-docker cp "$TMP" "$APP_CONTAINER:/app/scripts/production-acceptance.ts" >/dev/null
-docker exec -u 0 "$APP_CONTAINER" chmod 0644 /app/scripts/production-acceptance.ts
+if [[ -n "$SCRIPT_URL" ]]; then
+  TMP=$(mktemp)
+  curl -fsSL "$SCRIPT_URL" -o "$TMP"
+  docker cp "$TMP" "$APP_CONTAINER:/app/scripts/production-acceptance.ts" >/dev/null
+  docker exec -u 0 "$APP_CONTAINER" chmod 0644 /app/scripts/production-acceptance.ts
+  echo "[WARN] Acceptance script override supplied explicitly: $SCRIPT_URL"
+else
+  echo "[INFO] Using production-acceptance.ts baked into the deployed app image."
+fi
 
 set +e
 docker exec "$APP_CONTAINER" node --import tsx scripts/production-acceptance.ts
