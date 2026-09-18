@@ -1,9 +1,9 @@
 "use client";
 
-import { FileUp, Loader2, UploadCloud } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileUp, Loader2, Table2, UploadCloud } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { detectMapping, IMPORT_FIELDS, parseCsv } from "@/lib/csv-import";
+import { analyzeCsvSample, IMPORT_FIELDS } from "@/lib/csv-import";
 
 type ListOption = { id: string; name: string };
 type Mapping = Record<string, string>;
@@ -46,21 +46,36 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [message, setMessage] = useState("");
+  const [formatErrors, setFormatErrors] = useState<string[]>([]);
+  const [formatWarnings, setFormatWarnings] = useState<string[]>([]);
+  const [delimiter, setDelimiter] = useState<"comma"|"semicolon"|"tab"|"unknown">("unknown");
 
   async function choose(next: File | null) {
     setFile(next); setMessage(""); setUploadProgress(null);
-    if (!next) { setHeaders([]); setPreview([]); setMapping({}); return; }
-    if (next.size > MAX_FILE_BYTES) { setFile(null); setMessage("CSV is larger than 300 MB."); return; }
-    const sample = await next.slice(0, Math.min(next.size, 256 * 1024)).text();
-    const matrix = parseCsv(sample);
-    const nextHeaders = (matrix[0] || []).map((v) => v.trim());
-    setHeaders(nextHeaders); setPreview(matrix.slice(1, 6)); setMapping(detectMapping(nextHeaders));
+    if (!next) { setHeaders([]); setPreview([]); setMapping({}); setFormatErrors([]); setFormatWarnings([]); setDelimiter("unknown"); return; }
+    if (next.size > MAX_FILE_BYTES) { setFile(null); setMessage("CSV is larger than 300 MB."); setFormatErrors(["Maximum upload size is 300 MB."]); return; }
+    if (!next.name.toLowerCase().endsWith(".csv")) { setFile(null); setMessage("Choose a .csv file."); setFormatErrors(["NexiMail accepts comma-separated .csv files only."]); return; }
+    try {
+      const sample = await next.slice(0, Math.min(next.size, 256 * 1024)).text();
+      const analysis = analyzeCsvSample(sample);
+      setHeaders(analysis.headers);
+      setPreview(analysis.preview);
+      setMapping(analysis.mapping);
+      setFormatErrors(analysis.errors);
+      setFormatWarnings(analysis.warnings);
+      setDelimiter(analysis.delimiter);
+      if (analysis.errors.length) setMessage("CSV format needs attention before upload.");
+    } catch {
+      setFormatErrors(["Could not read the CSV preview. Re-export the file as UTF-8 comma-separated CSV."]);
+      setHeaders([]); setPreview([]); setMapping({});
+    }
   }
 
   const mappedCount = useMemo(() => Object.values(mapping).filter(Boolean).length, [mapping]);
 
   async function submit() {
     if (!file) return setMessage("Choose a CSV first.");
+    if (formatErrors.length) return setMessage("Fix the CSV format issues shown below before uploading.");
     if (!mapping.email) return setMessage("Map the email column.");
     if (!consentSource.trim()) return setMessage("Consent source is required.");
     setBusy(true); setMessage(""); setUploadProgress(0);
@@ -110,9 +125,27 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
         <label><span className="mb-1 block text-xs font-bold">Default category</span><input className={fieldClass} value={defaultCategory} onChange={(e)=>setDefaultCategory(e.target.value)} placeholder="Students|NEET" /></label>
         <label><span className="mb-1 block text-xs font-bold">Default tags</span><input className={fieldClass} value={defaultTags} onChange={(e)=>setDefaultTags(e.target.value)} placeholder="neet|medical|raipur" /><span className="mt-1 block text-[11px] text-[var(--muted)]">Use | for multiple tags/categories.</span></label>
         <label className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3 text-sm font-bold"><input type="checkbox" checked={queueValidation} onChange={(e)=>setQueueValidation(e.target.checked)} /> Queue background validation after import</label>
-        {preview.length ? <div className="overflow-hidden rounded-xl border border-[var(--border)]"><div className="bg-[var(--surface-soft)] px-3 py-2 text-xs font-black">Preview · first {preview.length} rows</div><div className="max-h-36 overflow-auto text-[11px]">{preview.map((row,i)=><div key={i} className="border-t border-[var(--border)] px-3 py-2 text-[var(--muted)]">{row.slice(0,4).join(" · ")}</div>)}</div></div> : null}
+        {file ? <div className="rounded-xl border border-[var(--border)] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2"><Table2 className="h-4 w-4 text-violet-500"/><span className="text-xs font-black">CSV format check</span></div>
+            <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${formatErrors.length ? "bg-rose-500/10 text-rose-600" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}>{formatErrors.length ? "Needs fix" : "Ready"} · {delimiter}</span>
+          </div>
+          {formatErrors.length ? <div className="mt-3 space-y-1.5">{formatErrors.map((item)=><p key={item} className="flex gap-2 text-[11px] font-bold text-rose-600"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0"/>{item}</p>)}</div> : <p className="mt-3 flex gap-2 text-[11px] font-bold text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5 shrink-0"/>Comma-separated CSV detected and email column recognized.</p>}
+          {formatWarnings.length ? <div className="mt-2 space-y-1">{formatWarnings.map((item)=><p key={item} className="text-[11px] font-semibold text-amber-600">{item}</p>)}</div> : null}
+        </div> : null}
+
+        {preview.length && headers.length ? <div className="overflow-hidden rounded-xl border border-[var(--border)]">
+          <div className="bg-[var(--surface-soft)] px-3 py-2 text-xs font-black">Preview · first {preview.length} rows</div>
+          <div className="max-h-64 overflow-auto">
+            <table className="min-w-full text-left text-[11px]">
+              <thead className="sticky top-0 bg-[var(--surface)]"><tr>{headers.slice(0,8).map((header)=><th key={header} className="whitespace-nowrap border-b border-r border-[var(--border)] px-3 py-2 font-black">{header || "(blank)"}</th>)}</tr></thead>
+              <tbody>{preview.map((row,i)=><tr key={i} className="border-t border-[var(--border)]">{headers.slice(0,8).map((header,j)=><td key={`${header}-${j}`} className="max-w-48 truncate border-r border-[var(--border)] px-3 py-2 text-[var(--muted)]" title={row[j] || ""}>{row[j] || "—"}</td>)}</tr>)}</tbody>
+            </table>
+          </div>
+          {headers.length>8?<p className="border-t border-[var(--border)] px-3 py-2 text-[10px] text-[var(--muted)]">Showing first 8 of {headers.length} columns. All columns will still be imported/mapped.</p>:null}
+        </div> : null}
         {message ? <p className="rounded-xl bg-violet-500/[.08] px-3 py-2 text-xs font-bold text-violet-600 dark:text-violet-300">{message}</p> : null}
-        <button disabled={busy || !file || !mapping.email || !consentSource.trim()} onClick={()=>void submit()} className="btn-primary w-full">{busy ? <><Loader2 className="h-4 w-4 animate-spin"/> {uploadProgress && uploadProgress > 0 ? `Uploading ${uploadProgress}%` : "Preparing upload…"}</> : <><FileUp className="h-4 w-4"/> Queue import</>}</button>
+        <button disabled={busy || !file || !!formatErrors.length || !mapping.email || !consentSource.trim()} onClick={()=>void submit()} className="btn-primary w-full">{busy ? <><Loader2 className="h-4 w-4 animate-spin"/> {uploadProgress && uploadProgress > 0 ? `Uploading ${uploadProgress}%` : "Preparing upload…"}</> : <><FileUp className="h-4 w-4"/> Queue import</>}</button>
       </div>
     </div>
   </section>;
