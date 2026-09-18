@@ -13,7 +13,7 @@ export default async function SettingsPage() {
   let rows: typeof systemSettings.$inferSelect[] = [];
   let dbError = false;
   if (databaseConfigured) {
-    try { rows = await db.select().from(systemSettings); } catch { dbError = true; }
+    try { rows = (await db.select().from(systemSettings)).filter((row) => row.key !== "validation.supersend_api_key"); } catch { dbError = true; }
   }
   const usable = databaseConfigured && !dbError;
 
