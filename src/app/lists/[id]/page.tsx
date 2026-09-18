@@ -1,2 +1,87 @@
-import { notFound,redirect } from "next/navigation";import { and,eq,ilike,ne } from "drizzle-orm";import { AppShell } from "@/components/app-shell";import { AudienceActions } from "@/components/audience-actions";import { AddListMember,RemoveListMember } from "@/components/list-member-actions";import { db,databaseConfigured } from "@/db";import { contactLists,contacts,lists } from "@/db/schema";import { segmentDefinitions } from "@/db/segment-schema";import { getSession } from "@/lib/auth";
-export default async function ListDetail({params}:{params:Promise<{id:string}>}){const session=await getSession();if(!session)redirect("/login");if(!databaseConfigured)redirect("/lists");const {id}=await params;const [list]=await db.select().from(lists).where(eq(lists.id,id)).limit(1);if(!list)notFound();let members:typeof contacts.$inferSelect[]=[],rule:typeof segmentDefinitions.$inferSelect|undefined;if(list.isDynamic){[rule]=await db.select().from(segmentDefinitions).where(eq(segmentDefinitions.listId,id)).limit(1);if(rule){let condition;if(rule.field==="email_domain")condition=rule.operator==="equals"?ilike(contacts.normalizedEmail,`%@${rule.value}`):ne(contacts.normalizedEmail,rule.value);else if(rule.field==="validation_status")condition=rule.operator==="equals"?eq(contacts.validationStatus,rule.value as "pending"|"accepted"|"valid"|"invalid"|"unknown"|"error"):ne(contacts.validationStatus,rule.value as "pending"|"accepted"|"valid"|"invalid"|"unknown"|"error");else condition=rule.operator==="equals"?eq(contacts.status,rule.value as "active"|"archived"):ne(contacts.status,rule.value as "active"|"archived");members=await db.select().from(contacts).where(condition).limit(500)}}else members=await db.select({id:contacts.id,email:contacts.email,normalizedEmail:contacts.normalizedEmail,firstName:contacts.firstName,lastName:contacts.lastName,status:contacts.status,validationStatus:contacts.validationStatus,source:contacts.source,consentStatus:contacts.consentStatus,consentSource:contacts.consentSource,attributes:contacts.attributes,createdAt:contacts.createdAt,updatedAt:contacts.updatedAt}).from(contactLists).innerJoin(contacts,eq(contactLists.contactId,contacts.id)).where(eq(contactLists.listId,id));return <AppShell session={session}><div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="page-eyebrow mb-2">Audience</p><h1 className="page-title">{list.name}</h1><p className="mt-2 text-sm text-zinc-500">{list.description||"No description"}</p>{rule?<p className="mt-3 inline-flex rounded-full bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">{rule.field.replaceAll("_"," ")} {rule.operator.replaceAll("_"," ")} {rule.value}</p>:null}</div><AudienceActions audience={{id:list.id,name:list.name,description:list.description,isDynamic:list.isDynamic}} rule={rule?{field:rule.field,operator:rule.operator,value:rule.value}:null}/></div>{!list.isDynamic?<section className="premium-panel mb-5 p-5"><h2 className="mb-3 font-black">Add existing contact</h2><AddListMember listId={id}/></section>:null}<section className="premium-panel overflow-hidden"><div className="border-b border-zinc-100 p-5 dark:border-zinc-900"><h2 className="font-black">{list.isDynamic?"Current computed members":"Members"} · {members.length.toLocaleString()}</h2></div>{members.length?<div className="divide-y divide-zinc-100 dark:divide-zinc-900">{members.map(c=><div key={c.id} className="flex items-center justify-between gap-4 p-4"><div><div className="font-bold">{[c.firstName,c.lastName].filter(Boolean).join(" ")||"Unnamed contact"}</div><div className="text-xs text-zinc-500">{c.email}</div></div>{!list.isDynamic?<RemoveListMember listId={id} contactId={c.id}/>:<span className="text-xs font-bold capitalize text-zinc-500">{c.validationStatus}</span>}</div>)}</div>:<div className="p-10 text-center text-sm text-zinc-500">No matching contacts.</div>}</section></AppShell>}
+import { notFound, redirect } from "next/navigation";
+import { eq, ilike, ne, notIlike, sql, type SQL } from "drizzle-orm";
+import { AppShell } from "@/components/app-shell";
+import { AudienceActions } from "@/components/audience-actions";
+import { AddListMember, RemoveListMember } from "@/components/list-member-actions";
+import { db, databaseConfigured } from "@/db";
+import { contactLists, contacts, lists } from "@/db/schema";
+import { segmentDefinitions } from "@/db/segment-schema";
+import { getSession } from "@/lib/auth";
+
+export default async function ListDetail({ params }: { params: Promise<{ id: string }> }) {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  if (!databaseConfigured) redirect("/lists");
+
+  const { id } = await params;
+  const [list] = await db.select().from(lists).where(eq(lists.id, id)).limit(1);
+  if (!list) notFound();
+
+  let members: typeof contacts.$inferSelect[] = [];
+  let rule: typeof segmentDefinitions.$inferSelect | undefined;
+
+  if (list.isDynamic) {
+    [rule] = await db.select().from(segmentDefinitions).where(eq(segmentDefinitions.listId, id)).limit(1);
+
+    if (rule) {
+      let condition: SQL | undefined;
+
+      if (rule.field === "email_domain") {
+        const domain = rule.value.trim().replace(/^@/, "").toLowerCase();
+        condition = rule.operator === "equals"
+          ? ilike(contacts.normalizedEmail, `%@${domain}`)
+          : notIlike(contacts.normalizedEmail, `%@${domain}`);
+      } else if (rule.field === "validation_status") {
+        condition = rule.operator === "equals"
+          ? eq(contacts.validationStatus, rule.value as "pending"|"accepted"|"valid"|"invalid"|"unknown"|"error")
+          : ne(contacts.validationStatus, rule.value as "pending"|"accepted"|"valid"|"invalid"|"unknown"|"error");
+      } else if (rule.field === "contact_status") {
+        condition = rule.operator === "equals"
+          ? eq(contacts.status, rule.value as "active"|"archived")
+          : ne(contacts.status, rule.value as "active"|"archived");
+      } else if (rule.field === "custom_attribute") {
+        const key = rule.attributeKey?.trim();
+        if (key) {
+          const actual = sql`lower(coalesce(${contacts.attributes}->>${key},''))`;
+          const expected = rule.value.trim().toLowerCase();
+          condition = rule.operator === "equals"
+            ? sql`${actual}=${expected}`
+            : sql`${actual}<>${expected}`;
+        }
+      }
+
+      if (condition) members = await db.select().from(contacts).where(condition).limit(500);
+    }
+  } else {
+    members = await db.select({
+      id:contacts.id,email:contacts.email,normalizedEmail:contacts.normalizedEmail,
+      firstName:contacts.firstName,lastName:contacts.lastName,status:contacts.status,
+      validationStatus:contacts.validationStatus,source:contacts.source,
+      consentStatus:contacts.consentStatus,consentSource:contacts.consentSource,
+      attributes:contacts.attributes,createdAt:contacts.createdAt,updatedAt:contacts.updatedAt,
+    }).from(contactLists).innerJoin(contacts,eq(contactLists.contactId,contacts.id)).where(eq(contactLists.listId,id));
+  }
+
+  const ruleText = rule
+    ? `${rule.field.replaceAll("_"," ")} ${rule.attributeKey ? `(${rule.attributeKey}) ` : ""}${rule.operator.replaceAll("_"," ")} ${rule.value}`
+    : null;
+
+  return <AppShell session={session}>
+    <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p className="page-eyebrow mb-2">Audience</p>
+        <h1 className="page-title">{list.name}</h1>
+        <p className="mt-2 text-sm text-zinc-500">{list.description||"No description"}</p>
+        {ruleText?<p className="mt-3 inline-flex rounded-full bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">{ruleText}</p>:null}
+      </div>
+      <AudienceActions audience={{id:list.id,name:list.name,description:list.description,isDynamic:list.isDynamic}} rule={rule?{field:rule.field,attributeKey:rule.attributeKey,operator:rule.operator,value:rule.value}:null}/>
+    </div>
+
+    {!list.isDynamic?<section className="premium-panel mb-5 p-5"><h2 className="mb-3 font-black">Add existing contact</h2><AddListMember listId={id}/></section>:null}
+
+    <section className="premium-panel overflow-hidden">
+      <div className="border-b border-zinc-100 p-5 dark:border-zinc-900"><h2 className="font-black">{list.isDynamic?"Current computed members":"Members"} · {members.length.toLocaleString()}</h2>{list.isDynamic&&members.length>=500?<p className="mt-1 text-xs text-[var(--muted)]">Preview capped at 500 contacts; send-time audience resolution runs in the database without this UI cap.</p>:null}</div>
+      {members.length?<div className="divide-y divide-zinc-100 dark:divide-zinc-900">{members.map(c=><div key={c.id} className="flex items-center justify-between gap-4 p-4"><div><div className="font-bold">{[c.firstName,c.lastName].filter(Boolean).join(" ")||"Unnamed contact"}</div><div className="text-xs text-zinc-500">{c.email}</div></div>{!list.isDynamic?<RemoveListMember listId={id} contactId={c.id}/>:<span className="text-xs font-bold capitalize text-zinc-500">{c.validationStatus}</span>}</div>)}</div>:<div className="p-10 text-center text-sm text-zinc-500">No matching contacts.</div>}
+    </section>
+  </AppShell>;
+}
