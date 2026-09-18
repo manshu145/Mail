@@ -11,7 +11,5 @@ export const campaignPreflights = pgTable("campaign_preflights", {
   validCount: integer("valid_count").notNull().default(0),
   pendingCount: integer("pending_count").notNull().default(0),
   unknownCount: integer("unknown_count").notNull().default(0),
-  awaitingValidationCount: integer("awaiting_validation_count").notNull().default(0),
-  validationPolicyVersion: integer("validation_policy_version").notNull().default(1),
   checkedAt: timestamp("checked_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("campaign_preflights_checked_idx").on(table.checkedAt)]);
