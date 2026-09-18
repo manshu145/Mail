@@ -3,7 +3,7 @@
 import { FileUp, Loader2, UploadCloud } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { detectMapping, IMPORT_FIELDS, parseCsv } from "@/lib/csv-import";
+import { analyzeCsvSample, IMPORT_FIELDS } from "@/lib/csv-import";
 
 type ListOption = { id: string; name: string };
 type Mapping = Record<string, string>;
@@ -66,10 +66,18 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
     setFile(next); setMessage(""); setUploadProgress(null);
     if (!next) { setHeaders([]); setPreview([]); setMapping({}); return; }
     if (next.size > MAX_FILE_BYTES) { setFile(null); setMessage("CSV is larger than 300 MB."); return; }
-    const sample = await next.slice(0, Math.min(next.size, 256 * 1024)).text();
-    const matrix = parseCsv(sample);
-    const nextHeaders = (matrix[0] || []).map((v) => v.trim());
-    setHeaders(nextHeaders); setPreview(matrix.slice(1, 6)); setMapping(detectMapping(nextHeaders));
+    try {
+      const sample = await next.slice(0, Math.min(next.size, 256 * 1024)).text();
+      const analysis = analyzeCsvSample(sample);
+      setHeaders(analysis.headers);
+      setPreview(analysis.preview.slice(0, 5));
+      setMapping(analysis.mapping);
+      if (analysis.errors.length) setMessage(analysis.errors.join(" "));
+      else if (analysis.warnings.length) setMessage(analysis.warnings.join(" "));
+    } catch {
+      setHeaders([]); setPreview([]); setMapping({});
+      setMessage("Could not read this CSV. Export it as UTF-8 comma-separated CSV and try again.");
+    }
   }
 
   const mappedCount = useMemo(() => Object.values(mapping).filter(Boolean).length, [mapping]);
