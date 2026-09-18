@@ -101,7 +101,7 @@ export default async function ImportsPage() {
         <p><b>3</b> Select a consent source, optional list, default source/category and tags before queueing.</p>
         <p><b>4</b> Unmapped columns are preserved as custom fields for personalization.</p>
       </div>
-      <div className="mt-4 rounded-xl bg-[var(--surface-soft)] p-3 text-xs text-[var(--muted)]"><b>Capacity:</b> up to 1,000,000 data rows and 300 MB per CSV. Active jobs refresh every 4 seconds with progress, speed and ETA.</div>
+      <div className="mt-4 rounded-xl bg-[var(--surface-soft)] p-3 text-xs text-[var(--muted)]"><b>Recommended header:</b> <code className="break-all">email,name,first_name,last_name,phone,dob,gender,state,district,city,pincode,occupation,industry,audience_type,category,categories,tags,source</code></div>\n      <div className="mt-3 rounded-xl bg-[var(--surface-soft)] p-3 text-xs text-[var(--muted)]"><b>Capacity:</b> up to 1,000,000 data rows and 300 MB per CSV. Active jobs refresh every 4 seconds with progress, speed and ETA.</div>
     </section>
 
     {usable ? <ImportWizard lists={listRows} /> : null}
