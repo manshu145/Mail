@@ -52,7 +52,7 @@ export function ValidationControls({
         <div>
           <p className="page-eyebrow">Validation control</p>
           <h2 className="mt-1 text-lg font-black">Gmail mailbox checks</h2>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--muted)]">Only unresolved Gmail / Googlemail contacts are queued. Final Accepted / Valid / Invalid results are not rechecked automatically.</p>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--muted)]">Validation is optional and Gmail/Googlemail-only. Campaigns do not wait for validation. Final Accepted / Valid / Invalid results are not rechecked automatically.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {paused
@@ -101,10 +101,10 @@ export function ValidationControls({
       <p className="page-eyebrow">How it works</p>
       <h2 className="mt-1 text-lg font-black">Current validator</h2>
       <div className="mt-4 space-y-3 text-sm">
-        <div className="rounded-xl border border-[var(--border)] p-3"><b>Method</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Direct SMTP RCPT probe against Gmail MX. No third-party validation API is configured in the current production stack.</p></div>
-        <div className="rounded-xl border border-[var(--border)] p-3"><b>Accepted</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Gmail accepted the mailbox RCPT check. This does not guarantee inbox placement.</p></div>
-        <div className="rounded-xl border border-[var(--border)] p-3"><b>Invalid</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Explicit mailbox-not-found response. NexiMail adds an invalid suppression.</p></div>
-        <div className="rounded-xl border border-[var(--border)] p-3"><b>Unknown / Error</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Temporary policy, timeout, network or ambiguous result. These remain eligible for a later retry.</p></div>
+        <div className="rounded-xl border border-[var(--border)] p-3"><b>Method</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Supersend email verification API for Gmail/Googlemail contacts. Validation runs only when you explicitly queue a job or opt in during import.</p></div>
+        <div className="rounded-xl border border-[var(--border)] p-3"><b>Accepted</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">The validation provider returned a positive mailbox verdict. This does not guarantee inbox placement.</p></div>
+        <div className="rounded-xl border border-[var(--border)] p-3"><b>Invalid</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">The validation provider returned an invalid mailbox verdict. NexiMail adds an invalid suppression.</p></div>
+        <div className="rounded-xl border border-[var(--border)] p-3"><b>Unknown / Error</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Temporary, provider, network or ambiguous result. These remain eligible for sending and can be validated again later.</p></div>
       </div>
     </aside>
   </div>;
