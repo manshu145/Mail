@@ -68,16 +68,39 @@ services:
       timeout: 5s
       retries: 10
 
+  import-volume-init:
+    image: neximail-next-runtime:${NEXIMAIL_IMAGE_TAG:-latest}
+    user: "0:0"
+    restart: "no"
+    entrypoint: ["/bin/sh","-c"]
+    command: ["mkdir -p /var/lib/neximail/imports && chown -R neximail:neximail /var/lib/neximail/imports && chmod 0770 /var/lib/neximail/imports"]
+    volumes:
+      - import_uploads:/var/lib/neximail/imports
+
   app:
     <<: *runtime
     ports: ["127.0.0.1:${APP_BIND_PORT:-3100}:3000"]
     volumes:
       - import_uploads:/var/lib/neximail/imports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      import-volume-init:
+        condition: service_completed_successfully
 
   import-worker:
     <<: *runtime
     volumes:
       - import_uploads:/var/lib/neximail/imports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      import-volume-init:
+        condition: service_completed_successfully
     command: ["npm", "run", "worker:import"]
 
   campaign-worker:
