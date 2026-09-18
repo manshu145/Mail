@@ -1,4 +1,5 @@
 x-runtime: &runtime
+  image: neximail-next-runtime:${NEXIMAIL_IMAGE_TAG:-latest}
   build: .
   restart: unless-stopped
   env_file: .env
