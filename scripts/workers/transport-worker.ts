@@ -14,6 +14,7 @@ import { getRuntimePolicy } from "../../src/lib/runtime-policy";
 import { providerForEmail } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
+import { validationAllowsSend } from "../../src/lib/validation-policy";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -51,19 +52,24 @@ async function rewriteLinks(html: string, messageId: string) {
 }
 
 
+function optionalMin(...values: number[]) {
+  const finiteCaps = values.filter((value) => Number.isFinite(value) && value > 0);
+  return finiteCaps.length ? Math.min(...finiteCaps) : 0;
+}
 function warmupLimit(warmup: typeof sendingAccountWarmups.$inferSelect | null, accountDaily: number) {
   if (!warmup?.enabled || !warmup.startedAt) return accountDaily;
   const days = Math.max(0, Math.floor((Date.now() - warmup.startedAt.getTime()) / 86400000));
   const calculated = Math.floor(warmup.dayOneLimit * Math.pow(1 + warmup.growthPercent / 100, days));
-  return Math.min(accountDaily, warmup.maxDailyLimit, Math.max(warmup.dayOneLimit, calculated));
+  return optionalMin(accountDaily, warmup.maxDailyLimit, Math.max(warmup.dayOneLimit, calculated));
 }
 async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect, settings: DeliverySettings) {
   const [warmup] = await db.select().from(sendingAccountWarmups).where(eq(sendingAccountWarmups.sendingAccountId, account.id)).limit(1);
-  const effectiveHourly = Math.min(account.hourlyLimit, settings.maxRollingHour);
-  const effectiveDaily = Math.min(warmupLimit(warmup || null, account.dailyLimit), settings.maxRolling24h);
+  const effectiveHourly = optionalMin(account.hourlyLimit, settings.maxRollingHour);
+  const effectiveDaily = optionalMin(warmupLimit(warmup || null, account.dailyLimit), settings.maxRolling24h);
   const result = await db.execute(sql`select count(*) filter(where m.accepted_at >= now() - interval '1 hour')::int as hour_count,count(*) filter(where m.accepted_at >= now() - interval '24 hours')::int as day_count from messages m join campaigns c on c.id = m.campaign_id where c.sending_account_id = ${account.id}`);
   const row = (result.rows[0] || {}) as Record<string, unknown>;
-  return { allowed: Number(row.hour_count || 0) < effectiveHourly && Number(row.day_count || 0) < effectiveDaily, effectiveHourly, effectiveDaily };
+  const hourCount = Number(row.hour_count || 0), dayCount = Number(row.day_count || 0);
+  return { allowed: (effectiveHourly === 0 || hourCount < effectiveHourly) && (effectiveDaily === 0 || dayCount < effectiveDaily), effectiveHourly, effectiveDaily };
 }
 
 async function providerGate(accountId: string, recipientEmail: string) {
@@ -230,7 +236,7 @@ async function runOnce() {
       await pool.query(`update messages set status=$2,last_error='campaign_not_sending',attempt_count=greatest(attempt_count-1,0),next_attempt_at=null where id=$1 and status='sending'`, [message.id, latest.status === "cancelled" ? "cancelled" : "ready_for_transport"]);
       continue;
     }
-    if (latest.contact_status !== "active" || latest.validation_status === "invalid" || latest.suppressed || latest.email !== contact.email || !hasConfirmedConsent({ consentStatus: latest.consent_status, consentSource: latest.consent_source })) {
+    if (latest.contact_status !== "active" || !validationAllowsSend(latest.email, latest.validation_status) || latest.suppressed || latest.email !== contact.email || !hasConfirmedConsent({ consentStatus: latest.consent_status, consentSource: latest.consent_source })) {
       await pool.query(`update messages set status='cancelled',last_error='recipient_no_longer_eligible',next_attempt_at=null where id=$1 and status='sending'`, [message.id]);
       await event(message.id, "transport_cancelled", { reason: "recipient_no_longer_eligible" });
       continue;
