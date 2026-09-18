@@ -46,6 +46,55 @@ export function parseCsv(text: string) {
   return [...iterateCsvRows(text)];
 }
 
+
+export type CsvSampleAnalysis = {
+  delimiter: "comma" | "semicolon" | "tab" | "unknown";
+  headers: string[];
+  preview: string[][];
+  mapping: ImportMapping;
+  errors: string[];
+  warnings: string[];
+};
+
+export function analyzeCsvSample(text: string): CsvSampleAnalysis {
+  const firstPhysicalLine = text.split(/\r?\n/, 1)[0] || "";
+  const commaCount = (firstPhysicalLine.match(/,/g) || []).length;
+  const semicolonCount = (firstPhysicalLine.match(/;/g) || []).length;
+  const tabCount = (firstPhysicalLine.match(/\t/g) || []).length;
+  const delimiter: CsvSampleAnalysis["delimiter"] =
+    commaCount > 0 && commaCount >= semicolonCount && commaCount >= tabCount ? "comma" :
+    semicolonCount > 0 && semicolonCount >= tabCount ? "semicolon" :
+    tabCount > 0 ? "tab" : "unknown";
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!text.trim()) errors.push("The CSV file is empty.");
+  if (delimiter === "semicolon") errors.push("This file appears to use semicolons (;). NexiMail currently expects comma-separated CSV.");
+  if (delimiter === "tab") errors.push("This file appears to be tab-separated. Export it as comma-separated CSV.");
+  if (delimiter === "unknown") errors.push("Could not detect comma-separated columns in the header row.");
+
+  const matrix = parseCsv(text);
+  const headers = (matrix[0] || []).map((value) => value.replace(/^\uFEFF/, "").trim());
+  if (!headers.length) errors.push("CSV header row is missing.");
+  if (headers.some((header) => !header)) errors.push("One or more CSV header names are blank.");
+
+  const normalized = headers.map(normalizeCsvHeader);
+  const duplicates = normalized.filter((header, index) => header && normalized.indexOf(header) !== index);
+  if (duplicates.length) errors.push("CSV contains duplicate column names after normalization.");
+
+  const mapping = detectMapping(headers);
+  if (!mapping.email) {
+    errors.push("No email column was detected. Use a header such as email, EMAILID, EMAIL_ID, E-MAIL or mail.");
+  }
+
+  const preview = matrix.slice(1, 11);
+  if (!preview.length) warnings.push("No data rows were found in the sampled portion of the file.");
+  const mismatched = preview.filter((row) => row.length !== headers.length).length;
+  if (mismatched) warnings.push(`${mismatched} preview row(s) have a different number of columns than the header.`);
+
+  return { delimiter, headers, preview, mapping, errors, warnings };
+}
+
 export function detectMapping(headers: string[]): ImportMapping {
   const normalized = headers.map(normalizeCsvHeader);
   const mapping: ImportMapping = {};
