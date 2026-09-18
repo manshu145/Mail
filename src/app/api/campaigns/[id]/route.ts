@@ -52,14 +52,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let audienceSize: number | null = null;
   let audiencePreflight: Awaited<ReturnType<typeof preflightAudience>> | null = null;
 
-  const requestedFromEmail = value(body.fromEmail)?.toLowerCase() || null;
   const accountFromEmail = account?.fromEmail?.trim().toLowerCase() || null;
   const accountDomain = accountFromEmail?.split("@")[1] || null;
-  const requestedDomain = requestedFromEmail?.split("@")[1] || null;
-  const normalizedFromEmail =
-    accountFromEmail && requestedFromEmail && isValidEmail(requestedFromEmail) && requestedDomain === accountDomain
-      ? requestedFromEmail
-      : accountFromEmail;
+  const normalizedFromEmail = accountFromEmail;
 
   if (wantsDelivery) {
     if (!list || !template || !account) return NextResponse.json({ error: "Select a list, template and sending account first." }, { status: 400 });
