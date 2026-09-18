@@ -5,13 +5,21 @@ umask 077
 PROJECT_NAME=${NEXIMAIL_PROJECT_NAME:-neximail-next}
 VOLUME="${PROJECT_NAME}_mta_tls"
 MTA_CONTAINER=${NEXIMAIL_MTA_CONTAINER:-neximail-next-mta-1}
-HOSTNAME=${MTA_TLS_HOSTNAME:-smtp.groundsreport.com}
+APP_DIR=${NEXIMAIL_APP_DIR:-/opt/neximail-next}
+
+env_value() {
+  local key="$1"
+  [[ -f "$APP_DIR/.env" ]] || return 0
+  awk -v k="$key" 'index($0,k"=")==1 {v=substr($0,length(k)+2); gsub(/^["'\'' ]+|["'\'' ]+$/,"",v); print v; exit}' "$APP_DIR/.env"
+}
+HOSTNAME=${MTA_TLS_HOSTNAME:-$(env_value MTA_HOSTNAME)}
+[[ -n "$HOSTNAME" ]] || { echo "MTA_HOSTNAME must be configured in $APP_DIR/.env or MTA_TLS_HOSTNAME must be supplied."; exit 2; }
 
 find_source() {
   if [[ -n "${MTA_TLS_SOURCE_DIR:-}" && -s "${MTA_TLS_SOURCE_DIR}/fullchain.pem" && -s "${MTA_TLS_SOURCE_DIR}/privkey.pem" ]]; then
     printf '%s\n' "$MTA_TLS_SOURCE_DIR"; return 0
   fi
-  for d in "/etc/letsencrypt/live/$HOSTNAME" "/etc/letsencrypt/live/mail.groundsreport.com" "/etc/letsencrypt/live/groundsreport.com"; do
+  for d in "/etc/letsencrypt/live/$HOSTNAME"; do
     if [[ -s "$d/fullchain.pem" && -s "$d/privkey.pem" ]]; then printf '%s\n' "$d"; return 0; fi
   done
   return 1
@@ -24,7 +32,7 @@ command -v openssl >/dev/null
 SOURCE=$(find_source || true)
 if [[ -z "$SOURCE" ]]; then
   echo "No trusted certificate found for $HOSTNAME."
-  echo "Checked /etc/letsencrypt/live/$HOSTNAME, /etc/letsencrypt/live/mail.groundsreport.com and /etc/letsencrypt/live/groundsreport.com."
+  echo "Checked /etc/letsencrypt/live/$HOSTNAME."
   echo "Set MTA_TLS_SOURCE_DIR=/path/to/cert-dir and rerun after a certificate exists."
   exit 2
 fi
