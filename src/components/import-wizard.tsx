@@ -88,6 +88,7 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
     if (!mapping.email) return setMessage("Map the email column.");
     if (!consentSource.trim()) return setMessage("Consent source is required.");
     setBusy(true); setMessage(""); setUploadProgress(0);
+    let initializedJobId: string | null = null;
     try {
       const response = await fetch("/api/imports", {
         method: "POST",
@@ -108,6 +109,7 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
       });
       const data = await response.json() as { error?: string; jobId?: string; uploadUrl?: string };
       if (!response.ok || !data.uploadUrl || !data.jobId) throw new Error(data.error || "Import could not be initialized.");
+      initializedJobId = data.jobId;
 
       const uploaded = await uploadFile(data.uploadUrl, file, setUploadProgress);
       setMessage(`Upload complete${uploaded.bytes ? ` · ${(uploaded.bytes / 1024 / 1024).toFixed(1)} MB` : ""}. Background processing now shows live rows, speed and ETA below.`);
@@ -115,6 +117,7 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
       router.refresh();
     } catch (error) {
       setUploadProgress(null);
+      if (initializedJobId) await fetch(`/api/imports/${initializedJobId}`, { method: "DELETE" }).catch(() => {});
       setMessage(error instanceof Error ? error.message : "Import failed.");
     } finally { setBusy(false); }
   }
