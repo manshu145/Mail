@@ -21,7 +21,7 @@ type DrillView="targeted"|"delivered"|"opens"|"clicks"|"bounce_failed";
 
 function one(value:string|string[]|undefined){return Array.isArray(value)?value[0]:value}
 function viewLabel(view:DrillView){
-  return view==="targeted"?"Targeted recipients":view==="delivered"?"Delivered recipients":view==="opens"?"Verified openers":view==="clicks"?"Verified clickers":"Bounced / failed recipients";
+  return view==="targeted"?"Targeted recipients":view==="delivered"?"Delivered recipients":view==="opens"?"Unique openers":view==="clicks"?"Unique clickers":"Bounced / failed recipients";
 }
 
 export default async function CampaignDetailPage({
@@ -133,8 +133,8 @@ export default async function CampaignDetailPage({
   const cardData=metrics?[
     {label:"Targeted",count:metrics.targeted,icon:Users,view:"targeted" as DrillView,tone:"text-violet-600"},
     {label:"Delivered",count:metrics.delivered,icon:MailCheck,view:"delivered" as DrillView,tone:"text-emerald-600"},
-    {label:"Verified opens",count:metrics.uniqueOpens,icon:Eye,view:"opens" as DrillView,tone:"text-blue-600"},
-    {label:"Verified clicks",count:metrics.uniqueClicks,icon:MousePointerClick,view:"clicks" as DrillView,tone:"text-cyan-600"},
+    {label:"Unique opens",count:metrics.uniqueOpens,icon:Eye,view:"opens" as DrillView,tone:"text-blue-600"},
+    {label:"Unique clicks",count:metrics.uniqueClicks,icon:MousePointerClick,view:"clicks" as DrillView,tone:"text-cyan-600"},
   ]:[];
 
   const drillHref=(nextView:DrillView,nextPage=1,extraUrl="")=>{
@@ -158,7 +158,7 @@ export default async function CampaignDetailPage({
 
     {campaign.lastError?<div className="mb-5 rounded-2xl border border-rose-500/20 bg-rose-500/[0.06] px-4 py-3 text-sm font-semibold text-rose-600">{campaign.lastError}</div>:null}
 
-    {preflight?<section className="premium-panel mb-5 overflow-hidden"><div className="border-b border-[var(--border)] p-5"><h2 className="font-black">Audience preflight</h2><p className="mt-1 text-xs text-[var(--muted)]">Eligibility snapshot before delivery. Suppressed and invalid contacts are excluded. Pending/unknown validation states remain eligible under the current sending policy.</p></div><div className="grid gap-px bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-7">{[["Active opt-ins",preflight.rawCount],["Eligible",preflight.eligibleCount],["Suppressed",preflight.suppressedCount],["Invalid",preflight.invalidCount],["Valid",preflight.validCount],["Pending validation",preflight.pendingCount],["Unknown",preflight.unknownCount]].map(([label,value])=><div className="bg-[var(--surface)] p-4" key={String(label)}><p className="text-xs font-bold text-[var(--muted)]">{label}</p><p className="mt-1 text-2xl font-black">{Number(value).toLocaleString()}</p></div>)}</div><div className="border-t border-[var(--border)] px-5 py-3 text-xs text-[var(--muted)]">Last checked {fmt(preflight.checkedAt)}</div></section>:null}
+    {preflight?<section className="premium-panel mb-5 overflow-hidden"><div className="border-b border-[var(--border)] p-5"><h2 className="font-black">Audience preflight</h2><p className="mt-1 text-xs text-[var(--muted)]">Eligibility snapshot before delivery. Suppressed and invalid contacts are excluded. Direct Gmail/Googlemail addresses still pending validation are held back; other pending or unknown states follow the current validation policy.</p></div><div className="grid gap-px bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-7">{[["Active opt-ins",preflight.rawCount],["Eligible",preflight.eligibleCount],["Suppressed",preflight.suppressedCount],["Invalid",preflight.invalidCount],["Valid",preflight.validCount],["Pending validation",preflight.pendingCount],["Unknown",preflight.unknownCount]].map(([label,value])=><div className="bg-[var(--surface)] p-4" key={String(label)}><p className="text-xs font-bold text-[var(--muted)]">{label}</p><p className="mt-1 text-2xl font-black">{Number(value).toLocaleString()}</p></div>)}</div><div className="border-t border-[var(--border)] px-5 py-3 text-xs text-[var(--muted)]">Last checked {fmt(preflight.checkedAt)}</div></section>:null}
 
     {metrics&&metrics.targeted>0?<>
       <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -217,7 +217,7 @@ export default async function CampaignDetailPage({
           const url=typeof payload.url==="string"?payload.url:null;
           const type=String(row.type||"event");
           const tone=type.includes("bounce")||type==="failed"?"bg-rose-500/10 text-rose-700 dark:text-rose-300":type==="open"||type==="click"||type.includes("deliver")?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":"bg-blue-500/10 text-blue-700 dark:text-blue-300";
-          return <div key={String(row.event_id)} className="p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${tone}`}>{type.replaceAll("_"," ")}</span>{automated?<span className="text-[10px] font-bold text-amber-600">automated</span>:null}</div>{url?<a href={url} target="_blank" rel="noreferrer" className="mt-2 block break-all text-xs font-bold text-violet-600 hover:underline">{url}</a>:null}<details className="mt-2"><summary className="cursor-pointer text-[11px] font-bold text-[var(--muted)]">Technical details</summary><pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-[var(--surface-soft)] p-3 font-mono text-[10px] leading-5 text-[var(--muted)]">{Object.keys(payload).length?JSON.stringify(payload,null,2):"No additional payload"}</pre></details></div><time className="shrink-0 text-[11px] text-[var(--muted)]">{fmt(row.created_at as string|null)}</time></div></div>
+          return <div key={String(row.event_id)} className="p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${tone}`}>{type.replaceAll("_"," ")}</span>{automated?<span className="text-[10px] font-bold text-amber-600">automated</span>:null}{payload.proxyProvider==="google_image_proxy"?<span className="text-[10px] font-bold text-blue-600">Gmail image proxy</span>:null}</div>{url?<a href={url} target="_blank" rel="noreferrer" className="mt-2 block break-all text-xs font-bold text-violet-600 hover:underline">{url}</a>:null}<details className="mt-2"><summary className="cursor-pointer text-[11px] font-bold text-[var(--muted)]">Technical details</summary><pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-[var(--surface-soft)] p-3 font-mono text-[10px] leading-5 text-[var(--muted)]">{Object.keys(payload).length?JSON.stringify(payload,null,2):"No additional payload"}</pre></details></div><time className="shrink-0 text-[11px] text-[var(--muted)]">{fmt(row.created_at as string|null)}</time></div></div>
         }):<div className="p-8 text-center text-sm text-[var(--muted)]">No event timeline recorded for this recipient yet.</div>}
       </div>
     </section>:null}
