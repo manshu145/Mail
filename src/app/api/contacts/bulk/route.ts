@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
   if (action === "archive" || action === "restore") {
     const status = action === "archive" ? "archived" : "active";
     await db.update(contacts).set({ status, updatedAt: new Date() }).where(inArray(contacts.id, existingIds));
-    await audit(`contacts.${action}`, session, "contact", null, { contactIds: existingIds, count: existingIds.length });
+    await audit(`contacts.${action}`, session, "contact", undefined, { contactIds: existingIds, count: existingIds.length });
     return NextResponse.json({ ok: true, count: existingIds.length });
   }
 
@@ -57,6 +57,6 @@ export async function POST(request: NextRequest) {
   }
 
   await db.delete(contacts).where(inArray(contacts.id, existingIds));
-  await audit("contacts.deleted", session, "contact", null, { contactIds: existingIds, count: existingIds.length });
+  await audit("contacts.deleted", session, "contact", undefined, { contactIds: existingIds, count: existingIds.length });
   return NextResponse.json({ ok: true, count: existingIds.length });
 }
