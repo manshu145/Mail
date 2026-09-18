@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 
 const BOT_PATTERNS = [
-  /googleimageproxy/i,
   /googleweblight/i,
   /microsoft office/i,
   /outlook-ios/i,
@@ -27,6 +26,7 @@ export type TrackingClassification = {
   automationReason: string | null;
   userAgent: string | null;
   ipHash: string | null;
+  proxyProvider: "google_image_proxy" | null;
 };
 
 function requestIp(request: Request) {
@@ -43,8 +43,9 @@ export function classifyTrackingRequest(request: Request): TrackingClassificatio
     const match = BOT_PATTERNS.find((pattern) => pattern.test(userAgent));
     if (match) automationReason = `user-agent:${match.source}`;
   }
+  const proxyProvider = userAgent && /googleimageproxy/i.test(userAgent) ? "google_image_proxy" as const : null;
   const ip = requestIp(request);
   const salt = process.env.TRACKING_HASH_SALT || process.env.AUTH_SECRET || "neximail";
   const ipHash = ip ? crypto.createHash("sha256").update(`${salt}:${ip}`).digest("hex").slice(0, 32) : null;
-  return { automated: Boolean(automationReason), automationReason, userAgent, ipHash };
+  return { automated: Boolean(automationReason), automationReason, userAgent, ipHash, proxyProvider };
 }
