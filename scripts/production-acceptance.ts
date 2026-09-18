@@ -79,7 +79,7 @@ async function main(){
       (select count(*) from validation_jobs where status='processing' and created_at < now()-interval '2 hours')::int stale_validations,
       (select count(*) from campaigns where status='sending' and updated_at < now()-interval '30 minutes')::int stale_campaigns`);
   const sj=staleJobs.rows[0];
-  const staleCount=Object.values(sj).reduce((a,v)=>a+Number(v||0),0);
+  const staleCount=Number(sj?.stale_imports||0)+Number(sj?.stale_validations||0)+Number(sj?.stale_campaigns||0);
   record("Stuck work",staleCount?"FAIL":"PASS",JSON.stringify(sj));
 
   const domains=await db.select().from(sendingDomains);
