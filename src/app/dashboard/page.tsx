@@ -24,14 +24,20 @@ export default async function DashboardPage() {
       totalContacts=contactsRows[0]?.value??0;sentToday=sentRows[0]?.value??0;delivered=deliveredRows[0]?.value??0;queued=queuedRows[0]?.value??0;dbHealthy=true;
       const [aggregateResult,recentResult,activeResult]=await Promise.all([
         db.execute(sql`
-          select
-            count(*)::int targeted,
-            count(*) filter(where m.status='delivered')::int delivered,
-            count(*) filter(where m.status='bounced')::int bounced,
-            count(distinct case when e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false then e.message_id end)::int opens,
-            count(distinct case when e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false then e.message_id end)::int clicks
-          from messages m
-          left join message_events e on e.message_id=m.id
+          with message_totals as (
+            select
+              count(*)::int targeted,
+              count(*) filter(where status='delivered')::int delivered,
+              count(*) filter(where status='bounced')::int bounced
+            from messages
+          ), engagement as (
+            select
+              count(distinct message_id) filter(where type='open' and coalesce((payload->>'automated')::boolean,false)=false)::int opens,
+              count(distinct message_id) filter(where type='click' and coalesce((payload->>'automated')::boolean,false)=false)::int clicks
+            from message_events
+          )
+          select message_totals.*,engagement.opens,engagement.clicks
+          from message_totals cross join engagement
         `),
         db.execute(sql`
           select c.id::text,c.name,c.status::text,c.created_at,
