@@ -19,8 +19,6 @@ export function isDirectGmailAddress(email: string) {
   return domain === "gmail.com" || domain === "googlemail.com";
 }
 
-export function validationAllowsSend(email: string, status: string) {
-  if (status === "invalid") return false;
-  if (isDirectGmailAddress(email) && status === "pending") return false;
-  return true;
+export function validationAllowsSend(_email: string, status: string) {
+  return status !== "invalid";
 }
