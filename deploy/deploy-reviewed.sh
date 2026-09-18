@@ -50,8 +50,13 @@ for service in "${build_services[@]}"; do
   id=$("${old_dc[@]}" ps -q "$service")
   if [[ -n "$id" ]]; then
     image=$(docker inspect --format '{{.Image}}' "$id")
-    docker image tag "$image" "neximail-rollback-${service}:$(basename "$BACKUP_DIR" | tr '[:upper:]' '[:lower:]')"
-    printf '%s %s\n' "$service" "$image" >> "$BACKUP_DIR/images-before.txt"
+    if docker image inspect "$image" >/dev/null 2>&1; then
+      docker image tag "$image" "neximail-rollback-${service}:$(basename "$BACKUP_DIR" | tr '[:upper:]' '[:lower:]')"
+      printf '%s %s\n' "$service" "$image" >> "$BACKUP_DIR/images-before.txt"
+    else
+      printf '%s %s %s\n' "$service" "$image" "image-metadata-missing; running container preserved" >> "$BACKUP_DIR/images-before.txt"
+      echo "[WARN] Existing $service container image metadata was pruned; skipping rollback image tag."
+    fi
   fi
 done
 
@@ -82,6 +87,10 @@ if [[ -z "$spool_mount" ]]; then
     echo "Unattached spool volume $spool_volume already exists. Preserve it and inspect the previous migration before proceeding."; exit 1
   fi
   mta_image=$(docker inspect --format '{{.Image}}' "$mta_id")
+  if ! docker image inspect "$mta_image" >/dev/null 2>&1; then
+    echo "Existing MTA image metadata is missing and its Postfix spool is not on the persistent volume; refusing unsafe spool migration."
+    exit 1
+  fi
   docker image tag "$mta_image" "neximail-rollback-mta:$(basename "$BACKUP_DIR" | tr '[:upper:]' '[:lower:]')"
   "${old_dc[@]}" exec -T mta postqueue -j > "$BACKUP_DIR/postfix-queue-before.jsonl"
   docker stop --time 120 "$mta_id"
