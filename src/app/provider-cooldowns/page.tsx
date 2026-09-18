@@ -9,7 +9,7 @@ import { providerCooldownEvents } from "@/db/provider-cooldown-event-schema";
 import { getSession } from "@/lib/auth";
 import { providerLabel } from "@/lib/provider";
 
-const fmt = (d: Date | null | undefined) => d ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(d) : "—";
+const fmt = (d: Date | null | undefined) => d ? new Intl.DateTimeFormat("en",{dateStyle: "medium", timeStyle: "short", timeZone:"Asia/Kolkata"}).format(d) : "—";
 
 export default async function ProviderCooldownsPage() {
   const session = await getSession();
