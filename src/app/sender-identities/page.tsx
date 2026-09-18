@@ -20,7 +20,8 @@ export default async function SenderIdentitiesPage() {
   const usable = databaseConfigured && !dbError;
   const active = rows.filter((row) => row.status === "active").length;
   const paused = rows.filter((row) => row.status === "paused").length;
-  const totalDaily = rows.reduce((sum, row) => sum + row.dailyLimit, 0);
+  const anyUnlimitedDaily = rows.some((row) => row.status === "active" && row.dailyLimit === 0);
+  const totalDaily = rows.reduce((sum, row) => sum + (row.dailyLimit > 0 ? row.dailyLimit : 0), 0);
 
   return (
     <AppShell session={session}>
@@ -33,7 +34,7 @@ export default async function SenderIdentitiesPage() {
       {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Sender configuration is unavailable.</b> Check the database connection.</div> : null}
 
       <section className="mb-5 grid gap-3 sm:grid-cols-3">
-        {[{label:"Active senders",value:active,icon:ShieldCheck},{label:"Paused",value:paused,icon:PauseCircle},{label:"Combined daily limit",value:totalDaily,icon:Send}].map(({label,value,icon:Icon}) => <article key={label} className="metric-card p-5"><div className="flex items-start justify-between"><div><p className="text-[12px] font-extrabold text-[var(--muted)]">{label}</p><p className="mt-3 text-3xl font-black tracking-[-0.04em]">{value.toLocaleString()}</p></div><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}
+        {[{label:"Active senders",value:active,icon:ShieldCheck},{label:"Paused",value:paused,icon:PauseCircle},{label:"Combined daily limit",value:anyUnlimitedDaily?"Unlimited":totalDaily,icon:Send}].map(({label,value,icon:Icon}) => <article key={label} className="metric-card p-5"><div className="flex items-start justify-between"><div><p className="text-[12px] font-extrabold text-[var(--muted)]">{label}</p><p className="mt-3 text-3xl font-black tracking-[-0.04em]">{typeof value === "number" ? value.toLocaleString() : value}</p></div><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
@@ -45,8 +46,8 @@ export default async function SenderIdentitiesPage() {
             </div>
             <div className="mt-5 grid grid-cols-3 gap-2.5">
               <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Transport</p><p className="mt-1 text-sm font-extrabold capitalize">{row.transportType}</p></div>
-              <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Hourly</p><p className="mt-1 text-sm font-extrabold">{row.hourlyLimit.toLocaleString()}</p></div>
-              <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Daily</p><p className="mt-1 text-sm font-extrabold">{row.dailyLimit.toLocaleString()}</p></div>
+              <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Hourly</p><p className="mt-1 text-sm font-extrabold">{row.hourlyLimit === 0 ? "Unlimited" : row.hourlyLimit.toLocaleString()}</p></div>
+              <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Daily</p><p className="mt-1 text-sm font-extrabold">{row.dailyLimit === 0 ? "Unlimited" : row.dailyLimit.toLocaleString()}</p></div>
             </div>
             <SendingAccountActions id={row.id} status={row.status} hourly={row.hourlyLimit} daily={row.dailyLimit} />
           </article>
