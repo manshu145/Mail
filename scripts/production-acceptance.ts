@@ -96,12 +96,23 @@ async function main(){
   const ownerRbac=await fetch(`${baseUrl}/api/users`,{method:"POST",headers:{cookie,"content-type":"application/json"},body:"{}",redirect:"manual"});
   record("Owner RBAC",ownerRbac.status===400?"PASS":"FAIL",`invalid user create reached validation -> ${ownerRbac.status}`);
 
-  const nonOwner=owners.find(u=>u.role!=="owner");
-  if(nonOwner){
-    const nonOwnerCookie=await sessionCookie(nonOwner);
-    const denied=await fetch(`${baseUrl}/api/users`,{method:"POST",headers:{cookie:nonOwnerCookie,"content-type":"application/json"},body:"{}",redirect:"manual"});
-    record("Non-owner RBAC",denied.status===403?"PASS":"FAIL",`${nonOwner.role} user create -> ${denied.status}`);
-  } else record("Non-owner RBAC","WARN","no active admin/operator account exists to exercise denial path");
+  let nonOwner=owners.find(u=>u.role!=="owner");
+  let tempOperatorId:string|undefined;
+  if(!nonOwner){
+    const [temp]=await db.insert(users).values({
+      name:"NexiMail Acceptance Operator",
+      email:`acceptance-operator-${stamp}@example.invalid`,
+      passwordHash:"acceptance-only-not-used",
+      role:"operator",
+      status:"active",
+    }).returning({id:users.id,email:users.email,name:users.name,role:users.role,status:users.status});
+    nonOwner=temp;
+    tempOperatorId=temp.id;
+  }
+  const nonOwnerCookie=await sessionCookie(nonOwner);
+  const denied=await fetch(`${baseUrl}/api/users`,{method:"POST",headers:{cookie:nonOwnerCookie,"content-type":"application/json"},body:"{}",redirect:"manual"});
+  record("Non-owner RBAC",denied.status===403?"PASS":"FAIL",`${nonOwner.role} user create -> ${denied.status}`);
+  if(tempOperatorId) await db.delete(users).where(eq(users.id,tempOperatorId));
 
   // Real import-worker acceptance test. Prefer a configured Gmail seed alias so
   // the same test can exercise the Gmail validation worker without inventing a mailbox.
