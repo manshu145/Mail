@@ -77,7 +77,6 @@ export default async function CampaignDetailPage({
         m.last_error,
         count(distinct case when e.type='open' and ${human} then
           e.message_id::text || ':' ||
-          coalesce(e.payload->>'ipHash','') || ':' ||
           coalesce(e.payload->>'userAgent','') || ':' ||
           floor(extract(epoch from e.created_at) / 300)::text
         end)::int opens,
