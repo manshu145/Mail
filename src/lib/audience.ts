@@ -30,27 +30,36 @@ export async function audienceSelection(list: typeof lists.$inferSelect, executo
       }
     }
   }
-  return sql`select ${contacts.id} as contact_id,${contacts.email} as email,${contacts.normalizedEmail} as normalized_email,
+
+  return sql`select
+    ${contacts.id} as contact_id,
+    ${contacts.email} as email,
+    ${contacts.normalizedEmail} as normalized_email,
     ${contacts.validationStatus} as validation_status,
     case
       when ${contacts.validationStatus}::text='invalid' then false
-      when lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com
-}
-
-export type AudienceRecipient = { contactId: string; email: string; normalizedEmail: string; validationStatus: "pending" | "accepted" | "valid" | "invalid" | "unknown" | "error" };
- and ${contacts.validationStatus}::text='pending' then false
+      when lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'
+        and ${contacts.validationStatus}::text='pending' then false
       else true
     end as send_eligible,
     case
-      when lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com
-}
-
-export type AudienceRecipient = { contactId: string; email: string; normalizedEmail: string; validationStatus: "pending" | "accepted" | "valid" | "invalid" | "unknown" | "error" };
- and ${contacts.validationStatus}::text='pending' then true
+      when lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'
+        and ${contacts.validationStatus}::text='pending' then true
       else false
     end as awaiting_validation,
     exists(select 1 from suppressions s where s.normalized_email=${contacts.normalizedEmail}) as suppressed
-    from ${contacts} where ${and(eq(contacts.status, "active"), eq(contacts.consentStatus, "confirmed"), sql`length(trim(coalesce(${contacts.consentSource},'')))>0`, condition)}`;
+  from ${contacts}
+  where ${and(
+    eq(contacts.status, "active"),
+    eq(contacts.consentStatus, "confirmed"),
+    sql`length(trim(coalesce(${contacts.consentSource},'')))>0`,
+    condition,
+  )}`;
 }
 
-export type AudienceRecipient = { contactId: string; email: string; normalizedEmail: string; validationStatus: "pending" | "accepted" | "valid" | "invalid" | "unknown" | "error" };
+export type AudienceRecipient = {
+  contactId: string;
+  email: string;
+  normalizedEmail: string;
+  validationStatus: "pending" | "accepted" | "valid" | "invalid" | "unknown" | "error";
+};
