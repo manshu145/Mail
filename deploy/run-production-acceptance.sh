@@ -3,6 +3,13 @@ set -Eeuo pipefail
 
 APP_CONTAINER=${NEXIMAIL_APP_CONTAINER:-neximail-next-app-1}
 PG_CONTAINER=${NEXIMAIL_PG_CONTAINER:-neximail-next-postgres-1}
+APP_DIR=${NEXIMAIL_APP_DIR:-/opt/neximail-next}
+
+env_value() {
+  local key="$1"
+  [[ -f "$APP_DIR/.env" ]] || return 0
+  awk -v k="$key" 'index($0,k"=")==1 {v=substr($0,length(k)+2); gsub(/^["'\'' ]+|["'\'' ]+$/,"",v); print v; exit}' "$APP_DIR/.env"
+}
 SCRIPT_URL=${NEXIMAIL_ACCEPTANCE_SCRIPT_URL:-}
 TMP=""
 cleanup() { [[ -n "${TMP:-}" && -f "$TMP" ]] && rm -f "$TMP"; }
@@ -65,9 +72,13 @@ fi
 
 if command -v openssl >/dev/null 2>&1; then
   echo "SMTP STARTTLS:"
-  TLS_HOST="${MTA_TLS_HOSTNAME:-smtp.groundsreport.com}"
+  TLS_HOST="${MTA_TLS_HOSTNAME:-$(env_value MTA_HOSTNAME)}"
+  if [[ -z "$TLS_HOST" ]]; then
+    echo "[WARN] MTA_HOSTNAME is not configured; STARTTLS hostname probe skipped."
+    TLS_HOST=""
+  fi
   TLS_OUT=$(mktemp)
-  if timeout 15 openssl s_client -starttls smtp -connect 127.0.0.1:25 -servername "$TLS_HOST" -verify_hostname "$TLS_HOST" </dev/null >"$TLS_OUT" 2>&1 \
+  if [[ -n "$TLS_HOST" ]] && timeout 15 openssl s_client -starttls smtp -connect 127.0.0.1:25 -servername "$TLS_HOST" -verify_hostname "$TLS_HOST" </dev/null >"$TLS_OUT" 2>&1 \
     && grep -Eq 'Protocol *: TLS|New, TLSv|Cipher is|Ciphersuite:' "$TLS_OUT" \
     && grep -q 'Verify return code: 0 (ok)' "$TLS_OUT"; then
     echo "[PASS] STARTTLS handshake and certificate hostname verification succeeded for $TLS_HOST"
