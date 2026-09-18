@@ -16,9 +16,13 @@ export async function GET() {
   const [row] = await db.select({ value: systemSettings.value, updatedAt: systemSettings.updatedAt })
     .from(systemSettings).where(eq(systemSettings.key, KEY)).limit(1);
 
+  const workspaceConfigured = Boolean(row?.value);
+  const environmentConfigured = Boolean(String(process.env.SUPERSEND_API_KEY || "").trim());
   return NextResponse.json({
-    configured: Boolean(row?.value),
-    hint: encryptedSettingHint(row?.value),
+    configured: workspaceConfigured || environmentConfigured,
+    workspaceConfigured,
+    source: workspaceConfigured ? "workspace" : environmentConfigured ? "environment" : null,
+    hint: workspaceConfigured ? encryptedSettingHint(row?.value) : environmentConfigured ? "Environment key" : null,
     updatedAt: row?.updatedAt || null,
     canManage: canManageInfrastructure(session.role),
   });
@@ -50,5 +54,6 @@ export async function DELETE() {
 
   await db.delete(systemSettings).where(eq(systemSettings.key, KEY));
   await audit("validation.provider_key.removed", session, "system_setting", KEY, { provider: "supersend" });
-  return NextResponse.json({ ok: true, configured: false });
+  const environmentConfigured = Boolean(String(process.env.SUPERSEND_API_KEY || "").trim());
+  return NextResponse.json({ ok: true, configured: environmentConfigured, source: environmentConfigured ? "environment" : null });
 }
