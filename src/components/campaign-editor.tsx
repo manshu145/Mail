@@ -11,7 +11,7 @@ type Campaign = { id: string; name: string; subject: string; preheader: string |
 type RuntimePolicyView = { mode: "staging" | "production"; sendingEnabled: boolean; maxRecipientsPerCampaign: number | null };
 type CampaignAction = "save" | "send_now" | "schedule";
 type PreviewData = {
-  audience: { rawCount:number; eligibleCount:number; suppressedCount:number; invalidCount:number; validCount:number; pendingCount:number; unknownCount:number };
+  audience: { rawCount:number; eligibleCount:number; suppressedCount:number; invalidCount:number; validCount:number; pendingCount:number; unknownCount:number; awaitingValidationCount:number };
   template: { name:string; subject:string|null; html:string; text:string };
 };
 
@@ -187,6 +187,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
               ["Matched",preview.audience.rawCount,"violet"],
               ["Valid",preview.audience.validCount,"emerald"],
               ["Pending",preview.audience.pendingCount,"amber"],
+              ["Waiting Gmail validation",preview.audience.awaitingValidationCount,"amber"],
               ["Unknown",preview.audience.unknownCount,"orange"],
               ["Suppressed",preview.audience.suppressedCount,"rose"],
               ["Invalid",preview.audience.invalidCount,"rose"],
