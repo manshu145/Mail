@@ -42,11 +42,11 @@ export default async function SendingLimitsPage() {
     {!currentSettings ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200">Sending-limit state is unavailable because the database could not be read.</div> : null}
     {currentSettings ? <>
       <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[
-        ["Used last hour", `${hour.toLocaleString()} / ${currentSettings.maxRollingHour.toLocaleString()}`],
-        ["Used last 24 hours", `${day.toLocaleString()} / ${currentSettings.maxRolling24h.toLocaleString()}`],
+        ["Used last hour", currentSettings.maxRollingHour === 0 ? `${hour.toLocaleString()} / Unlimited` : `${hour.toLocaleString()} / ${currentSettings.maxRollingHour.toLocaleString()}`],
+        ["Used last 24 hours", currentSettings.maxRolling24h === 0 ? `${day.toLocaleString()} / Unlimited` : `${day.toLocaleString()} / ${currentSettings.maxRolling24h.toLocaleString()}`],
         ["Active / retry queue", `${active.toLocaleString()} / ${currentSettings.maxActiveQueued.toLocaleString()}`],
         ["Per second", currentSettings.maxPerSecond.toLocaleString()],
-        ["Max / campaign", currentSettings.maxRecipientsPerCampaign.toLocaleString()],
+        ["Max / campaign", currentSettings.maxRecipientsPerCampaign === 0 ? "Unlimited" : currentSettings.maxRecipientsPerCampaign.toLocaleString()],
       ].map(([l, v]) => <article className="metric-card p-5" key={String(l)}><p className="text-xs font-extrabold text-[var(--muted)]">{l}</p><p className="mt-3 text-2xl font-black">{v}</p></article>)}</section>
 
       <section className="premium-panel p-5 sm:p-6"><div className="mb-5 flex items-start gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-500/10 text-violet-700 dark:text-violet-300"><Gauge className="h-5 w-5"/></div><div><h2 className="font-black">Throughput, retry & reputation guard</h2><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Owner changes are audited. Transport, policy, campaign and reputation workers consume the shared settings instead of relying on UI-only values.</p></div></div><DeliverySettingsForm initial={currentSettings} editable={session.role === "owner"}/></section>
