@@ -1,6 +1,6 @@
 "use client";
 
-import { Pause, Play, RotateCcw, SearchCheck } from "lucide-react";
+import { Pause, Play, RotateCcw, SearchCheck, ShieldCheck, UploadCloud } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -34,7 +34,7 @@ export function ValidationControls({
       });
       const data = await response.json().catch(() => ({})) as { error?: string; total?: number };
       if (!response.ok) { setError(data.error || "Validation action failed."); return; }
-      if (action === "pause") setNotice("Validation paused after the current mailbox check.");
+      if (action === "pause") setNotice("Validation paused after the current check.");
       else if (action === "resume") setNotice("Validation resumed.");
       else setNotice("Validation queued" + (data.total ? " for " + data.total.toLocaleString() + " contact" + (data.total === 1 ? "" : "s") : "") + ".");
       if (action === "start_single") setEmail("");
@@ -46,65 +46,54 @@ export function ValidationControls({
     }
   }
 
-  return <div className="grid gap-4 xl:grid-cols-[1.15fr_.85fr]">
-    <section className="premium-panel p-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+  return <div className="grid gap-4 xl:grid-cols-[1.45fr_.7fr]">
+    <section className="premium-panel overflow-hidden">
+      <div className="section-header">
         <div>
           <p className="page-eyebrow">Validation control</p>
-          <h2 className="mt-1 text-lg font-black">Gmail mailbox checks</h2>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--muted)]">Validation is optional and Gmail/Googlemail-only. Campaigns do not wait for validation. Final Accepted / Valid / Invalid results are not rechecked automatically.</p>
+          <h2 className="section-title mt-1">Gmail mailbox checks</h2>
+          <p className="section-subtitle">Optional Gmail/Googlemail verification. Campaign sending does not wait for validation.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           {paused
-            ? <button disabled={busy} type="button" onClick={() => act("resume")} className="btn-primary"><Play className="h-4 w-4"/> Resume</button>
-            : <button disabled={busy} type="button" onClick={() => act("pause")} className="btn-secondary"><Pause className="h-4 w-4"/> Pause</button>}
-          <button disabled={busy || !!activeJob || unresolved === 0} type="button" onClick={() => act("start_pending")} className="btn-primary"><RotateCcw className="h-4 w-4"/> Validate unresolved</button>
+            ? <button disabled={busy} type="button" onClick={() => act("resume")} className="btn-secondary !min-h-9 !px-3"><Play className="h-3.5 w-3.5"/> Resume</button>
+            : <button disabled={busy} type="button" onClick={() => act("pause")} className="btn-secondary !min-h-9 !px-3"><Pause className="h-3.5 w-3.5"/> Pause</button>}
+          <button disabled={busy || !!activeJob || unresolved === 0} type="button" onClick={() => act("start_pending")} className="btn-primary !min-h-9 !px-3"><RotateCcw className="h-3.5 w-3.5"/> Validate unresolved</button>
         </div>
       </div>
 
-      {activeJob ? <div className="mt-4 rounded-2xl border border-blue-500/15 bg-blue-500/[0.05] p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div><b className="text-sm">Active job</b><div className="mt-1 font-mono text-[10px] text-[var(--muted)]">{activeJob.id}</div></div>
-          <span className="rounded-full bg-blue-500/10 px-2.5 py-1 text-[11px] font-extrabold capitalize text-blue-700 dark:text-blue-300">{paused ? "paused" : activeJob.status}</span>
+      {activeJob ? <div className="border-b border-[var(--border)] bg-blue-500/[0.035] px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500"/><b className="text-xs">Active validation job</b><span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[9px] font-black uppercase text-blue-700 dark:text-blue-300">{paused ? "paused" : activeJob.status}</span></div><div className="mt-1 truncate font-mono text-[9.5px] text-[var(--muted)]">{activeJob.scope} · {activeJob.id.slice(0,8)}</div></div>
+          <div className="text-right text-[10px] font-bold text-[var(--muted)]">{activeJob.processedRows.toLocaleString()} / {activeJob.totalRows.toLocaleString()}</div>
         </div>
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--surface-soft)]"><div className="h-full rounded-full bg-violet-500 transition-all" style={{width:(activeJob.totalRows ? Math.min(100, activeJob.processedRows / activeJob.totalRows * 100) : 0) + "%"}}/></div>
-        <div className="mt-2 flex justify-between text-[11px] font-bold text-[var(--muted)]"><span>{activeJob.scope}</span><span>{activeJob.processedRows.toLocaleString()} / {activeJob.totalRows.toLocaleString()}</span></div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-violet-500 transition-all" style={{width:(activeJob.totalRows ? Math.min(100, activeJob.processedRows / activeJob.totalRows * 100) : 0) + "%"}}/></div>
       </div> : null}
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4">
-          <h3 className="text-sm font-black">Validate one contact</h3>
-          <p className="mt-1 text-[11px] text-[var(--muted)]">The contact must already exist and have Pending / Unknown / Error status.</p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <input value={email} onChange={(e)=>setEmail(e.target.value)} type="email" placeholder="person@gmail.com" className="min-w-0 flex-1 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm outline-none"/>
-            <button type="button" disabled={busy || !!activeJob || !email.trim()} onClick={()=>act("start_single")} className="btn-secondary shrink-0"><SearchCheck className="h-4 w-4"/> Validate</button>
-          </div>
+      <div className="grid gap-3 p-4 md:grid-cols-2">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3.5">
+          <div className="mb-3 flex items-start gap-3"><div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-700 dark:text-violet-300"><SearchCheck className="h-4 w-4"/></div><div><h3 className="text-[12px] font-black">Validate one contact</h3><p className="mt-0.5 text-[10.5px] leading-4 text-[var(--muted)]">Existing Gmail contact with Pending, Unknown or Error status.</p></div></div>
+          <div className="flex gap-2"><input value={email} onChange={(e)=>setEmail(e.target.value)} type="email" placeholder="person@gmail.com" className="form-control min-w-0 flex-1"/><button type="button" disabled={busy || !!activeJob || !email.trim()} onClick={()=>act("start_single")} className="btn-secondary !min-h-10 shrink-0 !px-3">Validate</button></div>
         </div>
 
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4">
-          <h3 className="text-sm font-black">Validate a recent CSV import</h3>
-          <p className="mt-1 text-[11px] text-[var(--muted)]">Only unresolved Gmail contacts from that import are included.</p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <select value={importId} onChange={(e)=>setImportId(e.target.value)} className="min-w-0 flex-1 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm outline-none">
-              {imports.length ? imports.map((item)=><option key={item.id} value={item.id}>{item.filename} · {item.unresolved} unresolved</option>) : <option value="">No imports need validation</option>}
-            </select>
-            <button type="button" disabled={busy || !!activeJob || !importId} onClick={()=>act("start_import")} className="btn-secondary shrink-0">Validate import</button>
-          </div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3.5">
+          <div className="mb-3 flex items-start gap-3"><div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-500/10 text-blue-700 dark:text-blue-300"><UploadCloud className="h-4 w-4"/></div><div><h3 className="text-[12px] font-black">Validate recent import</h3><p className="mt-0.5 text-[10.5px] leading-4 text-[var(--muted)]">Only unresolved Gmail contacts from that CSV import.</p></div></div>
+          <div className="flex gap-2"><select value={importId} onChange={(e)=>setImportId(e.target.value)} className="form-control min-w-0 flex-1">{imports.length ? imports.map((item)=><option key={item.id} value={item.id}>{item.filename} · {item.unresolved}</option>) : <option value="">No imports need validation</option>}</select><button type="button" disabled={busy || !!activeJob || !importId} onClick={()=>act("start_import")} className="btn-secondary !min-h-10 shrink-0 !px-3">Validate import</button></div>
         </div>
       </div>
 
-      {notice ? <p role="status" className="mt-4 text-xs font-bold text-emerald-700 dark:text-emerald-300">{notice}</p> : null}
-      {error ? <p role="alert" className="mt-4 text-xs font-bold text-rose-600">{error}</p> : null}
+      {(notice||error)?<div className="border-t border-[var(--border)] px-4 py-3">{notice?<p role="status" className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">{notice}</p>:null}{error?<p role="alert" className="text-[11px] font-bold text-rose-600">{error}</p>:null}</div>:null}
     </section>
 
-    <aside className="premium-panel p-5">
-      <p className="page-eyebrow">How it works</p>
-      <h2 className="mt-1 text-lg font-black">Current validator</h2>
-      <div className="mt-4 space-y-3 text-sm">
-        <div className="rounded-xl border border-[var(--border)] p-3"><b>Method</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Supersend email verification API for Gmail/Googlemail contacts. Validation runs only when you explicitly queue a job or opt in during import.</p></div>
-        <div className="rounded-xl border border-[var(--border)] p-3"><b>Accepted</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">The validation provider returned a positive mailbox verdict. This does not guarantee inbox placement.</p></div>
-        <div className="rounded-xl border border-[var(--border)] p-3"><b>Invalid</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">The validation provider returned an invalid mailbox verdict. NexiMail adds an invalid suppression.</p></div>
-        <div className="rounded-xl border border-[var(--border)] p-3"><b>Unknown / Error</b><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Temporary, provider, network or ambiguous result. These remain eligible for sending and can be validated again later.</p></div>
+    <aside className="premium-panel overflow-hidden">
+      <div className="section-header"><div><p className="page-eyebrow">How it works</p><h2 className="section-title mt-1">Current validator</h2></div><ShieldCheck className="h-5 w-5 text-violet-600"/></div>
+      <div className="divide-y divide-[var(--border)]">
+        {[
+          ["Method","Supersend API for Gmail/Googlemail. Runs only when you explicitly start validation."],
+          ["Positive","Provider returned a positive mailbox verdict. Inbox placement is still separate."],
+          ["Invalid","Provider returned an invalid mailbox verdict. NexiMail adds an invalid suppression."],
+          ["Unknown / Error","Temporary, provider or ambiguous result. Contact remains send-eligible and can be checked again."],
+        ].map(([title,body])=><div key={title} className="px-4 py-3"><p className="text-[11px] font-black">{title}</p><p className="mt-1 text-[10.5px] leading-4 text-[var(--muted)]">{body}</p></div>)}
       </div>
     </aside>
   </div>;
