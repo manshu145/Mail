@@ -41,9 +41,9 @@ function num(value: unknown, fallback: number, min: number, max: number) { retur
 export function defaultDeliverySettings(env: Readonly<Record<string,string|undefined>> = process.env): DeliverySettings {
   return {
     maxPerSecond: int(env.TRANSPORT_RATE_PER_SECOND, 1, 1, 1000),
-    maxRecipientsPerCampaign: int(env.MAX_RECIPIENTS_PER_CAMPAIGN, 1_000_000, 1, 10_000_000),
-    maxRollingHour: int(env.MAX_ROLLING_HOUR, 10_000, 1, 10_000_000),
-    maxRolling24h: int(env.MAX_ROLLING_24H, 100_000, 1, 100_000_000),
+    maxRecipientsPerCampaign: int(env.MAX_RECIPIENTS_PER_CAMPAIGN, 0, 0, 10_000_000),
+    maxRollingHour: int(env.MAX_ROLLING_HOUR, 0, 0, 10_000_000),
+    maxRolling24h: int(env.MAX_ROLLING_24H, 0, 0, 100_000_000),
     maxActiveQueued: int(env.MAX_ACTIVE_QUEUED, 15_000, 100, 10_000_000),
     retryMaxAttempts: int(env.TRANSPORT_MAX_ATTEMPTS, 5, 1, 20),
     retryInitialSeconds: int(env.TRANSPORT_RETRY_INITIAL_SECONDS, 30, 10, 86_400),
@@ -61,9 +61,9 @@ export async function readDeliverySettings(): Promise<DeliverySettings> {
   const values = new Map(rows.map((row) => [row.key, row.value]));
   return {
     maxPerSecond: int(values.get(DELIVERY_SETTING_KEYS.maxPerSecond), defaults.maxPerSecond, 1, 1000),
-    maxRecipientsPerCampaign: int(values.get(DELIVERY_SETTING_KEYS.maxRecipientsPerCampaign), defaults.maxRecipientsPerCampaign, 1, 10_000_000),
-    maxRollingHour: int(values.get(DELIVERY_SETTING_KEYS.maxRollingHour), defaults.maxRollingHour, 1, 10_000_000),
-    maxRolling24h: int(values.get(DELIVERY_SETTING_KEYS.maxRolling24h), defaults.maxRolling24h, 1, 100_000_000),
+    maxRecipientsPerCampaign: int(values.get(DELIVERY_SETTING_KEYS.maxRecipientsPerCampaign), defaults.maxRecipientsPerCampaign, 0, 10_000_000),
+    maxRollingHour: int(values.get(DELIVERY_SETTING_KEYS.maxRollingHour), defaults.maxRollingHour, 0, 10_000_000),
+    maxRolling24h: int(values.get(DELIVERY_SETTING_KEYS.maxRolling24h), defaults.maxRolling24h, 0, 100_000_000),
     maxActiveQueued: int(values.get(DELIVERY_SETTING_KEYS.maxActiveQueued), defaults.maxActiveQueued, 100, 10_000_000),
     retryMaxAttempts: int(values.get(DELIVERY_SETTING_KEYS.retryMaxAttempts), defaults.retryMaxAttempts, 1, 20),
     retryInitialSeconds: int(values.get(DELIVERY_SETTING_KEYS.retryInitialSeconds), defaults.retryInitialSeconds, 10, 86_400),
