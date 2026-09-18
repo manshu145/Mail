@@ -31,17 +31,22 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
       ('good@example.com','good@example.com','confirmed','form','accepted'),
       ('blocked@example.com','blocked@example.com','confirmed','form','valid'),
       ('invalid@example.com','invalid@example.com','confirmed','form','invalid'),
+      ('waiting@gmail.com','waiting@gmail.com','confirmed','form','pending'),
+      ('pending@example.com','pending@example.com','confirmed','form','pending'),
       ('unconfirmed@example.com','unconfirmed@example.com','unconfirmed',null,'valid');
       insert into suppressions(email,normalized_email,reason,source) values('blocked@example.com','blocked@example.com','unsubscribe','test');`);
     await pg.query("insert into contact_lists(contact_id,list_id) select id,$1::uuid from contacts", [list.id]);
     const selection = await audienceSelection(list, orm as unknown as Parameters<typeof audienceSelection>[1]);
-    const result = await orm.execute(sql`select * from (${selection}) a where not suppressed and validation_status<>'invalid'`);
-    assert.equal(result.rows.length, 1);
-    assert.equal(result.rows[0].email, "good@example.com");
+    const result = await orm.execute(sql`select * from (${selection}) a where not suppressed and send_eligible`);
+    assert.equal(result.rows.length, 2);
+    assert.deepEqual(result.rows.map((row) => row.email).sort(), ["good@example.com", "pending@example.com"]);
+    const waiting = await orm.execute(sql`select * from (${selection}) a where email='waiting@gmail.com'`);
+    assert.equal(waiting.rows[0].send_eligible, false);
+    assert.equal(waiting.rows[0].awaiting_validation, true);
     await pg.exec("insert into campaigns(name,subject,status) values('test','test','sending')");
     await orm.execute(sql`insert into messages(campaign_id,contact_id,recipient_email,status)
       select (select id from campaigns limit 1),contact_id,email,'queued'::message_status from (${selection}) a
-      where not suppressed and validation_status<>'invalid' on conflict(campaign_id,contact_id) do nothing`);
+      where not suppressed and send_eligible on conflict(campaign_id,contact_id) do nothing`);
     const connectionPool = { connect: async () => ({
       query: async (query: string, params?: unknown[]) => { const result = await pg.query(query, params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; },
       release() {},
