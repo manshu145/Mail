@@ -6,6 +6,7 @@ import { databaseConfigured, db, pool } from "@/db";
 import { workerHeartbeats } from "@/db/operations-schema";
 import { getSession } from "@/lib/auth";
 import { getRedis, isRedisConfigured } from "@/lib/redis";
+import { EXPECTED_WORKERS, isWorkerHeartbeatFresh } from "@/lib/worker-health";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +22,9 @@ export default async function SystemHealthPage() {
   let beats: typeof workerHeartbeats.$inferSelect[] = [];
   if (databaseConfigured) { try { beats = await db.select().from(workerHeartbeats).orderBy(desc(workerHeartbeats.lastSeenAt)); } catch {} }
   const beat = new Map(beats.map((item) => [item.workerName, item]));
-  const workerState = (name: string) => { const item = beat.get(name); if (!item) return "not_configured" as const; return Date.now() - item.lastSeenAt.getTime() < 12 * 60 * 1000 ? "online" as const : "offline" as const; };
+  const workerState = (name: string) => { const item = beat.get(name); if (!item) return "not_configured" as const; return isWorkerHeartbeatFresh(item.lastSeenAt) ? "online" as const : "offline" as const; };
 
-  const workerNames = ["import", "campaign", "policy", "transport", "event", "validation", "reputation", "domain-health", "dkim", "webhook", "postfix-events"];
+  const workerNames = EXPECTED_WORKERS;
   const items = [
     { name: "Application", status: "online", detail: "NexiMail control plane", icon: Activity },
     { name: "PostgreSQL", status: postgres, detail: "Persistent application data", icon: ServerCog },
