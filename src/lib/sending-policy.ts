@@ -1,3 +1,20 @@
 export type WarmupPolicy={enabled:boolean;startedAt:Date|null;dayOneLimit:number;growthPercent:number;maxDailyLimit:number};
-export function effectiveWarmupDailyLimit(policy:WarmupPolicy|null,accountDailyLimit:number,now=new Date()){if(!policy?.enabled||!policy.startedAt)return accountDailyLimit;const elapsed=Math.max(0,now.getTime()-policy.startedAt.getTime()),day=Math.floor(elapsed/86400000);const growth=1+policy.growthPercent/100;const calculated=Math.floor(policy.dayOneLimit*Math.pow(growth,day));return Math.min(accountDailyLimit,policy.maxDailyLimit,Math.max(policy.dayOneLimit,calculated))}
-export function shouldPauseForReputation(input:{sent:number;bounced:number;complaints:number;minSample:number;bounceStop:number;complaintStop:number}){if(input.sent<input.minSample)return false;const bounce=input.sent?input.bounced/input.sent:0,complaint=input.sent?input.complaints/input.sent:0;return bounce>=input.bounceStop||complaint>=input.complaintStop}
+
+function optionalMin(...values:number[]){
+  const caps=values.filter((value)=>Number.isFinite(value)&&value>0);
+  return caps.length?Math.min(...caps):0;
+}
+
+export function effectiveWarmupDailyLimit(policy:WarmupPolicy|null,accountDailyLimit:number,now=new Date()){
+  if(!policy?.enabled||!policy.startedAt)return accountDailyLimit;
+  const elapsed=Math.max(0,now.getTime()-policy.startedAt.getTime()),day=Math.floor(elapsed/86400000);
+  const growth=1+policy.growthPercent/100;
+  const calculated=Math.floor(policy.dayOneLimit*Math.pow(growth,day));
+  return optionalMin(accountDailyLimit,policy.maxDailyLimit,Math.max(policy.dayOneLimit,calculated));
+}
+
+export function shouldPauseForReputation(input:{sent:number;bounced:number;complaints:number;minSample:number;bounceStop:number;complaintStop:number}){
+  if(input.sent<input.minSample)return false;
+  const bounce=input.sent?input.bounced/input.sent:0,complaint=input.sent?input.complaints/input.sent:0;
+  return bounce>=input.bounceStop||complaint>=input.complaintStop;
+}
