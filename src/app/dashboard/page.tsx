@@ -11,16 +11,26 @@ import { isRedisConfigured } from "@/lib/redis";
 export default async function DashboardPage() {
   const session=await getSession(); if(!session) redirect("/login");
   let totalContacts=0,sentToday=0,delivered=0,queued=0,dbHealthy=false; let beats:typeof workerHeartbeats.$inferSelect[]=[];
-  if(databaseConfigured) try{
-    const [contactsRows,sentRows,deliveredRows,queuedRows,heartbeatRows]=await Promise.all([
-      db.select({value:sql<number>`count(*)::int`}).from(contacts),
-      db.select({value:sql<number>`count(*)::int`}).from(messages).where(sql`${messages.queuedAt} >= date_trunc('day', now())`),
-      db.select({value:sql<number>`count(*)::int`}).from(messages).where(sql`${messages.status}='delivered'`),
-      db.select({value:sql<number>`count(*)::int`}).from(messages).where(sql`${messages.status} in ('queued','ready_for_transport','sending','deferred')`),
-      db.select().from(workerHeartbeats).orderBy(desc(workerHeartbeats.lastSeenAt)),
-    ]);
-    totalContacts=contactsRows[0]?.value??0;sentToday=sentRows[0]?.value??0;delivered=deliveredRows[0]?.value??0;queued=queuedRows[0]?.value??0;beats=heartbeatRows;dbHealthy=true;
-  }catch{dbHealthy=false}
+  if(databaseConfigured){
+    try{
+      const [contactsRows,sentRows,deliveredRows,queuedRows]=await Promise.all([
+        db.select({value:sql<number>`count(*)::int`}).from(contacts),
+        db.select({value:sql<number>`count(*)::int`}).from(messages).where(sql`${messages.queuedAt} >= date_trunc('day', now())`),
+        db.select({value:sql<number>`count(*)::int`}).from(messages).where(sql`${messages.status}='delivered'`),
+        db.select({value:sql<number>`count(*)::int`}).from(messages).where(sql`${messages.status} in ('queued','ready_for_transport','sending','deferred')`),
+      ]);
+      totalContacts=contactsRows[0]?.value??0;sentToday=sentRows[0]?.value??0;delivered=deliveredRows[0]?.value??0;queued=queuedRows[0]?.value??0;dbHealthy=true;
+    }catch(error){
+      console.error("Dashboard core database query failed",error);
+      dbHealthy=false;
+    }
+    try{
+      beats=await db.select().from(workerHeartbeats).orderBy(desc(workerHeartbeats.lastSeenAt));
+    }catch(error){
+      console.error("Dashboard worker heartbeat query failed",error);
+      beats=[];
+    }
+  }
   const redisReady=isRedisConfigured(); const beat=new Map(beats.map(x=>[x.workerName,x]));
   const workerOnline=(name:string)=>{const row=beat.get(name);return Boolean(row&&Date.now()-row.lastSeenAt.getTime()<12*60*1000)};
   const campaignOnline=workerOnline("campaign")&&workerOnline("policy"); const transportOnline=workerOnline("transport")&&workerOnline("event");
