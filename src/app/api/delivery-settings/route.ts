@@ -33,7 +33,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   const constraints: Array<[keyof DeliverySettings, number, number]> = [
-    ["maxPerSecond",1,1000],["maxRecipientsPerCampaign",1,10_000_000],["maxRollingHour",1,10_000_000],["maxRolling24h",1,100_000_000],["maxActiveQueued",100,10_000_000],
+    ["maxPerSecond",1,1000],["maxRecipientsPerCampaign",0,10_000_000],["maxRollingHour",0,10_000_000],["maxRolling24h",0,100_000_000],["maxActiveQueued",100,10_000_000],
     ["retryMaxAttempts",1,20],["retryInitialSeconds",10,86_400],["retryMaxSeconds",30,604_800],["retryBackoffMultiplier",1,10],
     ["reputationBounceStopRate",0,1],["reputationComplaintStopRate",0,1],["reputationMinSample",1,10_000_000],
   ];
