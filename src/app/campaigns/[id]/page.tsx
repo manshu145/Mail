@@ -5,6 +5,8 @@ import { eq, sql } from "drizzle-orm";
 import { AppShell } from "@/components/app-shell";
 import { CampaignControl } from "@/components/campaign-control";
 import { CampaignEditor } from "@/components/campaign-editor";
+import { CampaignReuseAction } from "@/components/campaign-reuse-action";
+import { LiveRefresh } from "@/components/live-refresh";
 import { MessageStatusBadge } from "@/components/message-status-badge";
 import { DuplicateCampaignButton } from "@/components/duplicate-campaign-button";
 import { db, databaseConfigured } from "@/db";
@@ -160,7 +162,7 @@ export default async function CampaignDetailPage({
 
     {metrics&&metrics.targeted>0?<>
       <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {cardData.map(({label,count,icon:Icon,view:cardView,tone})=><Link href={drillHref(cardView)} className={`premium-panel block p-5 transition ${view===cardView?"ring-2 ring-violet-500/30":""}`} key={label}><div className="flex items-start justify-between"><div><p className="text-sm font-bold text-[var(--muted)]">{label}</p><p className="mt-2 text-3xl font-black">{Number(count).toLocaleString()}</p><p className="mt-2 text-[11px] font-bold text-violet-600">View recipients →</p></div><Icon className={`h-5 w-5 ${tone}`}/></div></Link>)}
+        {cardData.map(({label,count,icon:Icon,view:cardView,tone})=><Link href={drillHref(cardView)} className={`premium-panel block p-5 transition ${cardView==="delivered"?"border-emerald-500/15 bg-emerald-500/[0.025]":cardView==="opens"?"border-blue-500/15 bg-blue-500/[0.025]":cardView==="clicks"?"border-cyan-500/15 bg-cyan-500/[0.025]":"border-violet-500/15 bg-violet-500/[0.025]"} ${view===cardView?"ring-2 ring-violet-500/30":""}`} key={label}><div className="flex items-start justify-between"><div><p className="text-sm font-bold text-[var(--muted)]">{label}</p><p className="mt-2 text-3xl font-black">{Number(count).toLocaleString()}</p><p className="mt-2 text-[11px] font-bold text-violet-600">View recipients →</p></div><Icon className={`h-5 w-5 ${tone}`}/></div></Link>)}
       </section>
       <section className="mb-5 grid gap-3 md:grid-cols-3 xl:grid-cols-6">{[["Delivery",metrics.deliveryRate],["Open rate",metrics.openRate],["Click rate",metrics.clickRate],["CTOR",metrics.ctor],["Bounce",metrics.bounceRate],["Unsubscribes",metrics.unsubscribes]].map(([label,value])=><article key={String(label)} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4"><p className="text-xs font-bold text-[var(--muted)]">{label}</p><p className="mt-1.5 text-xl font-black">{label==="Unsubscribes"?Number(value).toLocaleString():`${Number(value).toFixed(2)}%`}</p></article>)}</section>
       <section className="mb-5 grid gap-5 xl:grid-cols-2">
