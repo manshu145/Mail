@@ -18,12 +18,16 @@ export function ResourceCreate({
   endpoint,
   title,
   buttonLabel,
+  submitLabel,
+  redirectBasePath,
   fields,
   disabled = false,
 }: {
   endpoint: string;
   title: string;
   buttonLabel: string;
+  submitLabel?: string;
+  redirectBasePath?: string;
   fields: Field[];
   disabled?: boolean;
 }) {
@@ -42,12 +46,16 @@ export function ResourceCreate({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await response.json().catch(() => ({})) as { error?: string };
+      const data = await response.json().catch(() => ({})) as { error?: string; id?: string };
       if (!response.ok) {
         setError(data.error || "Could not save.");
         return;
       }
       setOpen(false);
+      if (redirectBasePath && data.id) {
+        router.push(`${redirectBasePath}/${data.id}`);
+        return;
+      }
       router.refresh();
     } catch {
       setError("Could not reach NexiMail. Check the connection and try again.");
@@ -101,7 +109,7 @@ export function ResourceCreate({
               : <input name={field.name} required={field.required} placeholder={field.placeholder} type={field.type || "text"} autoComplete={field.type === "password" ? "new-password" : undefined} className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-3 text-sm outline-none focus:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900" />}
           </label>)}
           {error ? <p role="alert" aria-live="polite" className="text-sm font-semibold text-rose-600">{error}</p> : null}
-          <button disabled={busy} className="btn-primary w-full">{busy ? "Saving…" : buttonLabel}</button>
+          <button disabled={busy} className="btn-primary w-full">{busy ? "Saving…" : (submitLabel || buttonLabel)}</button>
         </form>
       </section>
     </div> : null}
