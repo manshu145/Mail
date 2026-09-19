@@ -68,7 +68,7 @@ export default async function CampaignsPage() {
         ].map(([title, copy]) => (
           <div key={title} className="panel-soft px-3.5 py-3">
             <p className="text-[11px] font-extrabold">{title}</p>
-            <p className="mt-1 text-[10px] leading-4 text-[var(--muted)]">{copy}</p>
+            <p className="mt-1 text-[11px] leading-4 text-[var(--muted)]">{copy}</p>
           </div>
         ))}
       </div>
@@ -85,7 +85,7 @@ export default async function CampaignsPage() {
         {rows.length ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[800px] text-left text-xs">
-              <thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.13em] text-[var(--muted)]">
+              <thead className="bg-[var(--surface-soft)] text-[11px] font-black uppercase tracking-[.13em] text-[var(--muted)]">
                 <tr><th className="px-4 py-3">Campaign</th><th className="px-5 py-3.5">Subject</th><th className="px-5 py-3.5">Status</th><th className="px-5 py-3.5">Schedule</th><th className="px-5 py-3.5">Created</th><th className="px-5 py-3.5" /></tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
