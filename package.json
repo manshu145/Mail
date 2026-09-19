@@ -25,7 +25,8 @@
     "worker:dkim": "tsx scripts/workers/dkim-worker.ts",
     "worker:reputation": "tsx scripts/workers/reputation-worker.ts",
     "worker:webhook": "tsx scripts/workers/webhook-worker.ts",
-    "release:check": "npm run test && npm run typecheck && npm run build"
+    "release:sanitize": "tsx scripts/release-sanitize.ts",
+    "release:check": "npm run release:sanitize && npm run test && npm run typecheck && npm run build"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
