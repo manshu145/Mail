@@ -92,34 +92,34 @@ export function AppShell({ session, children }: { session: SessionView; children
 
   const sidebar = (
     <div className="flex h-full flex-col overflow-hidden bg-[var(--sidebar)] text-[var(--sidebar-fg)]">
-      <div className={`flex h-[64px] items-center border-b border-[var(--sidebar-border)] ${collapsed ? "justify-center px-3" : "px-5"}`}><BrandMark compact={collapsed} /></div>
-      <div className="flex-1 overflow-y-auto px-2.5 py-3 scrollbar-thin">
+      <div className={`flex h-[68px] items-center border-b border-[var(--sidebar-border)] ${collapsed ? "justify-center px-3" : "px-5"}`}><BrandMark compact={collapsed} /></div>
+      <div className="flex-1 overflow-y-auto px-3 py-4 scrollbar-thin">
         {visibleGroups.map((group) => {
           const groupOpen = collapsed || openGroups[group.label] !== false;
           return <div key={group.label} className="mb-2.5 last:mb-1">
-            {!collapsed ? <button type="button" onClick={() => toggleGroup(group.label)} className="mb-1 flex w-full items-center justify-between rounded-lg px-2.5 py-1 text-[8.5px] font-black uppercase tracking-[0.18em] text-[var(--sidebar-muted)] transition hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-fg)]">
+            {!collapsed ? <button type="button" onClick={() => toggleGroup(group.label)} className="mb-1.5 flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sidebar-muted)] transition hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-fg)]">
               <span>{group.label}</span><ChevronDown className={`h-3 w-3 transition-transform ${groupOpen?"rotate-0":"-rotate-90"}`}/>
             </button> : null}
-            {groupOpen ? <nav className="space-y-0.5">{group.items.map((item) => { const Icon=item.icon; const active=pathname===item.href||pathname.startsWith(`${item.href}/`); return <Link key={item.href} href={item.href} title={collapsed?item.label:undefined} onClick={()=>setMobileOpen(false)} className={`group flex h-[35px] items-center rounded-[11px] border transition-all duration-150 ${collapsed?"justify-center px-2":"gap-2.5 px-2.5"} ${active?"border-violet-500/20 bg-violet-600 text-white shadow-[0_8px_20px_rgba(109,93,252,.22)]":"border-transparent text-[var(--sidebar-muted)] hover:border-violet-500/10 hover:bg-[linear-gradient(90deg,var(--sidebar-hover),rgba(109,93,252,.055))] hover:text-[var(--sidebar-fg)] hover:shadow-[inset_3px_0_0_rgba(109,93,252,.22)]"}`}><Icon className="h-4 w-4 shrink-0" strokeWidth={active?2.15:1.8}/>{!collapsed&&<span className="truncate text-[12px] font-bold">{item.label}</span>}</Link>})}</nav> : null}
+            {groupOpen ? <nav className="space-y-0.5">{group.items.map((item) => { const Icon=item.icon; const active=pathname===item.href||pathname.startsWith(`${item.href}/`); return <Link key={item.href} href={item.href} title={collapsed?item.label:undefined} onClick={()=>setMobileOpen(false)} className={`group flex h-[40px] items-center rounded-[12px] border transition-all duration-150 ${collapsed?"justify-center px-2":"gap-3 px-3"} ${active?"border-violet-500/20 bg-violet-600 text-white shadow-[0_8px_20px_rgba(109,93,252,.22)]":"border-transparent text-[var(--sidebar-muted)] hover:border-violet-500/10 hover:bg-[linear-gradient(90deg,var(--sidebar-hover),rgba(109,93,252,.055))] hover:text-[var(--sidebar-fg)] hover:shadow-[inset_3px_0_0_rgba(109,93,252,.22)]"}`}><Icon className="h-4 w-4 shrink-0" strokeWidth={active?2.15:1.8}/>{!collapsed&&<span className="truncate text-[13px] font-bold">{item.label}</span>}</Link>})}</nav> : null}
           </div>;
         })}
       </div>
       <div className="border-t border-[var(--sidebar-border)] bg-[linear-gradient(180deg,transparent,rgba(109,93,252,.025))] p-3">
-        <div className={`flex items-center ${collapsed?"justify-center":"gap-2.5"}`}><div className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-gradient-to-br from-[#7c5cff] to-[#4b7cff] text-[10px] font-black text-white">{initials(session.name)}</div>{!collapsed&&<><div className="min-w-0 flex-1"><div className="truncate text-[12px] font-extrabold">{session.name}</div><div className="truncate text-[10px] capitalize text-[var(--sidebar-muted)]">{session.role}</div></div><ChevronDown className="h-3.5 w-3.5 text-[var(--sidebar-muted)]"/></>}</div>
-        {!collapsed&&<form action="/api/auth/logout" method="post" className="mt-2.5"><button className="w-full rounded-[10px] border border-[var(--sidebar-border)] bg-[var(--sidebar-hover)] px-3 py-2 text-[11px] font-bold text-[var(--sidebar-muted)] transition hover:text-[var(--sidebar-fg)]">Sign out</button></form>}
+        <div className={`flex items-center ${collapsed?"justify-center":"gap-2.5"}`}><div className="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] bg-gradient-to-br from-[#7c5cff] to-[#4b7cff] text-[10px] font-black text-white">{initials(session.name)}</div>{!collapsed&&<><div className="min-w-0 flex-1"><div className="truncate text-[13px] font-extrabold">{session.name}</div><div className="truncate text-[11px] capitalize text-[var(--sidebar-muted)]">{session.role}</div></div><ChevronDown className="h-3.5 w-3.5 text-[var(--sidebar-muted)]"/></>}</div>
+        {!collapsed&&<form action="/api/auth/logout" method="post" className="mt-2.5"><button className="w-full rounded-[10px] border border-[var(--sidebar-border)] bg-[var(--sidebar-hover)] px-3 py-2.5 text-[12px] font-bold text-[var(--sidebar-muted)] transition hover:text-[var(--sidebar-fg)]">Sign out</button></form>}
       </div>
     </div>
   );
 
   return <div className="min-h-dvh bg-[var(--background)] text-[var(--foreground)]">
-    <aside className={`fixed inset-y-0 left-0 z-30 hidden border-r border-[var(--sidebar-border)] transition-[width] duration-200 lg:block ${collapsed?"w-[72px]":"w-[232px]"}`}>{sidebar}</aside>
+    <aside className={`fixed inset-y-0 left-0 z-30 hidden border-r border-[var(--sidebar-border)] transition-[width] duration-200 lg:block ${collapsed?"w-[76px]":"w-[248px]"}`}>{sidebar}</aside>
     {mobileOpen&&<div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Close navigation" className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={()=>setMobileOpen(false)}/><aside className="relative h-full w-[286px] max-w-[88vw] shadow-2xl"><button aria-label="Close navigation" className="absolute right-3 top-4 z-10 rounded-xl border border-[var(--sidebar-border)] bg-[var(--sidebar-hover)] p-2 text-[var(--sidebar-fg)]" onClick={()=>setMobileOpen(false)}><X className="h-4.5 w-4.5"/></button>{sidebar}</aside></div>}
-    <div className={`transition-[padding] duration-200 ${collapsed?"lg:pl-[72px]":"lg:pl-[232px]"}`}>
-      <header className="sticky top-0 z-20 flex h-[64px] items-center justify-between border-b border-[var(--border)] bg-[color:var(--header-bg)] px-4 backdrop-blur-xl sm:px-5 lg:px-6">
-        <div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu className="h-[18px] w-[18px]"/></button><button className="icon-button hidden lg:grid" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"} onClick={()=>setCollapsed(v=>{const next=!v;try{window.localStorage.setItem("neximail.sidebar.collapsed",next?"1":"0")}catch{}return next})}>{collapsed?<PanelLeftOpen className="h-[17px] w-[17px]"/>:<PanelLeftClose className="h-[17px] w-[17px]"/>}</button><div className="min-w-0"><p className="truncate text-[9px] font-black uppercase tracking-[0.16em] text-[var(--muted)]">Workspace</p><p className="truncate text-[13px] font-extrabold tracking-[-0.01em]">{current.label}</p></div></div>
+    <div className={`transition-[padding] duration-200 ${collapsed?"lg:pl-[76px]":"lg:pl-[248px]"}`}>
+      <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-[var(--border)] bg-[color:var(--header-bg)] px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+        <div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu className="h-[18px] w-[18px]"/></button><button className="icon-button hidden lg:grid" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"} onClick={()=>setCollapsed(v=>{const next=!v;try{window.localStorage.setItem("neximail.sidebar.collapsed",next?"1":"0")}catch{}return next})}>{collapsed?<PanelLeftOpen className="h-[17px] w-[17px]"/>:<PanelLeftClose className="h-[17px] w-[17px]"/>}</button><div className="min-w-0"><p className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-[var(--muted)]">Workspace</p><p className="truncate text-[14px] font-extrabold tracking-[-0.01em]">{current.label}</p></div></div>
         <div className="flex items-center gap-2"><PwaStatus/><ThemeToggle/></div>
       </header>
-      <main className="mx-auto w-full max-w-[1560px] px-4 py-4 sm:px-5 lg:px-6 lg:py-5">{children}</main>
+      <main className="mx-auto w-full max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
     </div>
   </div>;
 }
