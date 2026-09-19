@@ -4,9 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Activity, BarChart3, Blocks, ChevronDown, CircleGauge, ContactRound, FileUp, Gauge,
-  Globe2, History, Inbox, KeyRound, Layers3, ListOrdered, Mail, MailCheck, Menu, Network,
-  PanelLeftClose, PanelLeftOpen, Send, ServerCog, Settings, ShieldBan, Users, Webhook, X,
+  BarChart3, Blocks, ChevronDown, ContactRound, FileUp, Gauge,
+  Globe2, Inbox, Layers3, ListOrdered, Mail, MailCheck, Menu, Network,
+  PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldBan, Users, X,
 } from "lucide-react";
 import { BrandMark } from "./brand-mark";
 import { PwaStatus } from "./pwa-status";
@@ -34,24 +34,15 @@ const navGroups: NavGroup[] = [
   { label: "Delivery", items: [
     { href: "/reports", label: "Reports", icon: BarChart3 },
     { href: "/messages", label: "Message log", icon: ListOrdered },
-    { href: "/queue", label: "Delivery queue", icon: CircleGauge },
   ]},
   { label: "Deliverability", items: [
     { href: "/domains", label: "Sending domains", icon: Globe2 },
     { href: "/sender-identities", label: "Sender identities", icon: Network },
-    { href: "/sending-limits", label: "Sending limits", icon: Gauge },
     { href: "/suppressions", label: "Suppressions", icon: ShieldBan },
-    { href: "/provider-cooldowns", label: "Provider cooldowns", icon: CircleGauge },
     { href: "/inbox-placement", label: "Inbox placement", icon: Inbox },
-    { href: "/delivery-integrity", label: "Delivery integrity", icon: Activity },
   ]},
-  { label: "Platform", items: [
-    { href: "/system-health", label: "System health", icon: Activity },
-    { href: "/infrastructure", label: "Infrastructure", icon: ServerCog },
-    { href: "/api-keys", label: "API keys", icon: KeyRound, roles: ["owner"] },
-    { href: "/webhooks", label: "Webhooks", icon: Webhook, roles: ["owner"] },
+  { label: "Workspace", items: [
     { href: "/users", label: "Team access", icon: Users, roles: ["owner"] },
-    { href: "/audit-log", label: "Audit log", icon: History },
     { href: "/settings", label: "Settings", icon: Settings },
   ]},
 ]
