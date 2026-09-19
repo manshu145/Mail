@@ -10,6 +10,7 @@ import { getSession } from "@/lib/auth";
 import { isValidEmail } from "@/lib/contact-utils";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
 import { getCampaignPreflight } from "@/lib/campaign-preflight";
+import { isUuid } from "@/lib/id";
 
 function value(input: unknown) {
   const v = String(input ?? "").trim();
@@ -22,6 +23,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!databaseConfigured) return NextResponse.json({ error: "Database is not configured." }, { status: 503 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid campaign id." }, { status: 400 });
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
