@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
   const defaultCategory = String(body.defaultCategory || "").trim();
   const defaultTags = String(body.defaultTags || "").split("|").map((value) => value.trim()).filter(Boolean);
   const listId = String(body.listId || "").trim() || null;
-  const queueValidation = body.queueValidation !== false;
+  const queueValidation = body.queueValidation === true;
   const options: ImportOptions = { consentSource, consentStatus, defaultSource, defaultCategory, defaultTags, listId, queueValidation };
 
   const createdBy = /^[0-9a-f-]{36}$/i.test(session.userId) ? session.userId : null;
