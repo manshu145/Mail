@@ -139,7 +139,7 @@ export function ContactsTableManager({
       {error ? <p role="alert" className="mt-2 text-xs font-bold text-rose-600">{error}</p> : null}
     </div>
 
-    <div className="overflow-x-auto">
+    <div className="desktop-table-only overflow-x-auto">
       <table className="w-full min-w-[980px] text-left text-sm">
         <thead className="bg-[var(--surface-soft)] text-[11px] font-black uppercase tracking-[.12em] text-[var(--muted)]">
           <tr>
@@ -150,7 +150,7 @@ export function ContactsTableManager({
         <tbody className="divide-y divide-[var(--border)]">
           {rows.map((contact) => {
             const checked = selected.has(contact.id);
-            return <tr key={contact.id} className={`transition ${checked ? "bg-violet-500/[0.045]" : "hover:bg-[var(--surface-soft)]"}`}>
+            return <tr key={contact.id} className={`interactive-row ${checked ? "bg-violet-500/[0.045]" : ""}`}>
               <td className="px-5 py-4"><input aria-label={`Select ${contact.email}`} type="checkbox" checked={checked} onChange={() => toggle(contact.id)} /></td>
               <td className="py-4">
                 <Link href={`/contacts/${contact.id}`} className="font-black hover:text-violet-700 dark:hover:text-violet-300">{contact.name}</Link>
@@ -170,6 +170,30 @@ export function ContactsTableManager({
           })}
         </tbody>
       </table>
+    </div>
+
+    <div className="mobile-card-list p-3">
+      {rows.map((contact) => {
+        const checked = selected.has(contact.id);
+        return <article key={contact.id} className={`panel-soft overflow-hidden ${checked?"ring-2 ring-violet-500/20":""}`}>
+          <div className="flex items-start gap-3 p-4">
+            <input aria-label={`Select ${contact.email}`} type="checkbox" checked={checked} onChange={() => toggle(contact.id)} className="mt-1 accent-violet-600"/>
+            <div className="min-w-0 flex-1">
+              <Link href={`/contacts/${contact.id}`} className="block truncate text-sm font-black">{contact.name}</Link>
+              <p className="mt-1 break-all text-[10px] text-[var(--muted)]">{contact.hasName?contact.email:"Email-only contact · no name supplied"}</p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                <span className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[9px] font-bold capitalize">{contact.status}</span>
+                <span className="rounded-full bg-violet-500/[.07] px-2 py-1 text-[9px] font-bold capitalize text-[var(--accent)]">{contact.validationStatus}</span>
+                <span className="rounded-full bg-[var(--surface)] px-2 py-1 text-[9px] font-bold text-[var(--muted)]">{contact.source.replaceAll("_"," ")}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t border-[var(--border)] px-3 py-2.5">
+            <span className="text-[9px] text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium"}).format(new Date(contact.createdAt))}</span>
+            <div className="flex gap-1.5"><Link href={`/contacts/${contact.id}`} className="btn-secondary !min-h-8 !px-2.5 !py-1 text-[10px]">Edit</Link><button type="button" disabled={busy} onClick={() => deleteOne(contact.id, contact.email)} className="btn-danger !min-h-8 !px-2.5 !py-1 text-[10px]">Delete</button></div>
+          </div>
+        </article>;
+      })}
     </div>
   </div>;
 }
