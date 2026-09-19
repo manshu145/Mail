@@ -74,34 +74,56 @@ export default async function CampaignsPage() {
       </div>
 
       <section className="premium-panel overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3.5">
+        <div className="flex flex-col gap-3 border-b border-[var(--border)] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-extrabold">Campaign workspace</p>
             <p className="mt-1 text-xs text-[var(--muted)]">{rows.length ? `${rows.length} recent campaign${rows.length === 1 ? "" : "s"}` : "No campaigns yet"}</p>
           </div>
-          <div className="flex items-center gap-2"><LiveRefresh intervalMs={10000} label="Live"/><span className="status-pill"><TimerReset className="h-3.5 w-3.5" /> Delivery status</span></div>
+          <div className="flex flex-wrap items-center gap-2"><LiveRefresh intervalMs={10000} label="Live"/><span className="status-pill"><TimerReset className="h-3.5 w-3.5" /> Delivery status</span></div>
         </div>
 
         {rows.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-left text-xs">
-              <thead className="bg-[var(--surface-soft)] text-[11px] font-black uppercase tracking-[.13em] text-[var(--muted)]">
-                <tr><th className="px-4 py-3">Campaign</th><th className="px-5 py-3.5">Subject</th><th className="px-5 py-3.5">Status</th><th className="px-5 py-3.5">Schedule</th><th className="px-5 py-3.5">Created</th><th className="px-5 py-3.5" /></tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--border)]">
-                {rows.map((row) => (
-                  <tr key={row.id} className="transition hover:bg-[var(--surface-soft)]">
-                    <td className="px-4 py-3 font-extrabold"><Link href={`/campaigns/${row.id}`} className="hover:text-violet-700 dark:hover:text-violet-300">{row.name}</Link></td>
-                    <td className="max-w-[320px] truncate px-5 py-4 text-[var(--muted)]">{row.subject}</td>
-                    <td className="px-5 py-4"><span className={`rounded-full border px-2.5 py-1 text-[11px] font-extrabold capitalize ${statusClass(row.status)}`}>{row.status}</span></td>
-                    <td className="px-5 py-4 text-xs text-[var(--muted)]">{row.scheduledAt ? new Intl.DateTimeFormat("en",{dateStyle: "medium", timeStyle: "short", timeZone:"Asia/Kolkata"}).format(row.scheduledAt) : "Not scheduled"}</td>
-                    <td className="px-5 py-4 text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en",{day: "2-digit", month: "short", year: "numeric", timeZone:"Asia/Kolkata"}).format(row.createdAt)}</td>
-                    <td className="px-5 py-4 text-right"><Link href={`/campaigns/${row.id}`} aria-label={`Open ${row.name}`} className="inline-grid h-8 w-8 place-items-center rounded-lg border border-[var(--border)] text-[var(--muted)] transition hover:border-violet-500/20 hover:text-violet-700"><ArrowRight className="h-4 w-4" /></Link></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="divide-y divide-[var(--border)] sm:hidden">
+              {rows.map((row) => (
+                <Link key={row.id} href={`/campaigns/${row.id}`} className="block p-4 transition active:bg-[var(--surface-soft)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-black">{row.name}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--muted)]">{row.subject}</p>
+                    </div>
+                    <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-[var(--muted)]" />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full border px-2.5 py-1 text-[11px] font-extrabold capitalize ${statusClass(row.status)}`}>{row.status}</span>
+                    <span className="text-[11px] font-semibold text-[var(--muted)]">
+                      {row.scheduledAt ? new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Kolkata"}).format(row.scheduledAt) : "Not scheduled"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[11px] text-[var(--muted)]">Created {new Intl.DateTimeFormat("en",{day:"2-digit",month:"short",year:"numeric",timeZone:"Asia/Kolkata"}).format(row.createdAt)}</p>
+                </Link>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto sm:block">
+              <table className="w-full min-w-[800px] text-left text-xs">
+                <thead className="bg-[var(--surface-soft)] text-[11px] font-black uppercase tracking-[.13em] text-[var(--muted)]">
+                  <tr><th className="px-4 py-3">Campaign</th><th className="px-5 py-3.5">Subject</th><th className="px-5 py-3.5">Status</th><th className="px-5 py-3.5">Schedule</th><th className="px-5 py-3.5">Created</th><th className="px-5 py-3.5" /></tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {rows.map((row) => (
+                    <tr key={row.id} className="transition hover:bg-[var(--surface-soft)]">
+                      <td className="px-4 py-3 font-extrabold"><Link href={`/campaigns/${row.id}`} className="hover:text-violet-700 dark:hover:text-violet-300">{row.name}</Link></td>
+                      <td className="max-w-[320px] truncate px-5 py-4 text-[var(--muted)]">{row.subject}</td>
+                      <td className="px-5 py-4"><span className={`rounded-full border px-2.5 py-1 text-[11px] font-extrabold capitalize ${statusClass(row.status)}`}>{row.status}</span></td>
+                      <td className="px-5 py-4 text-xs text-[var(--muted)]">{row.scheduledAt ? new Intl.DateTimeFormat("en",{dateStyle: "medium", timeStyle: "short", timeZone:"Asia/Kolkata"}).format(row.scheduledAt) : "Not scheduled"}</td>
+                      <td className="px-5 py-4 text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en",{day: "2-digit", month: "short", year: "numeric", timeZone:"Asia/Kolkata"}).format(row.createdAt)}</td>
+                      <td className="px-5 py-4 text-right"><Link href={`/campaigns/${row.id}`} aria-label={`Open ${row.name}`} className="inline-grid h-8 w-8 place-items-center rounded-lg border border-[var(--border)] text-[var(--muted)] transition hover:border-violet-500/20 hover:text-violet-700"><ArrowRight className="h-4 w-4" /></Link></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : (
           <div className="grid min-h-52 place-items-center p-8 text-center">
             <div className="max-w-sm">
