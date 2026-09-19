@@ -4,6 +4,7 @@ import { db, databaseConfigured } from "@/db";
 import { webhookEndpoints } from "@/db/integration-schema";
 import { audit } from "@/lib/audit";
 import { canManageInfrastructure, getSession } from "@/lib/auth";
+import { isUuid } from "@/lib/id";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -12,6 +13,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid webhook id" }, { status: 400 });
   const body = (await request.json().catch(() => null)) as { active?: boolean } | null;
   if (typeof body?.active !== "boolean") return NextResponse.json({ error: "active must be boolean" }, { status: 400 });
 
@@ -30,6 +32,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid webhook id" }, { status: 400 });
   const [existing] = await db.select().from(webhookEndpoints).where(eq(webhookEndpoints.id, id)).limit(1);
   if (!existing) return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
   await db.delete(webhookEndpoints).where(eq(webhookEndpoints.id, id));
