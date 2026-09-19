@@ -7,7 +7,9 @@ async function main() {
     const source = await readFile(file, "utf8");
     for (const match of source.matchAll(/db.execute\(sql`([\s\S]*?)`\)/g)) {
       const query = match[1].replaceAll('${humanEvent}', "coalesce((payload->>'automated')::boolean,false)=false")
-        .replaceAll('${campaignId}', "'00000000-0000-0000-0000-000000000000'").replaceAll('${limit}', "30");
+        .replaceAll('${campaignId}', "'00000000-0000-0000-0000-000000000000'")
+        .replaceAll('${limit}', "30")
+        .replaceAll('${timeWhere}', "true");
       await pool.query(query);
       checked++;
     }
