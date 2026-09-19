@@ -93,7 +93,7 @@ export default async function ProviderCooldownsPage() {
             <p className="mt-1 text-xs font-bold">{row.accountName||"Sender identity"}{row.fromEmail?` · ${row.fromEmail}`:""}</p>
             <p className="mt-2 text-xs leading-5 text-[var(--muted)]">{row.reason||"Temporary provider pressure detected."}</p>
           </div>
-          <ProviderCooldownActions id={row.id} active={row.active} />
+          <ProviderCooldownActions id={row.id} active={row.active} canEdit={usable && session.role === "owner"} />
         </div>
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
