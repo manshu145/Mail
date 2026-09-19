@@ -82,7 +82,7 @@ export function TemplatePresetLibrary() {
               <button type="button" aria-label="Desktop preview" onClick={() => setPreviewMode("desktop")} className={`rounded-lg p-2 ${previewMode === "desktop" ? "bg-[var(--surface)] text-violet-600 shadow-sm" : "text-[var(--muted)]"}`}><Monitor className="h-4 w-4"/></button>
               <button type="button" aria-label="Mobile preview" onClick={() => setPreviewMode("mobile")} className={`rounded-lg p-2 ${previewMode === "mobile" ? "bg-[var(--surface)] text-violet-600 shadow-sm" : "text-[var(--muted)]"}`}><Smartphone className="h-4 w-4"/></button>
             </div>
-            <button type="button" aria-label="Close preview" onClick={() => setPreviewId(null)} className="icon-button"><X className="h-4 w-4"/></button>
+            <button type="button" aria-label="Close preview" onClick={() => setPreviewId(null)} className="icon-button grid"><X className="h-4 w-4"/></button>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto bg-[#e9edf5] p-3 sm:p-6">
