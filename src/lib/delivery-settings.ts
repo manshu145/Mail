@@ -11,6 +11,7 @@ export type DeliverySettings = {
   retryInitialSeconds: number;
   retryMaxSeconds: number;
   retryBackoffMultiplier: number;
+  providerCooldownMinutes: number;
   reputationBounceStopRate: number;
   reputationComplaintStopRate: number;
   reputationMinSample: number;
@@ -26,6 +27,7 @@ export const DELIVERY_SETTING_KEYS = {
   retryInitialSeconds: "delivery.retry_initial_seconds",
   retryMaxSeconds: "delivery.retry_max_seconds",
   retryBackoffMultiplier: "delivery.retry_backoff_multiplier",
+  providerCooldownMinutes: "delivery.provider_cooldown_minutes",
   reputationBounceStopRate: "reputation.bounce_stop_rate",
   reputationComplaintStopRate: "reputation.complaint_stop_rate",
   reputationMinSample: "reputation.min_sample",
@@ -49,6 +51,7 @@ export function defaultDeliverySettings(env: Readonly<Record<string,string|undef
     retryInitialSeconds: int(env.TRANSPORT_RETRY_INITIAL_SECONDS, 30, 10, 86_400),
     retryMaxSeconds: int(env.TRANSPORT_RETRY_MAX_SECONDS, 3600, 30, 604_800),
     retryBackoffMultiplier: num(env.TRANSPORT_RETRY_BACKOFF_MULTIPLIER, 2, 1, 10),
+    providerCooldownMinutes: int(env.PROVIDER_COOLDOWN_MINUTES, 15, 1, 1440),
     reputationBounceStopRate: num(env.REPUTATION_BOUNCE_STOP_RATE, 0.05, 0, 1),
     reputationComplaintStopRate: num(env.REPUTATION_COMPLAINT_STOP_RATE, 0.003, 0, 1),
     reputationMinSample: int(env.REPUTATION_MIN_SAMPLE, 100, 1, 10_000_000),
@@ -69,6 +72,7 @@ export async function readDeliverySettings(): Promise<DeliverySettings> {
     retryInitialSeconds: int(values.get(DELIVERY_SETTING_KEYS.retryInitialSeconds), defaults.retryInitialSeconds, 10, 86_400),
     retryMaxSeconds: int(values.get(DELIVERY_SETTING_KEYS.retryMaxSeconds), defaults.retryMaxSeconds, 30, 604_800),
     retryBackoffMultiplier: num(values.get(DELIVERY_SETTING_KEYS.retryBackoffMultiplier), defaults.retryBackoffMultiplier, 1, 10),
+    providerCooldownMinutes: int(values.get(DELIVERY_SETTING_KEYS.providerCooldownMinutes), defaults.providerCooldownMinutes, 1, 1440),
     reputationBounceStopRate: num(values.get(DELIVERY_SETTING_KEYS.reputationBounceStopRate), defaults.reputationBounceStopRate, 0, 1),
     reputationComplaintStopRate: num(values.get(DELIVERY_SETTING_KEYS.reputationComplaintStopRate), defaults.reputationComplaintStopRate, 0, 1),
     reputationMinSample: int(values.get(DELIVERY_SETTING_KEYS.reputationMinSample), defaults.reputationMinSample, 1, 10_000_000),
