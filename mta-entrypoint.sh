@@ -7,6 +7,8 @@ MTA_MESSAGE_SIZE_LIMIT="${MTA_MESSAGE_SIZE_LIMIT:-26214400}"
 BOUNCE_DOMAIN="${BOUNCE_DOMAIN:-}"
 BOUNCE_RECEIVER_HOST="${BOUNCE_RECEIVER_HOST:-bounce-receiver}"
 BOUNCE_RECEIVER_PORT="${BOUNCE_RECEIVER_PORT:-2526}"
+MTA_CONTROL_PORT="${MTA_CONTROL_PORT:-10026}"
+MTA_CONTROL_SECRET="${MTA_CONTROL_SECRET:-${BOUNCE_SECRET:-}}"
 DKIM_DIR="${DKIM_KEY_DIR:-/var/lib/neximail/dkim}"
 TLS_DIR="${MTA_TLS_DIR:-/etc/postfix/tls}"
 
@@ -109,8 +111,19 @@ opendkim -x /etc/opendkim.conf
 postfix check
 postfix start
 
+CONTROL_PID=""
+if [ -n "$MTA_CONTROL_SECRET" ]; then
+  export MTA_CONTROL_PORT MTA_CONTROL_SECRET
+  /usr/local/bin/mta-control.py &
+  CONTROL_PID=$!
+  echo "MTA queue control enabled on internal port ${MTA_CONTROL_PORT}"
+else
+  echo "MTA queue control disabled: no MTA_CONTROL_SECRET/BOUNCE_SECRET configured" >&2
+fi
+
 cleanup() {
   postfix stop >/dev/null 2>&1 || true
+  if [ -n "$CONTROL_PID" ]; then kill "$CONTROL_PID" >/dev/null 2>&1 || true; fi
   if [ -f /run/opendkim/opendkim.pid ]; then kill "$(cat /run/opendkim/opendkim.pid)" >/dev/null 2>&1 || true; fi
 }
 trap cleanup INT TERM EXIT
