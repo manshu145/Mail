@@ -1,15 +1,22 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { campaigns, messageEvents, messages, suppressions } from "@/db/schema";
+import { campaigns, messageEvents, messages, suppressions, systemSettings } from "@/db/schema";
 import { providerCooldowns } from "@/db/operations-schema";
 import { providerCooldownEvents } from "@/db/provider-cooldown-event-schema";
 import { normalizeEmail } from "@/lib/contact-utils";
 import { emitWebhookEvent } from "@/lib/webhooks";
 import { classifyBounce } from "@/lib/bounce-classification";
 import { isProviderPressureResponse, providerForDelivery } from "@/lib/provider";
-const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN_MINUTES || "15"));
+import { DELIVERY_SETTING_KEYS, defaultDeliverySettings } from "@/lib/delivery-settings";
 const terminalStatuses = new Set(["delivered", "bounced", "failed", "cancelled"]);
 export type EventDb = Pick<typeof db, "select" | "insert" | "update">;
+
+async function cooldownMinutes(db: EventDb) {
+  const fallback = defaultDeliverySettings().providerCooldownMinutes;
+  const [row] = await db.select({ value: systemSettings.value }).from(systemSettings).where(eq(systemSettings.key, DELIVERY_SETTING_KEYS.providerCooldownMinutes)).limit(1);
+  const value = Number(row?.value);
+  return Number.isFinite(value) ? Math.min(1440, Math.max(1, Math.floor(value))) : fallback;
+}
 
 async function sendingAccountForMessage(db: EventDb, campaignId: string) {
   const [campaign] = await db.select({ sendingAccountId: campaigns.sendingAccountId }).from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
@@ -20,7 +27,8 @@ async function activateProviderCooldown(db: EventDb, params: { campaignId: strin
   const sendingAccountId = await sendingAccountForMessage(db, params.campaignId);
   if (!sendingAccountId) return null;
   const provider = providerForDelivery(params.recipientEmail, params.response);
-  const nextProbeAt = new Date(Date.now() + providerCooldownMinutes * 60_000);
+  const minutes = await cooldownMinutes(db);
+  const nextProbeAt = new Date(Date.now() + minutes * 60_000);
   const reason = params.dsn ? `SMTP ${params.dsn}` : "provider_pressure";
   const response = params.response.slice(0, 1000);
   const now = new Date();
