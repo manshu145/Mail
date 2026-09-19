@@ -141,7 +141,7 @@ export function ContactsTableManager({
 
     <div className="overflow-x-auto">
       <table className="w-full min-w-[980px] text-left text-sm">
-        <thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]">
+        <thead className="bg-[var(--surface-soft)] text-[11px] font-black uppercase tracking-[.12em] text-[var(--muted)]">
           <tr>
             <th className="w-12 px-5 py-3.5"><input aria-label="Select all visible contacts" type="checkbox" checked={allSelected} onChange={toggleAll} /></th>
             <th className="py-3.5">Contact</th><th>Status</th><th>Validation</th><th>Source</th><th>Added</th><th className="pr-5 text-right">Actions</th>
