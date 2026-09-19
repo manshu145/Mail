@@ -22,12 +22,11 @@ NexiMail now contains the full control-plane path for:
 - Open, click and one-click unsubscribe tracking
 - Delivery, bounce, complaint and recipient-level analytics
 - Per-account hourly/daily throttles, warm-up ramps and reputation auto-pause thresholds
-- Real seed-test inbox placement data model and authenticated result ingestion
 - PWA installability, offline fallback and responsive premium light/dark UI
 
 ## Delivery truth model
 
-`mta_accepted` means the local Postfix instance accepted a message. It **does not** mean delivered or inboxed. NexiMail only moves a message to `delivered` after a remote transport event indicates acceptance. Inbox placement is reported only from configured seed inbox observations and is labelled as seed-test placement.
+`mta_accepted` means the local Postfix instance accepted a message. It **does not** mean delivered or inboxed. NexiMail only moves a message to `delivered` after a remote transport event indicates acceptance.
 
 ## Local development
 
@@ -76,4 +75,3 @@ The final VPS rollout must additionally verify DNS, STARTTLS, reverse DNS/PTR, M
 - Queueing requires a ready sending domain and a visible `{{unsubscribe_url}}` in the selected template.
 - Complaint and hard-bounce events create global suppression records.
 - Reputation thresholds can automatically pause a sending account.
-- No inbox/spam percentage is fabricated.
