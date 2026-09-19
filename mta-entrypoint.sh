@@ -133,6 +133,10 @@ while postfix status >/dev/null 2>&1; do
     echo "OpenDKIM stopped unexpectedly" >&2
     exit 1
   fi
+  if [ -n "$CONTROL_PID" ] && ! kill -0 "$CONTROL_PID" 2>/dev/null; then
+    echo "MTA queue control stopped unexpectedly" >&2
+    exit 1
+  fi
   sleep 5
 done
 
