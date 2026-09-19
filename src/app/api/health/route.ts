@@ -37,8 +37,11 @@ export async function GET() {
     }
   }
 
+  // Keep component-level health details server-side. The public endpoint is used
+  // by deployment/load-balancer checks and should not disclose the stack.
+  if (!healthy) console.error("[health] dependency check failed", checks);
   return NextResponse.json(
-    { status: healthy ? "ok" : "degraded", checks, timestamp: new Date().toISOString() },
+    { status: healthy ? "ok" : "degraded", timestamp: new Date().toISOString() },
     { status: healthy ? 200 : 503 },
   );
 }
