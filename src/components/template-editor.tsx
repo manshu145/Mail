@@ -2,7 +2,7 @@
 
 import { Code2, Eye, Maximize2, Monitor, Smartphone, Type, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EMAIL_PRESETS } from "@/lib/email-presets";
 import { samplePersonalization } from "@/lib/personalization";
 import { TemplateAttachments, type TemplateAttachmentView } from "@/components/template-attachments";
@@ -64,6 +64,14 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
   const [previewMode, setPreviewMode] = useState<PreviewMode>("desktop");
   const [editMode, setEditMode] = useState<EditMode>("html");
   const [fullPreview, setFullPreview] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 640px)");
+    const sync = () => { if (query.matches) setPreviewMode("mobile"); };
+    sync();
+    query.addEventListener?.("change", sync);
+    return () => query.removeEventListener?.("change", sync);
+  }, []);
+
   const preview = useMemo(() => previewHtml(html), [html]);
 
   async function save(fd: FormData) {
@@ -108,7 +116,7 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
     else setText((current) => `${current}${current && !current.endsWith("\n") ? "\n" : ""}${token}`);
   }
 
-  const previewFrame = (heightClass: string) => <div className={`mx-auto overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm transition-all ${previewMode === "mobile" ? "max-w-[390px]" : "max-w-[760px]"}`}>
+  const previewFrame = (heightClass: string) => <div className={`mx-auto w-full overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm transition-all ${previewMode === "mobile" ? "max-w-[390px]" : "max-w-[760px]"}`}>
     <iframe title="Template preview" sandbox="" srcDoc={preview} className={`w-full bg-white ${heightClass}`} />
   </div>;
 
@@ -169,9 +177,9 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
 
           <div className="border-t border-[var(--border)] bg-[var(--surface-soft)] p-4 sm:p-5">
             <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-3.5 py-3 text-xs leading-5 text-[var(--muted)]">NexiMail adds one-click unsubscribe headers and a visible footer at send time. Add <code>{"{{unsubscribe_url}}"}</code> yourself when you want exact placement.</div>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button disabled={busy} className="btn-primary">{busy ? "Saving…" : "Save template"}</button>
-              <button type="button" onClick={() => setFullPreview(true)} className="btn-secondary"><Eye className="h-4 w-4"/> Full preview</button>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+              <button disabled={busy} className="btn-primary w-full sm:w-auto">{busy ? "Saving…" : "Save template"}</button>
+              <button type="button" onClick={() => setFullPreview(true)} className="btn-secondary w-full sm:w-auto"><Eye className="h-4 w-4"/> Full preview</button>
               <span role="status" aria-live="polite" className={`text-xs font-bold ${msg === "Saved" || msg.startsWith("Preset") ? "text-emerald-600" : "text-rose-600"}`}>{msg}</span>
             </div>
           </div>
@@ -191,7 +199,7 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
             <button type="button" aria-label="Full screen preview" onClick={() => setFullPreview(true)} className="icon-button grid"><Maximize2 className="h-4 w-4"/></button>
           </div>
         </div>
-        <div className="overflow-auto bg-[#e9edf5] p-3 sm:p-5">{previewFrame("h-[520px] sm:h-[650px] 2xl:h-[72dvh]")}</div>
+        <div className="overflow-auto bg-[#e9edf5] p-3 sm:p-5">{previewFrame("h-[58dvh] min-h-[420px] sm:h-[650px] 2xl:h-[72dvh]")}</div>
       </section>
     </div>
 
@@ -207,7 +215,7 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
             <button type="button" aria-label="Close full preview" onClick={() => setFullPreview(false)} className="icon-button grid"><X className="h-4 w-4"/></button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto bg-[#e9edf5] p-3 sm:p-6">{previewFrame("h-[78dvh]")}</div>
+        <div className="min-h-0 flex-1 overflow-auto bg-[#e9edf5] p-3 sm:p-6">{previewFrame("h-[82dvh]")}</div>
       </section>
     </div> : null}
   </>;
