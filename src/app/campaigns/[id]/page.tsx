@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, CircleGauge, Eye, MailCheck, MousePointerClick, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CircleGauge, Clock3, Eye, MailCheck, MousePointerClick, ShieldCheck, TimerReset, Users } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
@@ -14,6 +14,7 @@ import { campaigns, lists, sendingAccounts, templates } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
 import { getCampaignMetrics } from "@/lib/campaign-reporting";
+import { providerLabel } from "@/lib/provider";
 
 const fmt=(value:Date|string|null|undefined)=>value?new Intl.DateTimeFormat("en",{dateStyle:"short",timeStyle:"short", timeZone:"Asia/Kolkata"}).format(new Date(value)):"—";
 type DrillView="targeted"|"delivered"|"opens"|"clicks"|"bounce_failed";
@@ -56,7 +57,7 @@ export default async function CampaignDetailPage({
     : sql`exists(select 1 from message_events ce where ce.message_id=m.id and ce.type='click' and coalesce((ce.payload->>'automated')::boolean,false)=false)`;
   if(view==="bounce_failed")drillCondition=sql`m.status in ('bounced','failed')`;
 
-  const [listRows,templateRows,accountRows,metrics,recipientResult,recipientCountResult,linkResult,preflightRows,selectedResult]=await Promise.all([
+  const [listRows,templateRows,accountRows,metrics,recipientResult,recipientCountResult,linkResult,preflightRows,selectedResult,providerImpactResult,providerStateResult]=await Promise.all([
     db.select({id:lists.id,name:lists.name}).from(lists),
     db.select({id:templates.id,name:templates.name}).from(templates),
     db.select({id:sendingAccounts.id,name:sendingAccounts.name,fromName:sendingAccounts.fromName,fromEmail:sendingAccounts.fromEmail,replyTo:sendingAccounts.replyTo}).from(sendingAccounts).where(eq(sendingAccounts.status,"active")),
@@ -120,6 +121,43 @@ export default async function CampaignDetailPage({
           limit 250
         `)
       : Promise.resolve({rows:[]} as {rows:unknown[]}),
+    db.execute(sql`
+      with impact as (
+        select
+          nullif(e.payload->>'provider','') provider,
+          m.id::text message_id,
+          e.type,
+          e.created_at,
+          coalesce((e.payload->>'providerCooldown')::boolean,false) provider_cooldown
+        from message_events e
+        join messages m on m.id=e.message_id
+        where m.campaign_id=${id}
+          and (
+            e.type in ('provider_cooldown','provider_probe')
+            or (
+              e.type in ('postfix_deferred','postfix_bounced')
+              and coalesce((e.payload->>'providerCooldown')::boolean,false)=true
+            )
+          )
+      )
+      select provider,
+        count(distinct message_id)::int affected_recipients,
+        min(created_at) first_event,
+        max(created_at) last_event,
+        count(*) filter(where provider_cooldown or type='provider_cooldown')::int cooldown_events,
+        count(*) filter(where type='provider_probe')::int probes
+      from impact
+      where provider is not null
+      group by provider
+      order by affected_recipients desc, provider asc
+    `),
+    campaign.sendingAccountId
+      ? db.execute(sql`
+          select provider,active,reason,last_response,detected_at,next_probe_at,last_probe_at,cleared_at
+          from provider_cooldowns
+          where sending_account_id=${campaign.sendingAccountId}
+        `)
+      : Promise.resolve({rows:[]} as {rows:unknown[]}),
   ]);
 
   const recipientRows=recipientResult.rows as Array<Record<string,unknown>>;
@@ -128,6 +166,11 @@ export default async function CampaignDetailPage({
   const links=linkResult.rows as Array<Record<string,unknown>>;
   const selectedRows=selectedResult.rows as Array<Record<string,unknown>>;
   const selectedRecipient=selectedRows[0]||null;
+  const providerStates=new Map((providerStateResult.rows as Array<Record<string,unknown>>).map((row)=>[String(row.provider),row]));
+  const providerImpact=(providerImpactResult.rows as Array<Record<string,unknown>>).map((row)=>({
+    ...row,
+    state:providerStates.get(String(row.provider))||null,
+  }));
   const preflight=preflightRows[0]||null;
   const editable=["draft","paused","scheduled"].includes(campaign.status);
   const runtimePolicy=getRuntimePolicy();
@@ -167,6 +210,50 @@ export default async function CampaignDetailPage({
       </section>
       <section className="mb-5 grid gap-3 md:grid-cols-3 xl:grid-cols-6">{[["Delivery progress",metrics.deliveryProgressRate],["Open rate",metrics.openRate],["Click rate",metrics.clickRate],["CTOR",metrics.ctor],["Bounce",metrics.bounceRate],["Unsubscribes",metrics.unsubscribes]].map(([label,value])=><article key={String(label)} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4"><p className="text-xs font-bold text-[var(--muted)]">{label}</p><p className="mt-1.5 text-xl font-black">{label==="Unsubscribes"?Number(value).toLocaleString():`${Number(value).toFixed(2)}%`}</p></article>)}</section>
       {inFlight>0?<div className="mb-5 rounded-2xl border border-blue-500/15 bg-blue-500/[0.05] px-4 py-3 text-xs font-semibold text-blue-700 dark:text-blue-300">{inFlight.toLocaleString()} {inFlight===1?"recipient is":"recipients are"} still queued/in transport. Delivery progress is based on all targeted recipients, not only finalized outcomes.</div>:null}
+
+      <section className="premium-panel mb-5 overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div>
+            <p className="page-eyebrow">Deliverability</p>
+            <h2 className="mt-1 text-lg font-black">Provider impact during this campaign</h2>
+            <p className="mt-1 text-xs leading-5 text-[var(--muted)]">Temporary mailbox-provider throttling or cooldown events recorded from this campaign's actual delivery events.</p>
+          </div>
+          <Link href="/provider-cooldowns" className="btn-secondary !min-h-9 !px-3 text-xs"><TimerReset className="h-4 w-4"/>All provider cooldowns</Link>
+        </div>
+
+        {providerImpact.length?<div className="grid gap-px bg-[var(--border)] lg:grid-cols-2">
+          {providerImpact.map((row)=>{
+            const provider=String(row.provider);
+            const state=row.state as Record<string,unknown>|null;
+            const active=Boolean(state?.active);
+            return <article key={provider} className="min-w-0 bg-[var(--surface)] p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-black">{providerLabel(provider)}</h3>
+                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[.08em] ${active?"bg-amber-500/10 text-amber-700 dark:text-amber-300":"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}>{active?"Cooldown active":"Not active now"}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-[var(--muted)]">{Number(row.affected_recipients||0).toLocaleString()} affected recipient{Number(row.affected_recipients||0)===1?"":"s"} · {Number(row.cooldown_events||0).toLocaleString()} cooldown event{Number(row.cooldown_events||0)===1?"":"s"}</p>
+                </div>
+                {active?<AlertTriangle className="h-5 w-5 shrink-0 text-amber-500"/>:<ShieldCheck className="h-5 w-5 shrink-0 text-emerald-500"/>}
+              </div>
+
+              <div className="mt-4 grid gap-2 min-[420px]:grid-cols-2">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">First impact</p><p className="mt-1 text-xs font-bold">{fmt(row.first_event as string|null)}</p></div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Last impact</p><p className="mt-1 text-xs font-bold">{fmt(row.last_event as string|null)}</p></div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><p className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]"><Clock3 className="h-3 w-3"/>Next probe</p><p className="mt-1 text-xs font-bold">{active?fmt(state?.next_probe_at as string|null):"—"}</p></div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Probe attempts</p><p className="mt-1 text-xs font-bold">{Number(row.probes||0).toLocaleString()}</p></div>
+              </div>
+
+              {state?.reason?<p className="mt-3 break-words rounded-xl border border-amber-500/15 bg-amber-500/[0.05] px-3 py-2.5 text-xs leading-5 text-amber-800 dark:text-amber-200"><b>Reason:</b> {String(state.reason)}</p>:null}
+              {state?.last_response?<details className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2.5"><summary className="cursor-pointer text-[11px] font-black">Last provider response</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-5 text-[var(--muted)]">{String(state.last_response)}</pre></details>:null}
+            </article>;
+          })}
+        </div>:<div className="flex items-start gap-3 p-4 sm:p-5">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600"><ShieldCheck className="h-4 w-4"/></div>
+          <div><h3 className="text-sm font-black">No provider pressure recorded</h3><p className="mt-1 text-xs leading-5 text-[var(--muted)]">This campaign has no recorded provider cooldown or temporary provider-throttling events.</p></div>
+        </div>}
+      </section>
       <section className="mb-5 grid gap-5 xl:grid-cols-2">
         <article className="premium-panel overflow-hidden"><div className="border-b border-[var(--border)] p-5"><h2 className="font-black">Delivery funnel</h2><p className="mt-1 text-xs text-[var(--muted)]">Click a state to inspect the actual recipients.</p></div><div className="grid gap-px bg-[var(--border)] sm:grid-cols-2">{[
           ["Targeted",metrics.targeted,"targeted" as DrillView],["Delivered",metrics.delivered,"delivered" as DrillView],["In flight",inFlight,null],["Bounced",metrics.bounced,"bounce_failed" as DrillView],["Failed",metrics.failed,"bounce_failed" as DrillView],["Cancelled",metrics.cancelled,null],
