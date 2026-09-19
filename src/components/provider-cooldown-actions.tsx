@@ -31,10 +31,10 @@ export function ProviderCooldownActions({ id, active, canEdit }: { id: string; a
   }
 
   return <div className="shrink-0">
-    {canEdit&&active?<button disabled={busy} onClick={() => void checkNow()} className="btn-secondary !min-h-9 !px-3 text-xs">
+    {canEdit?<div className="text-right"><button disabled={busy||!active} onClick={() => void checkNow()} className="btn-secondary !min-h-9 !px-3 text-xs" title={active?"Run one controlled restriction probe now":"Check now becomes available while a restriction is active"}>
       <RefreshCw className={`h-3.5 w-3.5 ${busy?"animate-spin":""}`}/>
       {busy ? "Checking…" : "Check now"}
-    </button>:null}
+    </button>{!active?<p className="mt-1.5 text-[10px] font-semibold text-[var(--muted)]">Available during an active restriction</p>:null}</div>:null}
     {error?<p className="mt-2 max-w-72 text-[11px] font-bold text-rose-500">{error}</p>:message?<p className="mt-2 max-w-72 text-[11px] font-bold text-emerald-600">{message}</p>:null}
   </div>;
 }
