@@ -1,6 +1,7 @@
 import { SignJWT } from "jose";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { resolve4, reverse } from "node:dns/promises";
 import { eq } from "drizzle-orm";
 import { db, pool } from "../src/db";
 import { campaigns, contactLists, contacts, importJobs, lists, messageEvents, messages, sendingAccounts, suppressions, templates, users } from "../src/db/schema";
@@ -86,9 +87,22 @@ async function main(){
   if(!domains.length) record("Sending-domain auth","WARN","no sending domain configured");
   else {
     const badDomains=domains.filter(d=>d.status!=="ready" || !d.spfOk || !d.dkimOk || !d.dmarcOk);
-    record("Sending-domain auth",badDomains.length?"WARN":"PASS",
+    record("Sending-domain auth",badDomains.length?"FAIL":"PASS",
       domains.map(d=>`${d.domain}:status=${d.status},spf=${d.spfOk},dkim=${d.dkimOk},dmarc=${d.dmarcOk}`).join(" | "));
   }
+
+  const mtaHostname=String(process.env.MTA_HOSTNAME||"").trim().toLowerCase().replace(/\.$/,"");
+  let mtaPublicIp=String(process.env.MTA_PUBLIC_IP||"").trim();
+  let forwardAddresses:string[]=[];
+  if(mtaHostname){
+    forwardAddresses=await resolve4(mtaHostname).catch(()=>[]);
+    if(!mtaPublicIp) mtaPublicIp=forwardAddresses[0]||"";
+  }
+  const ptrNames=mtaPublicIp?await reverse(mtaPublicIp).catch(()=>[]):[];
+  const normalizedPtrs=ptrNames.map(name=>name.toLowerCase().replace(/\.$/,""));
+  const identityOk=Boolean(mtaHostname&&mtaPublicIp&&forwardAddresses.includes(mtaPublicIp)&&normalizedPtrs.includes(mtaHostname));
+  record("MTA forward/reverse DNS",identityOk?"PASS":"FAIL",
+    `hostname=${mtaHostname||"missing"}, publicIp=${mtaPublicIp||"missing"}, A=[${forwardAddresses.join(",")}], PTR=[${normalizedPtrs.join(",")}]`);
 
   const cookie=await sessionCookie(owner);
   const dashboard=await fetch(`${baseUrl}/dashboard`,{headers:{cookie},redirect:"manual"});
