@@ -30,6 +30,7 @@ if [ -f .env ]; then
 
   if [ -n "${APP_URL:-}" ] && ! is_placeholder "${APP_URL}"; then ok "APP_URL configured"; else bad "APP_URL missing/default"; fi
   if [ -n "${MTA_HOSTNAME:-}" ] && ! is_placeholder "${MTA_HOSTNAME}"; then ok "MTA_HOSTNAME configured"; else bad "MTA_HOSTNAME missing/default"; fi
+  if [[ "${MTA_PUBLIC_IP:-}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && ! is_placeholder "${MTA_PUBLIC_IP:-}"; then ok "MTA_PUBLIC_IP configured"; else bad "MTA_PUBLIC_IP missing/invalid"; fi
   if [ -n "${POSTGRES_PASSWORD:-}" ] && ! is_placeholder "${POSTGRES_PASSWORD}"; then ok "database password customized"; else bad "database password still default"; fi
   if [ -n "${OWNER_EMAIL:-}" ] && ! is_placeholder "${OWNER_EMAIL}"; then ok "owner email configured"; else bad "owner email missing/default"; fi
   if [ -n "${OWNER_PASSWORD:-}" ] && [ ${#OWNER_PASSWORD} -ge 12 ] && ! is_placeholder "${OWNER_PASSWORD}"; then ok "owner password configured"; else bad "owner password missing/default"; fi
