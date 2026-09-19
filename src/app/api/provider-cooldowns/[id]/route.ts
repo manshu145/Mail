@@ -5,6 +5,7 @@ import { providerCooldowns } from "@/db/operations-schema";
 import { providerCooldownEvents } from "@/db/provider-cooldown-event-schema";
 import { canManageInfrastructure, getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { isUuid } from "@/lib/id";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -12,6 +13,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!canManageInfrastructure(session.role)) return NextResponse.json({ error: "Owner role required" }, { status: 403 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid cooldown id" }, { status: 400 });
   const body = await request.json().catch(() => null) as { action?: string } | null;
   if (body?.action !== "clear" && body?.action !== "reactivate") return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 
