@@ -134,7 +134,7 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
               </label>
               <label className="text-sm font-bold">Default subject
                 <input name="subject" value={subject} onChange={(e) => setSubject(e.target.value)} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3 py-2.5 outline-none" />
-                <span className="mt-1 block text-right text-[10px] font-semibold text-[var(--muted)]">{subject.length} characters</span>
+                <span className="mt-1 block text-right text-[11px] font-semibold text-[var(--muted)]">{subject.length} characters</span>
               </label>
             </div>
 
@@ -148,17 +148,17 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
                   <button type="button" onClick={() => setEditMode("html")} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 ${editMode === "html" ? "bg-violet-500/10 text-violet-700 dark:text-violet-300" : "text-[var(--muted)]"}`}><Code2 className="h-3.5 w-3.5"/> HTML</button>
                   <button type="button" onClick={() => setEditMode("text")} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 ${editMode === "text" ? "bg-violet-500/10 text-violet-700 dark:text-violet-300" : "text-[var(--muted)]"}`}><Type className="h-3.5 w-3.5"/> Plain text</button>
                 </div>
-                <span className="text-[10px] font-bold text-[var(--muted)]">{editMode === "html" ? `${html.length.toLocaleString()} HTML characters` : `${text.length.toLocaleString()} text characters`}</span>
+                <span className="text-[11px] font-bold text-[var(--muted)]">{editMode === "html" ? `${html.length.toLocaleString()} HTML characters` : `${text.length.toLocaleString()} text characters`}</span>
               </div>
 
               <div className="border-b border-[var(--border)] p-3">
                 {editMode === "html" ? <div className="mb-3 flex flex-wrap gap-1.5">
-                  <span className="mr-1 self-center text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]">Blocks</span>
-                  {HTML_BLOCKS.map((block) => <button key={block.label} type="button" onClick={() => appendHtml(block.value)} className="rounded-lg border border-[var(--border)] bg-[var(--surface-soft)] px-2.5 py-1.5 text-[10px] font-extrabold transition hover:border-violet-500/25 hover:text-violet-700 dark:hover:text-violet-300">{block.label}</button>)}
+                  <span className="mr-1 self-center text-[11px] font-black uppercase tracking-[.12em] text-[var(--muted)]">Blocks</span>
+                  {HTML_BLOCKS.map((block) => <button key={block.label} type="button" onClick={() => appendHtml(block.value)} className="rounded-lg border border-[var(--border)] bg-[var(--surface-soft)] px-2.5 py-1.5 text-[11px] font-extrabold transition hover:border-violet-500/25 hover:text-violet-700 dark:hover:text-violet-300">{block.label}</button>)}
                 </div> : null}
                 <div className="flex flex-wrap gap-1.5">
-                  <span className="mr-1 self-center text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]">Tokens</span>
-                  {TOKENS.map((token) => <button key={token} type="button" onClick={() => insertToken(token)} className="rounded-lg border border-[var(--border)] bg-[var(--surface-soft)] px-2 py-1 text-[10px] font-bold text-[var(--muted)] transition hover:border-violet-500/25 hover:text-[var(--foreground)]">{token}</button>)}
+                  <span className="mr-1 self-center text-[11px] font-black uppercase tracking-[.12em] text-[var(--muted)]">Tokens</span>
+                  {TOKENS.map((token) => <button key={token} type="button" onClick={() => insertToken(token)} className="rounded-lg border border-[var(--border)] bg-[var(--surface-soft)] px-2 py-1 text-[11px] font-bold text-[var(--muted)] transition hover:border-violet-500/25 hover:text-[var(--foreground)]">{token}</button>)}
                 </div>
               </div>
 
@@ -188,7 +188,7 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
               <button type="button" aria-label="Desktop preview" onClick={() => setPreviewMode("desktop")} className={`rounded-lg p-2 ${previewMode === "desktop" ? "bg-[var(--surface)] text-violet-600 shadow-sm" : "text-[var(--muted)]"}`}><Monitor className="h-4 w-4"/></button>
               <button type="button" aria-label="Mobile preview" onClick={() => setPreviewMode("mobile")} className={`rounded-lg p-2 ${previewMode === "mobile" ? "bg-[var(--surface)] text-violet-600 shadow-sm" : "text-[var(--muted)]"}`}><Smartphone className="h-4 w-4"/></button>
             </div>
-            <button type="button" aria-label="Full screen preview" onClick={() => setFullPreview(true)} className="icon-button"><Maximize2 className="h-4 w-4"/></button>
+            <button type="button" aria-label="Full screen preview" onClick={() => setFullPreview(true)} className="icon-button grid"><Maximize2 className="h-4 w-4"/></button>
           </div>
         </div>
         <div className="overflow-auto bg-[#e9edf5] p-3 sm:p-5">{previewFrame("h-[520px] sm:h-[650px] 2xl:h-[72dvh]")}</div>
@@ -204,7 +204,7 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
               <button type="button" aria-label="Desktop preview" onClick={() => setPreviewMode("desktop")} className={`rounded-lg p-2 ${previewMode === "desktop" ? "bg-[var(--surface)] text-violet-600 shadow-sm" : "text-[var(--muted)]"}`}><Monitor className="h-4 w-4"/></button>
               <button type="button" aria-label="Mobile preview" onClick={() => setPreviewMode("mobile")} className={`rounded-lg p-2 ${previewMode === "mobile" ? "bg-[var(--surface)] text-violet-600 shadow-sm" : "text-[var(--muted)]"}`}><Smartphone className="h-4 w-4"/></button>
             </div>
-            <button type="button" aria-label="Close full preview" onClick={() => setFullPreview(false)} className="icon-button"><X className="h-4 w-4"/></button>
+            <button type="button" aria-label="Close full preview" onClick={() => setFullPreview(false)} className="icon-button grid"><X className="h-4 w-4"/></button>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto bg-[#e9edf5] p-3 sm:p-6">{previewFrame("h-[78dvh]")}</div>
