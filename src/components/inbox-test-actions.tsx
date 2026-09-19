@@ -25,7 +25,7 @@ export function InboxTestActions({ id, status, hasCampaign }: { id: string; stat
       {busy ? <Loader2 className="mr-2 inline h-3.5 w-3.5 animate-spin"/> : <Send className="mr-2 inline h-3.5 w-3.5"/>}
       {busy ? "Sending…" : status === "running" ? "Resend seeds" : "Send to seeds"}
     </button>
-    {!hasCampaign ? <span className="text-[10px] text-amber-600">Campaign required</span> : null}
-    {message ? <span className="max-w-[220px] text-right text-[10px] font-semibold text-[var(--muted)]">{message}</span> : null}
+    {!hasCampaign ? <span className="text-[11px] text-amber-600">Campaign required</span> : null}
+    {message ? <span className="max-w-[220px] text-right text-[11px] font-semibold text-[var(--muted)]">{message}</span> : null}
   </div>;
 }
