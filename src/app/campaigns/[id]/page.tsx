@@ -132,7 +132,7 @@ export default async function CampaignDetailPage({
     db.execute(sql`
       with impact as (
         select
-          nullif(e.payload->>'provider','') provider,
+          nullif(coalesce(nullif(e.payload->>'cooldownKey',''),e.payload->>'provider'),'') provider,
           m.id::text message_id,
           e.type,
           e.created_at,
