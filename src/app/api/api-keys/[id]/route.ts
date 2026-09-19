@@ -4,6 +4,7 @@ import { db, databaseConfigured } from "@/db";
 import { apiKeys } from "@/db/integration-schema";
 import { audit } from "@/lib/audit";
 import { canManageInfrastructure, getSession } from "@/lib/auth";
+import { isUuid } from "@/lib/id";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -12,6 +13,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid API key id" }, { status: 400 });
   const body = (await request.json().catch(() => null)) as { action?: string } | null;
   if (body?.action !== "revoke") return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
 
