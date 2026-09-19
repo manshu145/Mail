@@ -52,7 +52,7 @@ export default async function SenderIdentitiesPage() {
               <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">From address</p><p className="mt-1 truncate text-sm font-extrabold">{row.fromEmail}</p></div>
               <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Reply-to</p><p className="mt-1 truncate text-sm font-extrabold">{row.replyTo || row.fromEmail}</p></div>
             </div>
-            <SendingAccountActions id={row.id} status={row.status} hourly={row.hourlyLimit} daily={row.dailyLimit} />
+            <SendingAccountActions id={row.id} status={row.status} name={row.name} fromName={row.fromName} fromEmail={row.fromEmail} replyTo={row.replyTo} canEdit={usable && session.role === "owner"} />
           </article>
         )) : <div className="premium-panel col-span-full grid min-h-64 place-items-center p-8 text-center"><div><MailCheck className="mx-auto h-8 w-8 text-[var(--muted)]" /><h3 className="mt-4 font-black">No sender identities</h3><p className="mt-1 text-sm text-[var(--muted)]">Add your first approved sender identity.</p></div></div>}
       </section>
