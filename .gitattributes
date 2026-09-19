@@ -1,0 +1,5 @@
+.github export-ignore
+tests export-ignore
+docs/archive-backend-architecture-2026-09-16.md export-ignore
+coverage export-ignore
+.vercel export-ignore
