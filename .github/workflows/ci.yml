@@ -38,8 +38,11 @@ jobs:
         with:
           node-version: 20
       - run: npm install
+      - name: Release sanitization gate
+        run: npm run release:sanitize
       - name: Validate deployment script syntax
         run: |
+          bash -n deploy/install-isolated.sh
           bash -n deploy/deploy-reviewed.sh
           bash -n deploy/run-production-acceptance.sh
           bash -n deploy/provision-mta-tls.sh
