@@ -3,12 +3,14 @@ import { NextResponse } from "next/server";
 import { pool, databaseConfigured } from "@/db";
 import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
+import { isUuid } from "@/lib/id";
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable." }, { status: 503 });
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Invalid import id." }, { status: 400 });
 
   const client = await pool.connect();
