@@ -29,7 +29,7 @@ export default async function UsersPage() {
         <ResourceCreate disabled={!usable} endpoint="/api/users" title="Create user" buttonLabel="Add team member" fields={[{name:"name",label:"Name",required:true},{name:"email",label:"Email",type:"email",required:true},{name:"password",label:"Temporary password (12+ chars)",type:"password",required:true},{name:"role",label:"Role",type:"select",options:["admin","operator"],required:true}]} />
       </div>
 
-      {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>User database unavailable.</b> Team mutations are disabled until PostgreSQL is connected.</div> : null}
+      {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Team access is temporarily unavailable.</b> Please refresh shortly.</div> : null}
 
       <section className="mb-4 grid gap-2 sm:grid-cols-3">
         {[{label:"Workspace users",value:rows.length,icon:UsersRound},{label:"Active admins",value:admins,icon:ShieldCheck},{label:"Active operators",value:operators,icon:UserCog}].map(({label,value,icon:Icon}) => <article key={label} className="compact-stat"><div className="flex items-start justify-between"><div><p className="compact-stat-label">{label}</p><p className="compact-stat-value">{value.toLocaleString()}</p></div><div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}
