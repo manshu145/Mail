@@ -188,13 +188,13 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
               ["Unknown",preview.audience.unknownCount,"orange"],
               ["Suppressed",preview.audience.suppressedCount,"rose"],
               ["Invalid",preview.audience.invalidCount,"rose"],
-            ].map(([label,count,tone])=><div key={String(label)} className={`rounded-xl border p-3 ${tone==="emerald"?"border-emerald-500/15 bg-emerald-500/[0.05]":tone==="amber"?"border-amber-500/15 bg-amber-500/[0.05]":tone==="orange"?"border-orange-500/15 bg-orange-500/[0.05]":tone==="rose"?"border-rose-500/15 bg-rose-500/[0.05]":"border-violet-500/15 bg-violet-500/[0.05]"}`}><div className="font-black">{Number(count).toLocaleString()}</div><div className="mt-0.5 text-[10px] font-bold text-[var(--muted)]">{label}</div></div>)}
+            ].map(([label,count,tone])=><div key={String(label)} className={`rounded-xl border p-3 ${tone==="emerald"?"border-emerald-500/15 bg-emerald-500/[0.05]":tone==="amber"?"border-amber-500/15 bg-amber-500/[0.05]":tone==="orange"?"border-orange-500/15 bg-orange-500/[0.05]":tone==="rose"?"border-rose-500/15 bg-rose-500/[0.05]":"border-violet-500/15 bg-violet-500/[0.05]"}`}><div className="font-black">{Number(count).toLocaleString()}</div><div className="mt-0.5 text-[11px] font-bold text-[var(--muted)]">{label}</div></div>)}
           </div>
           {runtimePolicy.maxRecipientsPerCampaign!==null && preview.audience.eligibleCount>runtimePolicy.maxRecipientsPerCampaign ? <p className="mt-4 rounded-xl bg-rose-500/10 p-3 text-xs font-bold text-rose-700 dark:text-rose-300">Audience exceeds the runtime limit of {runtimePolicy.maxRecipientsPerCampaign.toLocaleString()} recipients.</p> : null}
         </div>
         <div className="bg-[#e9edf5] p-3 sm:p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="min-w-0"><p className="text-[10px] font-black uppercase tracking-[.12em] text-zinc-500">Template preview</p><p className="mt-1 truncate text-xs font-bold text-zinc-700">{preview.template.name}{preview.template.subject ? ` · ${preview.template.subject}` : ""}</p></div>
+            <div className="min-w-0"><p className="text-[11px] font-black uppercase tracking-[.12em] text-zinc-500">Template preview</p><p className="mt-1 truncate text-xs font-bold text-zinc-700">{preview.template.name}{preview.template.subject ? ` · ${preview.template.subject}` : ""}</p></div>
             <div className="flex rounded-xl border border-zinc-300 bg-white p-1">
               <button type="button" aria-label="Desktop campaign preview" onClick={()=>setPreviewMode("desktop")} className={`rounded-lg p-2 ${previewMode==="desktop"?"bg-violet-500/10 text-violet-600":"text-zinc-500"}`}><Monitor className="h-4 w-4"/></button>
               <button type="button" aria-label="Mobile campaign preview" onClick={()=>setPreviewMode("mobile")} className={`rounded-lg p-2 ${previewMode==="mobile"?"bg-violet-500/10 text-violet-600":"text-zinc-500"}`}><Smartphone className="h-4 w-4"/></button>
