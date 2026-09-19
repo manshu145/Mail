@@ -50,8 +50,25 @@ type EditMode = "html" | "text";
 
 function previewHtml(html: string) {
   const sample = samplePersonalization(html, "alex.customer@example.com").replaceAll("{{unsubscribe_url}}", "#unsubscribe");
-  if (/unsubscribe/i.test(sample)) return sample;
-  return `${sample}<div style="margin:32px auto 0;max-width:640px;padding:18px;border-top:1px solid #e5e7eb;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;color:#6b7280;text-align:center">A visible unsubscribe link is automatically added when NexiMail sends this template.</div>`;
+  const withFooter = /unsubscribe/i.test(sample)
+    ? sample
+    : `${sample}<div style="margin:32px auto 0;max-width:640px;padding:18px;border-top:1px solid #e5e7eb;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;color:#6b7280;text-align:center">A visible unsubscribe link is automatically added when NexiMail sends this template.</div>`;
+  const responsive = `<style id="neximail-preview-responsive">
+    html,body{margin:0!important;width:100%!important;max-width:100%!important;overflow-x:hidden!important}
+    body{box-sizing:border-box!important}
+    body>table,body>div,body>center{max-width:100%!important}
+    table{max-width:100%!important}
+    img{max-width:100%!important;height:auto!important}
+    pre{max-width:100%!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important}
+    [style*="min-width"]{min-width:0!important}
+    @media(max-width:480px){
+      body{padding-left:0!important;padding-right:0!important}
+      table[width]{width:100%!important}
+      td,th{max-width:100%!important}
+    }
+  </style>`;
+  if (/<head[\s>]/i.test(withFooter)) return withFooter.replace(/<head([^>]*)>/i, `<head$1><meta name="viewport" content="width=device-width,initial-scale=1">${responsive}`);
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">${responsive}</head><body>${withFooter}</body></html>`;
 }
 
 export function TemplateEditor({ template, attachments }: { template: { id: string; name: string; subject: string | null; htmlBody: string; textBody: string }; attachments: TemplateAttachmentView[] }) {
@@ -190,7 +207,7 @@ export function TemplateEditor({ template, attachments }: { template: { id: stri
 
       <section className="premium-panel min-w-0 overflow-hidden 2xl:sticky 2xl:top-[90px] 2xl:self-start">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] p-4">
-          <div className="min-w-0"><h2 className="font-black">Live preview</h2><p className="mt-1 truncate text-xs text-[var(--muted)]">{subject || "No subject yet"}</p></div>
+          <div className="min-w-0"><h2 className="font-black">Live preview</h2><p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-[var(--muted)]">{subject || "No subject yet"}</p></div>
           <div className="flex items-center gap-2">
             <div className="flex rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-1">
               <button type="button" aria-label="Desktop preview" onClick={() => setPreviewMode("desktop")} className={`rounded-lg p-2 ${previewMode === "desktop" ? "bg-[var(--surface)] text-violet-600 shadow-sm" : "text-[var(--muted)]"}`}><Monitor className="h-4 w-4"/></button>
