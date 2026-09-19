@@ -82,6 +82,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 button, input, textarea, select { font: inherit; }
+input, textarea, select { min-width: 0; max-width: 100%; }
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
