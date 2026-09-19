@@ -23,7 +23,7 @@ if [ -f .env ]; then
   . ./.env
   set +a
 
-  for key in AUTH_SECRET PUBLIC_TOKEN_SECRET MTA_EVENT_SECRET SEED_AGENT_SECRET WEBHOOK_SECRET_KEY DKIM_SECRET_KEY BOUNCE_SECRET FEEDBACK_INGEST_SECRET; do
+  for key in AUTH_SECRET PUBLIC_TOKEN_SECRET MTA_EVENT_SECRET WEBHOOK_SECRET_KEY DKIM_SECRET_KEY BOUNCE_SECRET FEEDBACK_INGEST_SECRET; do
     value="${!key:-}"
     if [ ${#value} -ge 32 ] && ! is_placeholder "$value"; then ok "$key configured"; else bad "$key missing/default/too short"; fi
   done
