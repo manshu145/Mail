@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, MousePointerClick, Eye, MailCheck, ShieldAlert, Clock3 } from "lucide-react";
+import { ArrowLeft, MousePointerClick, Eye, Clock3 } from "lucide-react";
 import { redirect, notFound } from "next/navigation";
 import { desc, eq, sql } from "drizzle-orm";
 import { AppShell } from "@/components/app-shell";
