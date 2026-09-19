@@ -23,12 +23,13 @@ if [ -f .env ]; then
   . ./.env
   set +a
 
-  for key in AUTH_SECRET PUBLIC_TOKEN_SECRET MTA_EVENT_SECRET SEED_AGENT_SECRET WEBHOOK_SECRET_KEY DKIM_SECRET_KEY; do
+  for key in AUTH_SECRET PUBLIC_TOKEN_SECRET MTA_EVENT_SECRET SEED_AGENT_SECRET WEBHOOK_SECRET_KEY DKIM_SECRET_KEY BOUNCE_SECRET FEEDBACK_INGEST_SECRET; do
     value="${!key:-}"
     if [ ${#value} -ge 32 ] && ! is_placeholder "$value"; then ok "$key configured"; else bad "$key missing/default/too short"; fi
   done
 
   if [ -n "${APP_URL:-}" ] && ! is_placeholder "${APP_URL}"; then ok "APP_URL configured"; else bad "APP_URL missing/default"; fi
+  if [ "${NEXIMAIL_RUNTIME_MODE:-}" = "production" ] && [[ "${APP_URL:-}" != https://* ]]; then bad "production APP_URL must use HTTPS"; fi
   if [ -n "${MTA_HOSTNAME:-}" ] && ! is_placeholder "${MTA_HOSTNAME}"; then ok "MTA_HOSTNAME configured"; else bad "MTA_HOSTNAME missing/default"; fi
   if [[ "${MTA_PUBLIC_IP:-}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && ! is_placeholder "${MTA_PUBLIC_IP:-}"; then ok "MTA_PUBLIC_IP configured"; else bad "MTA_PUBLIC_IP missing/invalid"; fi
   if [ -n "${POSTGRES_PASSWORD:-}" ] && ! is_placeholder "${POSTGRES_PASSWORD}"; then ok "database password customized"; else bad "database password still default"; fi
@@ -36,7 +37,14 @@ if [ -f .env ]; then
   if [ -n "${OWNER_PASSWORD:-}" ] && [ ${#OWNER_PASSWORD} -ge 12 ] && ! is_placeholder "${OWNER_PASSWORD}"; then ok "owner password configured"; else bad "owner password missing/default"; fi
 
   case "${NEXIMAIL_RUNTIME_MODE:-}" in
-    staging|production) ok "runtime mode ${NEXIMAIL_RUNTIME_MODE}" ;;
+    staging)
+      ok "runtime mode staging"
+      [ "${NEXIMAIL_SEND_ENABLED:-false}" = "false" ] && ok "production sending locked in staging" || bad "NEXIMAIL_SEND_ENABLED must be false in staging"
+      ;;
+    production)
+      ok "runtime mode production"
+      [ "${NEXIMAIL_SEND_ENABLED:-false}" = "true" ] && ok "production sending explicitly enabled" || bad "NEXIMAIL_SEND_ENABLED must be true in production"
+      ;;
     *) bad "NEXIMAIL_RUNTIME_MODE must be staging or production" ;;
   esac
 fi
