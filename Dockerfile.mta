@@ -1,9 +1,10 @@
 FROM alpine:3.20
 
-RUN apk add --no-cache postfix ca-certificates opendkim opendkim-utils
+RUN apk add --no-cache postfix ca-certificates opendkim opendkim-utils python3
 
 COPY mta-entrypoint.sh /usr/local/bin/mta-entrypoint.sh
-RUN chmod +x /usr/local/bin/mta-entrypoint.sh
+COPY mta-control.py /usr/local/bin/mta-control.py
+RUN chmod +x /usr/local/bin/mta-entrypoint.sh /usr/local/bin/mta-control.py
 
-EXPOSE 10025
+EXPOSE 10025 10026
 ENTRYPOINT ["/usr/local/bin/mta-entrypoint.sh"]
