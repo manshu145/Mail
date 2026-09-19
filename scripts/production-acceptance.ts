@@ -76,7 +76,20 @@ async function main(){
     select
       (select count(*) from import_jobs where status='processing' and created_at < now()-interval '30 minutes')::int stale_imports,
       (select count(*) from validation_jobs where status='processing' and created_at < now()-interval '2 hours')::int stale_validations,
-      (select count(*) from campaigns where status='sending' and updated_at < now()-interval '30 minutes')::int stale_campaigns`);
+      (select count(*)
+         from campaigns c
+        where c.status='sending'
+          and c.updated_at < now()-interval '30 minutes'
+          and (
+            not exists (select 1 from messages m where m.campaign_id=c.id)
+            or not exists (
+              select 1
+              from messages m
+              where m.campaign_id=c.id
+                and m.status in ('queued','ready_for_transport','sending','mta_accepted','deferred')
+            )
+          )
+      )::int stale_campaigns`);
   const sj=staleJobs.rows[0];
   const staleCount=Number(sj?.stale_imports||0)+Number(sj?.stale_validations||0)+Number(sj?.stale_campaigns||0);
   record("Stuck work",staleCount?"FAIL":"PASS",JSON.stringify(sj));
