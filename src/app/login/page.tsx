@@ -1,4 +1,4 @@
-import { ArrowRight, LockKeyhole, Mail, ServerCog, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, LockKeyhole, Mail, ShieldCheck, Sparkles } from "lucide-react";
 import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 import { getSession } from "@/lib/auth";
@@ -19,11 +19,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <div className="absolute inset-0 opacity-25 [background-image:linear-gradient(rgba(255,255,255,.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.025)_1px,transparent_1px)] [background-size:38px_38px]" />
           <div className="relative z-10"><BrandMark inverse /></div>
           <div className="relative z-10 my-auto max-w-xl py-16">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.055] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-white/65"><Sparkles className="h-3.5 w-3.5 text-violet-300" /> Self-hosted email infrastructure</div>
-            <h1 className="text-[clamp(2.8rem,5vw,5.4rem)] font-black leading-[.94] tracking-[-0.065em]">Control every send.<br /><span className="bg-gradient-to-r from-[#a99dff] via-[#7f91ff] to-[#6aa9ff] bg-clip-text text-transparent">Own the stack.</span></h1>
-            <p className="mt-7 max-w-lg text-[15px] leading-7 text-white/52">Campaigns, audience, validation, delivery, reputation and infrastructure — unified in one control plane.</p>
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.055] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-white/65"><Sparkles className="h-3.5 w-3.5 text-violet-300" /> Email marketing workspace</div>
+            <h1 className="text-[clamp(2.8rem,5vw,5.4rem)] font-black leading-[.94] tracking-[-0.065em]">Campaigns that stay under control.<br /><span className="bg-gradient-to-r from-[#a99dff] via-[#7f91ff] to-[#6aa9ff] bg-clip-text text-transparent">Send with confidence.</span></h1>
+            <p className="mt-7 max-w-lg text-[15px] leading-7 text-white/52">Campaigns, contacts, validation, delivery and reporting in one focused workspace.</p>
             <div className="mt-9 grid gap-3 sm:grid-cols-2">
-              {[[ShieldCheck,"Private by design","Customer and campaign data stays under your infrastructure."],[ServerCog,"Built for scale","Workers, Redis, PostgreSQL and dedicated mail transport work together as one system."]].map(([Icon,title,copy])=>{const Component=Icon as typeof ShieldCheck;return <div key={String(title)} className="rounded-2xl border border-white/[0.08] bg-white/[0.045] p-4 backdrop-blur-sm"><Component className="h-5 w-5 text-violet-300"/><p className="mt-3 text-sm font-extrabold">{String(title)}</p><p className="mt-1 text-xs leading-5 text-white/42">{String(copy)}</p></div>})}
+              {[[ShieldCheck,"Private workspace","Keep campaign and audience data protected."],[Mail,"Built for campaigns","Contacts, templates, sending and reports in one place."]].map(([Icon,title,copy])=>{const Component=Icon as typeof ShieldCheck;return <div key={String(title)} className="rounded-2xl border border-white/[0.08] bg-white/[0.045] p-4 backdrop-blur-sm"><Component className="h-5 w-5 text-violet-300"/><p className="mt-3 text-sm font-extrabold">{String(title)}</p><p className="mt-1 text-xs leading-5 text-white/42">{String(copy)}</p></div>})}
             </div>
           </div>
         </section>
