@@ -18,14 +18,33 @@ mkdir -p "$OUT_DIR"
 rm -f "$ARCHIVE"
 
 # git archive exports committed release content only. It never includes .git,
-# local .env files, runtime databases, volumes, logs, or Git author history.
+# local runtime .env files, databases, volumes, logs, or Git author history.
 git archive --format=tar.gz --prefix="neximail/" -o "$ARCHIVE" "$SHA"
 
 test -s "$ARCHIVE"
-if tar -tzf "$ARCHIVE" | grep -Eq '(^|/)\.git(/|$)|(^|/)\.env($|\.)'; then
-  echo "Release bundle contains forbidden Git/runtime environment material."
-  exit 1
-fi
+
+for entry in $(tar -tzf "$ARCHIVE"); do
+  case "$entry" in
+    */.git|*/.git/*)
+      echo "Release bundle contains forbidden Git metadata: $entry"
+      exit 1
+      ;;
+    */.env)
+      echo "Release bundle contains forbidden runtime environment file: $entry"
+      exit 1
+      ;;
+    */.env.*)
+      case "$entry" in
+        */.env.example|*/.env.staging.example) ;;
+        *)
+          echo "Release bundle contains forbidden runtime environment file: $entry"
+          exit 1
+          ;;
+      esac
+      ;;
+  esac
+done
 
 sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
-printf 'Release bundle created\nArtifact: %s\nRevision: %s\nChecksum: %s\n'   "$ARCHIVE" "$SHA" "$(cat "$ARCHIVE.sha256")"
+printf 'Release bundle created\nArtifact: %s\nRevision: %s\nChecksum: %s\n' \
+  "$ARCHIVE" "$SHA" "$(cat "$ARCHIVE.sha256")"
