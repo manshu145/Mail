@@ -4,7 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/neximail-next}"
 PROJECT_NAME="${PROJECT_NAME:-neximail-next}"
 REPO_URL="${REPO_URL:-https://github.com/manshu145/Mail.git}"
-RELEASE_REF="${NEXIMAIL_RELEASE_REF:-release/v1.0.0}"
+RELEASE_REF="${NEXIMAIL_RELEASE_REF:-release/v0.1.0}"
 
 if [ "${EUID}" -ne 0 ]; then
   echo "Run as root."
