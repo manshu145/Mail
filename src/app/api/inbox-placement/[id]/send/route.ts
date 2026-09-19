@@ -12,6 +12,7 @@ import { loadTemplateAttachments } from "@/lib/template-attachments";
 import { buildMimeContent } from "@/lib/mime-email";
 import { injectPreheader } from "@/lib/email-preheader";
 import { audit } from "@/lib/audit";
+import { isUuid } from "@/lib/id";
 
 function clean(value: string | null | undefined) { return String(value || "").replace(/[\r\n]+/g, " ").trim(); }
 function sample(value: string, recipient: string) {
@@ -31,6 +32,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!getRuntimePolicy().sendingEnabled) return NextResponse.json({ error: "Sending is disabled by runtime configuration" }, { status: 423 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid inbox test id" }, { status: 400 });
   const [test] = await db.select().from(inboxTests).where(eq(inboxTests.id, id)).limit(1);
   if (!test) return NextResponse.json({ error: "Inbox test not found" }, { status: 404 });
   if (!test.campaignId) return NextResponse.json({ error: "Attach a campaign to this inbox test first" }, { status: 409 });
