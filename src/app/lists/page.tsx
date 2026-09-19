@@ -26,7 +26,7 @@ export default async function ListsPage() {
   const counts = new Map(countRows.map((row) => [row.listId, Number(row.count || 0)]));
 
   return <AppShell session={session}>
-    <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="page-intro">
       <div>
         <p className="page-eyebrow mb-2">Audience</p>
         <h1 className="page-title">Lists & segments</h1>
@@ -45,23 +45,23 @@ export default async function ListsPage() {
 
     <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       {listRows.length ? listRows.map((list) =>
-        <article key={list.id} className="premium-panel p-4">
+        <article key={list.id} className="premium-panel surface-lift p-4">
           <div className="flex items-start justify-between gap-3">
-            <Link href={`/lists/${list.id}`} className="grid h-9 w-9 place-items-center rounded-lg bg-violet-50 text-violet-600 transition hover:scale-105 dark:bg-violet-950/30 dark:text-violet-300">
+            <Link href={`/lists/${list.id}`} className="grid h-9 w-9 place-items-center rounded-xl bg-violet-500/[.08] text-[var(--accent)] transition hover:scale-105">
               <Layers3 className="h-4 w-4"/>
             </Link>
-            <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-extrabold uppercase text-zinc-500 dark:bg-zinc-900">{list.isDynamic ? "dynamic" : "static"}</span>
+            <span className="rounded-full border border-[var(--border)] bg-[var(--surface-soft)] px-2.5 py-1 text-[10px] font-black uppercase text-[var(--muted)]">{list.isDynamic ? "dynamic" : "static"}</span>
           </div>
           <Link href={`/lists/${list.id}`} className="mt-3.5 block text-[15px] font-black hover:text-violet-700 dark:hover:text-violet-300">{list.name}</Link>
-          <p className="mt-1 min-h-8 text-xs text-zinc-500">{list.description || "No description"}</p>
-          <div className="mt-3.5 flex items-center gap-2 border-t border-zinc-100 pt-4 text-sm font-bold text-zinc-500 dark:border-zinc-800">
+          <p className="mt-1 min-h-8 text-xs text-[var(--muted)]">{list.description || "No description"}</p>
+          <div className="mt-3.5 flex items-center gap-2 border-t border-[var(--border)] pt-4 text-sm font-bold text-[var(--muted)] ">
             <UsersRound className="h-4 w-4"/>{list.isDynamic ? "Computed at send time" : `${(counts.get(list.id)||0).toLocaleString()} members`}
           </div>
           <div className="mt-3 border-t border-[var(--border)] pt-4">
             <AudienceActions audience={{id:list.id,name:list.name,description:list.description,isDynamic:list.isDynamic}} compact />
           </div>
         </article>
-      ) : <div className="premium-panel col-span-full grid min-h-52 place-items-center text-center"><div><Layers3 className="mx-auto h-8 w-8 text-zinc-400"/><h2 className="mt-4 font-black">No audiences yet</h2></div></div>}
+      ) : <div className="premium-panel col-span-full grid min-h-52 place-items-center text-center"><div><Layers3 className="mx-auto h-8 w-8 text-[var(--muted)]"/><h2 className="mt-4 font-black">No audiences yet</h2></div></div>}
     </section>
   </AppShell>;
 }
