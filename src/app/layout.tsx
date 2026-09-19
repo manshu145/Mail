@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   applicationName: "NexiMail",
   title: { default: "NexiMail", template: "%s · NexiMail" },
-  description: "Self-hosted email marketing and campaign management infrastructure.",
+  description: "Email marketing and campaign management platform.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "NexiMail" },
   formatDetection: { telephone: false },
