@@ -22,6 +22,10 @@ env_value() {
 }
 APP_URL="$(env_value APP_URL)"
 [[ "$APP_URL" =~ ^https?:// ]] || { echo 'APP_URL must be configured in .env with http:// or https://'; exit 1; }
+RUNTIME_MODE="$(env_value NEXIMAIL_RUNTIME_MODE)"
+SEND_ENABLED="$(env_value NEXIMAIL_SEND_ENABLED)"
+[[ "$RUNTIME_MODE" == "production" ]] || { echo 'NEXIMAIL_RUNTIME_MODE must explicitly be production before deploying the live stack.'; exit 1; }
+[[ "$SEND_ENABLED" == "true" ]] || { echo 'NEXIMAIL_SEND_ENABLED must explicitly be true before deploying the live stack.'; exit 1; }
 HEALTH_URL="${APP_URL%/}/api/health"
 LOGIN_URL="${APP_URL%/}/login"
 
