@@ -53,6 +53,8 @@ jobs:
           NEXIMAIL_RELEASE_OUT_DIR: /tmp/neximail-release
         run: npm run release:bundle
       - run: npm run db:migrate
+      - name: Exercise production report SQL
+        run: node --import tsx scripts/check-reports.ts
       - run: npm run test
       - run: npm run typecheck
       - run: npm run build
