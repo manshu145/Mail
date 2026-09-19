@@ -119,7 +119,7 @@ export function ImportWizard({ lists }: { lists: ListOption[] }) {
   }
 
   return <section className="premium-panel mb-5 overflow-hidden">
-    <div className="border-b border-[var(--border)] px-5 py-4 sm:px-6"><p className="text-[10px] font-black uppercase tracking-[.16em] text-[var(--muted)]">Start an import</p><h2 className="mt-1 text-lg font-black">Upload CSV audience</h2><p className="mt-1 text-xs text-[var(--muted)]">Up to 1,000,000 data rows in one job. Large files stream to persistent disk instead of being loaded into app memory.</p></div>
+    <div className="border-b border-[var(--border)] px-5 py-4 sm:px-6"><p className="text-[11px] font-black uppercase tracking-[.16em] text-[var(--muted)]">Start an import</p><h2 className="mt-1 text-lg font-black">Upload CSV audience</h2><p className="mt-1 text-xs text-[var(--muted)]">Up to 1,000,000 data rows in one job. Large files stream to persistent disk instead of being loaded into app memory.</p></div>
     <div className="grid gap-5 p-5 lg:grid-cols-[1.1fr_.9fr] sm:p-6">
       <div className="space-y-4">
         <label className="grid min-h-36 cursor-pointer place-items-center rounded-2xl border border-dashed border-violet-300 bg-violet-500/[.04] p-6 text-center"><div><UploadCloud className="mx-auto h-8 w-8 text-violet-500"/><p className="mt-3 font-black">{file ? file.name : "Choose CSV"}</p><p className="mt-1 text-xs text-[var(--muted)]">Up to 300 MB · up to 1,000,000 rows · streamed background processing</p></div><input type="file" accept=".csv,text/csv" className="hidden" onChange={(e)=>void choose(e.target.files?.[0] || null)} /></label>
