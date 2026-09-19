@@ -189,6 +189,15 @@ export default async function CampaignDetailPage({
   });
   const preflight=preflightRows[0]||null;
   const editable=["draft","paused","scheduled"].includes(campaign.status);
+  const readOnlyState = campaign.status==="sending"
+    ? {title:"Delivery processing",detail:"This campaign is actively sending. Editing is locked while the audience snapshot is in use."}
+    : campaign.status==="completed"
+      ? {title:"Campaign completed",detail:"Sending is complete. This campaign is now read-only and the report remains available."}
+      : campaign.status==="cancelled"
+        ? {title:"Campaign cancelled",detail:"This campaign was cancelled. Existing delivery and engagement history remains available."}
+        : campaign.status==="queued"
+          ? {title:"Campaign queued",detail:"The audience snapshot is ready and delivery is waiting to start. Editing is locked."}
+          : {title:"Campaign read-only",detail:"Editing is unavailable for this campaign state."};
   const runtimePolicy=getRuntimePolicy();
   const inFlight=metrics?metrics.queued+metrics.ready+metrics.sending+metrics.accepted+metrics.deferred:0;
 
@@ -237,32 +246,22 @@ export default async function CampaignDetailPage({
           <Link href="/provider-cooldowns" className="btn-secondary !min-h-9 !px-3 text-xs"><TimerReset className="h-4 w-4"/>All provider cooldowns</Link>
         </div>
 
-        {providerImpact.length?<div className="grid gap-px bg-[var(--border)] lg:grid-cols-2">
+        {providerImpact.length?<div className="divide-y divide-[var(--border)]">
           {providerImpact.map((row)=>{
             const provider=String(row.provider);
             const state=row.state as Record<string,unknown>|null;
             const active=Boolean(state?.active);
-            return <article key={provider} className="min-w-0 bg-[var(--surface)] p-4 sm:p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-black">{providerLabel(provider)}</h3>
-                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[.08em] ${active?"bg-amber-500/10 text-amber-700 dark:text-amber-300":"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}>{active?"Cooldown active":"Not active now"}</span>
-                  </div>
-                  <p className="mt-1 text-xs text-[var(--muted)]">{Number(row.affected_recipients||0).toLocaleString()} affected recipient{Number(row.affected_recipients||0)===1?"":"s"} · {Number(row.cooldown_events||0).toLocaleString()} cooldown event{Number(row.cooldown_events||0)===1?"":"s"}</p>
+            return <article key={provider} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-black">{providerLabel(provider)}</h3>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[.08em] ${active?"bg-amber-500/10 text-amber-700 dark:text-amber-300":"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}>{active?"Paused":"Cleared"}</span>
                 </div>
-                {active?<AlertTriangle className="h-5 w-5 shrink-0 text-amber-500"/>:<ShieldCheck className="h-5 w-5 shrink-0 text-emerald-500"/>}
               </div>
-
-              <div className="mt-4 grid gap-2 min-[420px]:grid-cols-2">
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">First impact</p><p className="mt-1 text-xs font-bold">{fmt(row.first_event as string|null)}</p></div>
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Last impact</p><p className="mt-1 text-xs font-bold">{fmt(row.last_event as string|null)}</p></div>
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><p className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]"><Clock3 className="h-3 w-3"/>Next probe</p><p className="mt-1 text-xs font-bold">{active?fmt(state?.next_probe_at as string|null):"—"}</p></div>
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Probe attempts</p><p className="mt-1 text-xs font-bold">{Number(row.probes||0).toLocaleString()}</p></div>
+              <div className="grid shrink-0 gap-2 min-[420px]:grid-cols-2 sm:min-w-[360px]">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2.5"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Last impact</p><p className="mt-1 text-xs font-bold">{fmt(row.last_event as string|null)}</p></div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2.5"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">{active?"Retry / check":"Recovered"}</p><p className="mt-1 text-xs font-bold">{active?fmt(state?.next_probe_at as string|null):fmt(state?.cleared_at as string|null)}</p></div>
               </div>
-
-              {state?.reason?<p className="mt-3 break-words rounded-xl border border-amber-500/15 bg-amber-500/[0.05] px-3 py-2.5 text-xs leading-5 text-amber-800 dark:text-amber-200"><b>Reason:</b> {String(state.reason)}</p>:null}
-              {state?.last_response?<details className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2.5"><summary className="cursor-pointer text-[11px] font-black">Last provider response</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-5 text-[var(--muted)]">{String(state.last_response)}</pre></details>:null}
             </article>;
           })}
         </div>:<div className="flex items-start gap-3 p-4 sm:p-5">
@@ -280,7 +279,7 @@ export default async function CampaignDetailPage({
       </section>
     </>:null}
 
-    {editable?<section className="premium-panel p-3 sm:p-5 lg:p-6"><CampaignEditor campaign={{...campaign,scheduledAt:campaign.scheduledAt?.toISOString()||null}} lists={listRows} templates={templateRows} accounts={accountRows} runtimePolicy={{mode:runtimePolicy.mode,sendingEnabled:runtimePolicy.sendingEnabled,maxRecipientsPerCampaign:runtimePolicy.maxRecipientsPerCampaign}}/></section>:<section className="premium-panel p-4 sm:p-6"><div className="grid min-h-32 place-items-center text-center"><div><CircleGauge className="mx-auto h-8 w-8 text-[var(--muted)]"/><h2 className="mt-4 font-black">Delivery processing</h2><p className="mt-1 text-sm text-[var(--muted)]">Editing is locked after the audience snapshot begins.</p></div></div></section>}
+    {editable?<section className="premium-panel p-3 sm:p-5 lg:p-6"><CampaignEditor campaign={{...campaign,scheduledAt:campaign.scheduledAt?.toISOString()||null}} lists={listRows} templates={templateRows} accounts={accountRows} runtimePolicy={{mode:runtimePolicy.mode,sendingEnabled:runtimePolicy.sendingEnabled,maxRecipientsPerCampaign:runtimePolicy.maxRecipientsPerCampaign}}/></section>:<section className="premium-panel p-4 sm:p-6"><div className="grid min-h-32 place-items-center text-center"><div><CircleGauge className="mx-auto h-8 w-8 text-[var(--muted)]"/><h2 className="mt-4 font-black">{readOnlyState.title}</h2><p className="mt-1 text-sm text-[var(--muted)]">{readOnlyState.detail}</p></div></div></section>}
 
     {links.length?<section className="premium-panel mt-5 overflow-hidden"><div className="border-b border-[var(--border)] p-5"><h2 className="font-black">Clicked links</h2><p className="mt-1 text-xs text-[var(--muted)]">Click a URL row to see exactly who clicked it.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-5 py-3">URL</th><th>Unique clickers</th><th>Total clicks</th></tr></thead><tbody>{links.map((row,i)=>{const url=String(row.url||"");return <tr className="border-t border-[var(--border)] transition hover:bg-[var(--surface-soft)]" key={`${url}-${i}`}><td className="max-w-[620px] truncate px-5 py-3.5"><Link className="font-semibold text-violet-600 hover:underline" href={drillHref("clicks",1,url)}>{url}</Link></td><td>{Number(row.unique_clickers||0).toLocaleString()}</td><td>{Number(row.clicks||0).toLocaleString()}</td></tr>})}</tbody></table></div></section>:null}
 
