@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, databaseConfigured, pool } from "@/db";
 import { templates } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { isUuid } from "@/lib/id";
 import {
   ALLOWED_ATTACHMENT_TYPES,
   MAX_ATTACHMENT_BYTES,
@@ -22,6 +23,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   if (!await getTemplate(id)) return NextResponse.json({ error: "Template not found" }, { status: 404 });
   return NextResponse.json({ attachments: await listTemplateAttachments(id) });
 }
@@ -31,6 +33,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   if (!await getTemplate(id)) return NextResponse.json({ error: "Template not found" }, { status: 404 });
 
   const form = await request.formData().catch(() => null);
@@ -63,6 +66,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   if (!await getTemplate(id)) return NextResponse.json({ error: "Template not found" }, { status: 404 });
   const body = await request.json().catch(() => null) as { attachmentId?: string } | null;
   const attachmentId = String(body?.attachmentId || "");
