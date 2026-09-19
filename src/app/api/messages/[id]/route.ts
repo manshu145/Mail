@@ -4,6 +4,7 @@ import { db, databaseConfigured, pool } from "@/db";
 import { messages } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { isUuid } from "@/lib/id";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -11,6 +12,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   const [message] = await db.select().from(messages).where(eq(messages.id, id)).limit(1);
   if (!message) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
