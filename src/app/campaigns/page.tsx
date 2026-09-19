@@ -1,9 +1,8 @@
-import { ArrowRight, Send, TimerReset } from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock3, Radio, Send, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { desc } from "drizzle-orm";
 import { AppShell } from "@/components/app-shell";
-import { LiveRefresh } from "@/components/live-refresh";
 import { ResourceCreate } from "@/components/resource-create";
 import { db, databaseConfigured } from "@/db";
 import { campaigns } from "@/db/schema";
@@ -31,12 +30,15 @@ export default async function CampaignsPage() {
     }
   }
   const usable = databaseConfigured && !dbError;
+  const activeCount=rows.filter((row)=>["queued","sending","scheduled"].includes(row.status)).length;
+  const draftCount=rows.filter((row)=>row.status==="draft").length;
+  const completedCount=rows.filter((row)=>row.status==="completed").length;
 
   return (
     <AppShell session={session}>
-      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className="page-intro">
         <div>
-          <p className="page-eyebrow mb-2">Messaging</p>
+          <div className="mb-2 flex items-center gap-2"><p className="page-eyebrow">Messaging</p><span className="status-pill"><Sparkles className="h-3 w-3"/>Campaign studio</span></div>
           <h1 className="page-title">Campaigns</h1>
           <p className="page-description">Create, schedule and monitor campaigns from draft through delivery.</p>
         </div>
@@ -62,33 +64,28 @@ export default async function CampaignsPage() {
         </div>
       ) : null}
 
-      <div className="mb-3 grid gap-2 sm:grid-cols-3">
+      <section className="mb-4 grid gap-3 sm:grid-cols-3">
         {[
-          ["Build", "Create campaigns with subject, preheader, audience and content."],
-          ["Schedule", "Send immediately or choose the exact delivery time."],
-          ["Monitor", "Track campaign and recipient delivery status in one place."],
-        ].map(([title, copy]) => (
-          <div key={title} className="panel-soft px-3.5 py-3">
-            <p className="text-[11px] font-extrabold">{title}</p>
-            <p className="mt-1 text-[11px] leading-4 text-[var(--muted)]">{copy}</p>
-          </div>
-        ))}
-      </div>
+          [Clock3,"Drafts",draftCount,"Campaigns still being prepared"],
+          [Radio,"Live / scheduled",activeCount,"Queued, sending or scheduled"],
+          [CheckCircle2,"Completed",completedCount,"Campaigns with finished delivery"],
+        ].map(([Icon,label,value,copy],index)=>{const C=Icon as typeof Clock3;return <article key={String(label)} className={`metric-card surface-lift p-4 reveal reveal-delay-${index+1}`}><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">{String(label)}</p><p className="metric-value mt-2 text-2xl font-black">{Number(value).toLocaleString()}</p></div><div className="grid h-9 w-9 place-items-center rounded-xl bg-violet-500/[.08] text-[var(--accent)]"><C className="h-4 w-4"/></div></div><p className="mt-2 text-[10px] leading-4 text-[var(--muted)]">{String(copy)}</p></article>})}
+      </section>
 
-      <section className="premium-panel overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-[var(--border)] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+      <section className="section-card overflow-hidden">
+        <div className="section-card-header flex-col items-stretch sm:flex-row sm:items-center">
           <div>
             <p className="text-sm font-extrabold">Campaign workspace</p>
             <p className="mt-1 text-xs text-[var(--muted)]">{rows.length ? `${rows.length} recent campaign${rows.length === 1 ? "" : "s"}` : "No campaigns yet"}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2"><LiveRefresh intervalMs={10000} label="Live"/><span className="status-pill"><TimerReset className="h-3.5 w-3.5" /> Delivery status</span></div>
+          <div className="flex flex-wrap items-center gap-2"><span className="status-pill"><span className="live-dot"/>Live 5s</span><span className="status-pill"><Radio className="h-3.5 w-3.5"/>Delivery status</span></div>
         </div>
 
         {rows.length ? (
           <>
             <div className="divide-y divide-[var(--border)] sm:hidden">
               {rows.map((row) => (
-                <Link key={row.id} href={`/campaigns/${row.id}`} className="block p-4 transition active:bg-[var(--surface-soft)]">
+                <Link key={row.id} href={`/campaigns/${row.id}`} className="interactive-row block p-4 active:bg-[var(--surface-soft)]">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-black">{row.name}</p>
@@ -113,7 +110,7 @@ export default async function CampaignsPage() {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {rows.map((row) => (
-                    <tr key={row.id} className="transition hover:bg-[var(--surface-soft)]">
+                    <tr key={row.id} className="interactive-row">
                       <td className="px-4 py-3 font-extrabold"><Link href={`/campaigns/${row.id}`} className="hover:text-violet-700 dark:hover:text-violet-300">{row.name}</Link></td>
                       <td className="max-w-[320px] truncate px-5 py-4 text-[var(--muted)]">{row.subject}</td>
                       <td className="px-5 py-4"><span className={`rounded-full border px-2.5 py-1 text-[11px] font-extrabold capitalize ${statusClass(row.status)}`}>{row.status}</span></td>

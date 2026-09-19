@@ -59,7 +59,7 @@ export function AppShell({ session, children }: { session: SessionView; children
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({ Overview:true, Audience:true, Campaigns:true, Delivery:true, Deliverability:false, Platform:false }));
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({ Overview:true, Audience:true, Campaigns:true, Delivery:true, Deliverability:false, Workspace:true }));
 
   const visibleGroups = useMemo(() => navGroups.map((group) => ({
     ...group,
@@ -70,6 +70,7 @@ export function AppShell({ session, children }: { session: SessionView; children
     for (const group of visibleGroups) for (const item of group.items) if (pathname === item.href || pathname.startsWith(`${item.href}/`)) return item;
     return visibleGroups[0]?.items[0] || navGroups[0].items[0];
   }, [pathname, visibleGroups]);
+  const CurrentIcon = current.icon;
 
   useEffect(() => {
     try {
@@ -93,7 +94,7 @@ export function AppShell({ session, children }: { session: SessionView; children
   }
 
   const sidebar = (compact: boolean) => (
-    <div className="flex h-full flex-col overflow-hidden bg-[var(--sidebar)] text-[var(--sidebar-fg)]">
+    <div className="flex h-full flex-col overflow-hidden bg-[linear-gradient(180deg,color-mix(in_srgb,var(--sidebar)_96%,var(--accent-soft)),var(--sidebar))] text-[var(--sidebar-fg)]">
       <div className={`flex h-[68px] items-center border-b border-[var(--sidebar-border)] ${compact ? "justify-center px-3" : "px-5"}`}><BrandMark compact={compact} /></div>
       <div className="flex-1 overflow-y-auto px-3 py-4 scrollbar-thin">
         {visibleGroups.map((group) => {
@@ -115,13 +116,13 @@ export function AppShell({ session, children }: { session: SessionView; children
 
   return <div className="min-h-dvh bg-[var(--background)] text-[var(--foreground)]">
     <aside className={`fixed inset-y-0 left-0 z-30 hidden border-r border-[var(--sidebar-border)] transition-[width] duration-200 lg:block ${collapsed?"w-[76px]":"w-[248px]"}`}>{sidebar(collapsed)}</aside>
-    {mobileOpen&&<div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Close navigation" className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={()=>setMobileOpen(false)}/><aside className="relative h-full w-[286px] max-w-[88vw] shadow-2xl"><button aria-label="Close navigation" className="absolute right-3 top-4 z-10 rounded-xl border border-[var(--sidebar-border)] bg-[var(--sidebar-hover)] p-2 text-[var(--sidebar-fg)]" onClick={()=>setMobileOpen(false)}><X className="h-4.5 w-4.5"/></button>{sidebar(false)}</aside></div>}
+    {mobileOpen&&<div className="fixed inset-0 z-50 lg:hidden reveal"><button aria-label="Close navigation" className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={()=>setMobileOpen(false)}/><aside className="relative h-full w-[286px] max-w-[88vw] border-r border-[var(--sidebar-border)] shadow-2xl"><button aria-label="Close navigation" className="absolute right-3 top-4 z-10 rounded-xl border border-[var(--sidebar-border)] bg-[var(--sidebar-hover)] p-2 text-[var(--sidebar-fg)]" onClick={()=>setMobileOpen(false)}><X className="h-4.5 w-4.5"/></button>{sidebar(false)}</aside></div>}
     <div className={`transition-[padding] duration-200 ${collapsed?"lg:pl-[76px]":"lg:pl-[248px]"}`}>
-      <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-[var(--border)] bg-[color:var(--header-bg)] px-4 backdrop-blur-xl sm:px-6 lg:px-8">
-        <div className="flex min-w-0 items-center gap-3"><button className="icon-button grid lg:hidden" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu className="h-[18px] w-[18px]"/></button><button className="icon-button hidden lg:grid" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"} onClick={()=>setCollapsed(v=>{const next=!v;try{window.localStorage.setItem("neximail.sidebar.collapsed",next?"1":"0")}catch{}return next})}>{collapsed?<PanelLeftOpen className="h-[17px] w-[17px]"/>:<PanelLeftClose className="h-[17px] w-[17px]"/>}</button><div className="min-w-0"><p className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-[var(--muted)]">Workspace</p><p className="truncate text-[14px] font-extrabold tracking-[-0.01em]">{current.label}</p></div></div>
+      <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-[var(--border)] bg-[color:var(--header-bg)] px-4 shadow-[0_1px_0_rgba(255,255,255,.35)_inset] backdrop-blur-xl sm:px-6 lg:px-8">
+        <div className="flex min-w-0 items-center gap-3"><button className="icon-button grid lg:hidden" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu className="h-[18px] w-[18px]"/></button><button className="icon-button hidden lg:grid" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"} onClick={()=>setCollapsed(v=>{const next=!v;try{window.localStorage.setItem("neximail.sidebar.collapsed",next?"1":"0")}catch{}return next})}>{collapsed?<PanelLeftOpen className="h-[17px] w-[17px]"/>:<PanelLeftClose className="h-[17px] w-[17px]"/>}</button><div className="hidden h-9 w-9 shrink-0 place-items-center rounded-xl border border-[var(--border)] bg-[linear-gradient(145deg,var(--surface),var(--accent-soft))] text-[var(--accent)] shadow-sm sm:grid"><CurrentIcon className="h-4 w-4" strokeWidth={2}/></div><div className="min-w-0"><p className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-[var(--muted)]">Workspace</p><p className="truncate text-[14px] font-extrabold tracking-[-0.01em]">{current.label}</p></div></div>
         <div className="flex items-center gap-2"><LiveRefresh intervalMs={5000} label="Live 5s"/><PwaStatus/><ThemeToggle/></div>
       </header>
-      <main className="mx-auto w-full max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
+      <main className="app-content mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8"><div key={pathname} className="reveal">{children}</div></main>
     </div>
   </div>;
 }

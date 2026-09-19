@@ -83,15 +83,16 @@ export default async function ProviderCooldownsPage() {
     </section>
 
     <section className="space-y-3">
-      {rows.length?rows.map((row)=><article key={row.id} className="premium-panel p-4 sm:p-5">
+      {rows.length?rows.map((row)=><article key={row.id} className={`premium-panel surface-lift p-4 sm:p-5 ${row.active?"border-amber-500/25 shadow-[0_0_28px_rgba(245,158,11,.07)]":""}`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
+              {row.active?<span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-50"/><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500"/></span>:null}
               <h2 className="text-[15px] font-black">{providerLabel(row.provider)}</h2>
               <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[.1em] ${row.active?"bg-amber-500/10 text-amber-700 dark:text-amber-300":"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}>{row.active?"Cooldown active":"Cleared"}</span>
             </div>
             <p className="mt-1 text-xs font-bold">{row.accountName||"Sender identity"}{row.fromEmail?` · ${row.fromEmail}`:""}</p>
-            <p className="mt-2 text-xs leading-5 text-[var(--muted)]">{row.reason||"Temporary provider pressure detected."}</p>
+            <p className="mt-2 max-w-3xl text-xs leading-5 text-[var(--muted)]">{row.reason||"Temporary provider pressure detected."}</p>{row.active?<p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/[.08] px-2.5 py-1 text-[10px] font-bold text-amber-700 dark:text-amber-300"><Clock3 className="h-3 w-3"/>Automatic probe scheduled for {formatDate(row.nextProbeAt)}</p>:null}
           </div>
           <ProviderCooldownActions id={row.id} active={row.active} canEdit={usable && session.role === "owner"} />
         </div>

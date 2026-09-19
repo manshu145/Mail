@@ -50,34 +50,34 @@ export default async function UnsubscribersPage({searchParams}:{searchParams:Pro
   const usable=databaseConfigured&&!dbError;
 
   return <AppShell session={session}>
-    <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="page-intro">
       <div>
         <p className="page-eyebrow mb-2">Compliance</p>
         <h1 className="page-title">Unsubscribers</h1>
         <p className="page-description">People who explicitly unsubscribed are globally blocked from future campaign sends.</p>
       </div>
-      <div className="compact-stat min-w-[160px]"><p className="compact-stat-label">Total unsubscribed</p><p className="compact-stat-value">{usable?total.toLocaleString():"—"}</p></div>
+      <div className="metric-card min-w-[180px] p-4"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Total unsubscribed</p><p className="metric-value mt-2 text-2xl font-black">{usable?total.toLocaleString():"—"}</p></div>
     </div>
 
     {!usable?<div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Unsubscriber data is temporarily unavailable.</b></div>:null}
 
-    <section className="premium-panel overflow-hidden">
+    <section className="section-card overflow-hidden">
       <div className="border-b border-[var(--border)] p-4 sm:px-5">
         <form className="flex gap-2">
-          <div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]"/><input name="q" defaultValue={q} placeholder="Search email or name…" className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] py-2.5 pl-10 pr-3 text-sm outline-none"/></div>
+          <div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]"/><input name="q" defaultValue={q} placeholder="Search email or name…" className="form-control pl-10"/></div>
           <button className="btn-secondary">Search</button>
         </form>
       </div>
-      {rows.length?<div className="overflow-x-auto"><table className="w-full min-w-[960px] text-left text-sm">
+      {rows.length?<><div className="desktop-table-only overflow-x-auto"><table className="w-full min-w-[960px] text-left text-sm">
         <thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-5 py-3.5">Subscriber</th><th>Source</th><th>Unsubscribed</th><th>Campaign</th><th>Message</th></tr></thead>
-        <tbody>{rows.map((row)=><tr key={String(row.id)} className="border-t border-[var(--border)]">
+        <tbody>{rows.map((row)=><tr key={String(row.id)} className="interactive-row border-t border-[var(--border)]">
           <td className="px-5 py-4"><p className="font-black">{String(row.contact_name||row.email)}</p><p className="mt-1 text-xs text-[var(--muted)]">{String(row.email)}</p></td>
           <td className="text-xs font-bold">{String(row.source||"unsubscribe_link").replaceAll("_"," ")}</td>
           <td className="text-xs text-[var(--muted)]">{fmt(row.event_at||row.created_at)}</td>
           <td>{row.campaign_id?<Link className="font-bold text-violet-600 hover:underline" href={`/campaigns/${String(row.campaign_id)}`}>{String(row.campaign_name||"Campaign")}</Link>:<span className="text-[var(--muted)]">—</span>}</td>
           <td>{row.message_id?<Link className="text-xs font-bold text-violet-600 hover:underline" href={`/messages/${String(row.message_id)}`}>View timeline</Link>:<span className="text-[var(--muted)]">—</span>}</td>
         </tr>)}</tbody>
-      </table></div>:<div className="grid min-h-64 place-items-center p-8 text-center"><div><UserMinus className="mx-auto h-9 w-9 text-[var(--muted)]"/><h2 className="mt-4 font-black">No unsubscribers found</h2><p className="mt-1 text-sm text-[var(--muted)]">Explicit unsubscribe requests will appear here automatically.</p></div></div>}
+      </table></div><div className="mobile-card-list p-3">{rows.map((row)=><article key={String(row.id)} className="panel-soft p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-black">{String(row.contact_name||row.email)}</p><p className="mt-1 break-all text-[10px] text-[var(--muted)]">{String(row.email)}</p></div><UserMinus className="h-4 w-4 shrink-0 text-rose-500"/></div><div className="mt-3 grid gap-2 text-[10px] text-[var(--muted)]"><div className="flex justify-between"><span>Unsubscribed</span><b className="text-[var(--foreground)]">{fmt(row.event_at||row.created_at)}</b></div><div className="flex justify-between"><span>Source</span><b className="capitalize text-[var(--foreground)]">{String(row.source||"unsubscribe_link").replaceAll("_"," ")}</b></div></div><div className="mt-3 flex flex-wrap gap-2 border-t border-[var(--border)] pt-3">{row.campaign_id?<Link className="btn-secondary !min-h-8 !px-2.5 !py-1 text-[10px]" href={`/campaigns/${String(row.campaign_id)}`}>Campaign</Link>:null}{row.message_id?<Link className="btn-secondary !min-h-8 !px-2.5 !py-1 text-[10px]" href={`/messages/${String(row.message_id)}`}>Timeline</Link>:null}</div></article>)}</div></>:<div className="grid min-h-64 place-items-center p-8 text-center"><div><UserMinus className="mx-auto h-9 w-9 text-[var(--muted)]"/><h2 className="mt-4 font-black">No unsubscribers found</h2><p className="mt-1 text-sm text-[var(--muted)]">Explicit unsubscribe requests will appear here automatically.</p></div></div>}
     </section>
   </AppShell>;
 }
