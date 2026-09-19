@@ -5,6 +5,7 @@ import { campaigns, lists } from "@/db/schema";
 import { segmentDefinitions } from "@/db/segment-schema";
 import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
+import { isUuid } from "@/lib/id";
 
 const fields = new Set(["email_domain", "validation_status", "contact_status", "custom_attribute"]);
 const ops = new Set(["equals", "not_equals"]);
@@ -15,6 +16,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid audience id." }, { status: 400 });
   const [current] = await db.select().from(lists).where(eq(lists.id, id)).limit(1);
   if (!current) return NextResponse.json({ error: "Audience not found." }, { status: 404 });
 
@@ -84,6 +86,7 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid audience id." }, { status: 400 });
   const [current] = await db.select().from(lists).where(eq(lists.id, id)).limit(1);
   if (!current) return NextResponse.json({ error: "Audience not found." }, { status: 404 });
 
