@@ -23,7 +23,6 @@ const smtpTimeoutMs = Math.max(3000, Number(process.env.MTA_SMTP_TIMEOUT_MS || "
 const intervalMs = Math.max(1000, Number(process.env.TRANSPORT_WORKER_INTERVAL_MS || "3000"));
 const claimBatch = Math.min(200, Math.max(1, Number(process.env.TRANSPORT_BATCH_SIZE || "50")));
 const bounceEnabled = Boolean(process.env.BOUNCE_DOMAIN?.trim() && process.env.BOUNCE_SECRET?.trim());
-const providerCooldownMinutes = Math.max(1, Number(process.env.PROVIDER_COOLDOWN_MINUTES || "15"));
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
@@ -72,20 +71,20 @@ async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect,
   return { allowed: (effectiveHourly === 0 || hourCount < effectiveHourly) && (effectiveDaily === 0 || dayCount < effectiveDaily), effectiveHourly, effectiveDaily };
 }
 
-async function providerGate(accountId: string, recipientEmail: string) {
+async function providerGate(accountId: string, recipientEmail: string, cooldownMinutes: number) {
   const provider = providerForEmail(recipientEmail);
   const [cooldown] = await db.select().from(providerCooldowns).where(and(eq(providerCooldowns.sendingAccountId, accountId), eq(providerCooldowns.provider, provider), eq(providerCooldowns.active, true))).limit(1);
   if (!cooldown) return { allowed: true, provider, probe: false, retryAt: null as Date | null };
   const now = new Date();
   if (cooldown.nextProbeAt && cooldown.nextProbeAt > now) return { allowed: false, provider, probe: false, retryAt: cooldown.nextProbeAt };
-  const retryAt = new Date(Date.now() + providerCooldownMinutes * 60_000);
+  const retryAt = new Date(Date.now() + cooldownMinutes * 60_000);
   await db.update(providerCooldowns).set({ lastProbeAt: now, nextProbeAt: retryAt, updatedAt: now }).where(eq(providerCooldowns.id, cooldown.id));
   await pool.query(`insert into provider_cooldown_events(cooldown_id,sending_account_id,provider,event_type,reason,response,metadata) values($1,$2,$3,'probe_started',$4,$5,$6::jsonb)`, [cooldown.id, accountId, provider, cooldown.reason, cooldown.lastResponse, JSON.stringify({ nextProbeAt: retryAt.toISOString(), recipientEmail })]);
   return { allowed: true, provider, probe: true, retryAt };
 }
 
-async function releaseProviderCooldown(id: string, provider: string, retryAt: Date | null) {
-  const next = retryAt || new Date(Date.now() + providerCooldownMinutes * 60_000);
+async function releaseProviderCooldown(id: string, provider: string, retryAt: Date | null, cooldownMinutes: number) {
+  const next = retryAt || new Date(Date.now() + cooldownMinutes * 60_000);
   await pool.query(`update messages set status='ready_for_transport',next_attempt_at=$2,last_error=$3,attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'`, [id, next, `provider_cooldown:${provider}`]);
   await event(id,"provider_cooldown",{provider,retryAt:next.toISOString()});
 }
@@ -174,8 +173,8 @@ async function runOnce() {
       failed++; continue;
     }
 
-    const gate = await providerGate(account.id, contact.email);
-    if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.provider, gate.retryAt); providerHeld++; continue; }
+    const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
+    if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.provider, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
     if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,retryAt:gate.retryAt?.toISOString()}); }
 
     const limit = await accountWithinLimits(account, settings);
@@ -261,7 +260,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, mtaHost, mtaPort, bounceTracking: bounceEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceEnabled, source: "database_control_plane" });
 }
 
 async function main() {
