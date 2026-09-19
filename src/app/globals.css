@@ -152,7 +152,6 @@ body::before {
 .btn-primary:disabled,.btn-secondary:disabled,.btn-danger:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
 
 .icon-button {
-  display: grid;
   height: 36px;
   width: 36px;
   place-items: center;
