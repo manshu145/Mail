@@ -14,6 +14,7 @@ import { loadTemplateAttachments } from "@/lib/template-attachments";
 import { buildMimeContent } from "@/lib/mime-email";
 import { injectPreheader } from "@/lib/email-preheader";
 import { samplePersonalization } from "@/lib/personalization";
+import { isUuid } from "@/lib/id";
 
 function clean(value: unknown) { return String(value ?? "").replace(/[\r\n]+/g, " ").trim(); }
 function sample(value: string, recipient: string) {
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!getRuntimePolicy().sendingEnabled) return NextResponse.json({ error: "Sending is disabled by runtime configuration." }, { status: 423 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   const recipient = clean(body.recipient).toLowerCase();
