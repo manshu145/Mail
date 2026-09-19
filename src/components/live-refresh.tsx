@@ -37,7 +37,7 @@ export function LiveRefresh({ intervalMs = 10000, label = "Live" }: { intervalMs
     };
   }, [intervalMs, router]);
 
-  return <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/[0.06] px-2.5 py-1 text-[10px] font-black uppercase tracking-[.08em] text-emerald-700 dark:text-emerald-300">
+  return <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/[0.06] px-2.5 py-1 text-[11px] font-black uppercase tracking-[.08em] text-emerald-700 dark:text-emerald-300">
     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"/>
     {label}
     <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`}/>
