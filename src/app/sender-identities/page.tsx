@@ -48,7 +48,7 @@ export default async function SenderIdentitiesPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="page-intro">
         <div>
           <p className="page-eyebrow mb-2">Sending</p>
           <h1 className="page-title">Sender identities</h1>
@@ -60,12 +60,12 @@ export default async function SenderIdentitiesPage() {
       {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Sender configuration is temporarily unavailable.</b> Please refresh shortly.</div> : null}
 
       <section className="mb-4 grid gap-2 sm:grid-cols-3">
-        {[{label:"Active senders",value:active,icon:ShieldCheck},{label:"Paused",value:paused,icon:PauseCircle},{label:"Combined daily limit",value:anyUnlimitedDaily?"Unlimited":totalDaily,icon:Send}].map(({label,value,icon:Icon}) => <article key={label} className="compact-stat"><div className="flex items-start justify-between"><div><p className="compact-stat-label">{label}</p><p className="compact-stat-value">{typeof value === "number" ? value.toLocaleString() : value}</p></div><div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}
+        {[{label:"Active senders",value:active,icon:ShieldCheck},{label:"Paused",value:paused,icon:PauseCircle},{label:"Combined daily limit",value:anyUnlimitedDaily?"Unlimited":totalDaily,icon:Send}].map(({label,value,icon:Icon}) => <article key={label} className="metric-card surface-lift p-4"><div className="flex items-start justify-between"><div><p className="compact-stat-label">{label}</p><p className="compact-stat-value">{typeof value === "number" ? value.toLocaleString() : value}</p></div><div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-500/[0.08] text-violet-700 dark:text-violet-300"><Icon className="h-4.5 w-4.5" /></div></div></article>)}
       </section>
 
       <section className="grid gap-3 xl:grid-cols-2">
         {rows.length ? rows.map((row) => (
-          <article key={row.id} className="premium-panel p-4">
+          <article key={row.id} className="premium-panel surface-lift p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-[15px] font-black">{row.name}</h2><span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[.1em] ${row.status === "active" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : row.status === "paused" ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-zinc-500/10 text-zinc-600 dark:text-zinc-300"}`}>{row.status}</span></div><p className="mt-1.5 text-xs font-bold">{row.fromName} &lt;{row.fromEmail}&gt;</p><p className="mt-1 text-xs text-[var(--muted)]">Reply-to: {row.replyTo || "same as From"}</p></div>
               <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-500/10 text-blue-700 dark:text-blue-300"><MailCheck className="h-5 w-5" /></div>
@@ -74,9 +74,9 @@ export default async function SenderIdentitiesPage() {
               <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">From address</p><p className="mt-1 truncate text-sm font-extrabold">{row.fromEmail}</p></div>
               <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Reply-to</p><p className="mt-1 truncate text-sm font-extrabold">{row.replyTo || row.fromEmail}</p></div>
             </div>
-            {(()=>{const u=usage.get(row.id)||{hour:0,day:0};const hourCap=effective(row.hourlyLimit,settings.maxRollingHour);const dayCap=effective(row.dailyLimit,settings.maxRolling24h);return <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Hourly usage / effective limit</p><p className="mt-1 text-sm font-extrabold">{u.hour.toLocaleString()} / {hourCap?hourCap.toLocaleString():"Unlimited"}</p><p className="mt-1 text-[10px] text-[var(--muted)]">Sender setting: {row.hourlyLimit?row.hourlyLimit.toLocaleString():"Unlimited"} · Global: {settings.maxRollingHour?settings.maxRollingHour.toLocaleString():"Unlimited"}</p></div>
-              <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">24h usage / effective limit</p><p className="mt-1 text-sm font-extrabold">{u.day.toLocaleString()} / {dayCap?dayCap.toLocaleString():"Unlimited"}</p><p className="mt-1 text-[10px] text-[var(--muted)]">Sender setting: {row.dailyLimit?row.dailyLimit.toLocaleString():"Unlimited"} · Global: {settings.maxRolling24h?settings.maxRolling24h.toLocaleString():"Unlimited"}</p></div>
+            {(()=>{const u=usage.get(row.id)||{hour:0,day:0};const hourCap=effective(row.hourlyLimit,settings.maxRollingHour);const dayCap=effective(row.dailyLimit,settings.maxRolling24h);const hourPct=hourCap?Math.min(100,u.hour/hourCap*100):0;const dayPct=dayCap?Math.min(100,u.day/dayCap*100):0;return <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">Hourly usage / effective limit</p><div className="mt-1 flex items-end justify-between gap-2"><p className="text-sm font-extrabold">{u.hour.toLocaleString()} / {hourCap?hourCap.toLocaleString():"Unlimited"}</p>{hourCap?<span className="text-[10px] font-black text-[var(--accent)]">{hourPct.toFixed(0)}%</span>:null}</div>{hourCap?<div className="progress-track mt-2"><div className="progress-fill" style={{width:`${hourPct}%`}}/></div>:null}<p className="mt-2 text-[10px] text-[var(--muted)]">Sender: {row.hourlyLimit?row.hourlyLimit.toLocaleString():"Unlimited"} · Global: {settings.maxRollingHour?settings.maxRollingHour.toLocaleString():"Unlimited"}</p></div>
+              <div className="panel-soft p-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">24h usage / effective limit</p><div className="mt-1 flex items-end justify-between gap-2"><p className="text-sm font-extrabold">{u.day.toLocaleString()} / {dayCap?dayCap.toLocaleString():"Unlimited"}</p>{dayCap?<span className="text-[10px] font-black text-[var(--accent)]">{dayPct.toFixed(0)}%</span>:null}</div>{dayCap?<div className="progress-track mt-2"><div className="progress-fill" style={{width:`${dayPct}%`}}/></div>:null}<p className="mt-2 text-[10px] text-[var(--muted)]">Sender: {row.dailyLimit?row.dailyLimit.toLocaleString():"Unlimited"} · Global: {settings.maxRolling24h?settings.maxRolling24h.toLocaleString():"Unlimited"}</p></div>
             </div>})()}
             <SendingAccountActions id={row.id} status={row.status} name={row.name} fromName={row.fromName} fromEmail={row.fromEmail} replyTo={row.replyTo} hourlyLimit={row.hourlyLimit} dailyLimit={row.dailyLimit} canEdit={usable && session.role === "owner"} />
           </article>
