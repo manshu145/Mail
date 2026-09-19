@@ -96,7 +96,7 @@ if [[ -n "$CAMPAIGN_ID" ]]; then
 
   echo
   echo "===== 6. CAMPAIGN STATE ====="
-  "${dc[@]}" exec -T postgres sh -lc '
+  "${dc[@]}" exec -T -e CAMPAIGN_ID="$CAMPAIGN_ID" postgres sh -lc '
     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -x -v cid="$CAMPAIGN_ID" <<'"'"'SQL'"'"'
 select
   c.id,
@@ -110,31 +110,51 @@ select
   sa.status sender_status,
   sa.hourly_limit,
   sa.daily_limit,
-  count(m.id)::int total,
-  count(*) filter(where m.status='"'"'queued'"'"')::int queued,
-  count(*) filter(where m.status='"'"'ready_for_transport'"'"')::int ready,
-  count(*) filter(where m.status='"'"'sending'"'"')::int sending,
-  count(*) filter(where m.status='"'"'mta_accepted'"'"')::int mta_accepted,
-  count(*) filter(where m.status='"'"'deferred'"'"')::int deferred,
-  count(*) filter(where m.status='"'"'delivered'"'"')::int delivered,
-  count(*) filter(where m.status='"'"'bounced'"'"')::int bounced,
-  count(*) filter(where m.status='"'"'failed'"'"')::int failed,
-  count(*) filter(where m.status='"'"'cancelled'"'"')::int cancelled,
-  min(m.next_attempt_at) filter(where m.status in ('"'"'ready_for_transport'"'"','"'"'deferred'"'"')) earliest_retry,
-  max(m.next_attempt_at) filter(where m.status in ('"'"'ready_for_transport'"'"','"'"'deferred'"'"')) latest_retry,
-  max(me.created_at) last_event_at
+  x.total,
+  x.queued,
+  x.ready,
+  x.sending,
+  x.mta_accepted,
+  x.deferred,
+  x.delivered,
+  x.bounced,
+  x.failed,
+  x.cancelled,
+  x.earliest_retry,
+  x.latest_retry,
+  e.last_event_at
 from campaigns c
 left join sending_accounts sa on sa.id=c.sending_account_id
-left join messages m on m.campaign_id=c.id
-left join message_events me on me.message_id=m.id
-where c.id=:'"'"'cid'"'"'
-group by c.id,sa.id;
+left join lateral (
+  select
+    count(*)::int total,
+    count(*) filter(where m.status='"'"'queued'"'"')::int queued,
+    count(*) filter(where m.status='"'"'ready_for_transport'"'"')::int ready,
+    count(*) filter(where m.status='"'"'sending'"'"')::int sending,
+    count(*) filter(where m.status='"'"'mta_accepted'"'"')::int mta_accepted,
+    count(*) filter(where m.status='"'"'deferred'"'"')::int deferred,
+    count(*) filter(where m.status='"'"'delivered'"'"')::int delivered,
+    count(*) filter(where m.status='"'"'bounced'"'"')::int bounced,
+    count(*) filter(where m.status='"'"'failed'"'"')::int failed,
+    count(*) filter(where m.status='"'"'cancelled'"'"')::int cancelled,
+    min(m.next_attempt_at) filter(where m.status in ('"'"'ready_for_transport'"'"','"'"'deferred'"'"')) earliest_retry,
+    max(m.next_attempt_at) filter(where m.status in ('"'"'ready_for_transport'"'"','"'"'deferred'"'"')) latest_retry
+  from messages m
+  where m.campaign_id=c.id
+) x on true
+left join lateral (
+  select max(me.created_at) last_event_at
+  from message_events me
+  join messages mm on mm.id=me.message_id
+  where mm.campaign_id=c.id
+) e on true
+where c.id=:'"'"'cid'"'"';
 SQL
   '
 
   echo
   echo "===== 7. CAMPAIGN HOLD REASONS ====="
-  "${dc[@]}" exec -T postgres sh -lc '
+  "${dc[@]}" exec -T -e CAMPAIGN_ID="$CAMPAIGN_ID" postgres sh -lc '
     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -x -v cid="$CAMPAIGN_ID" <<'"'"'SQL'"'"'
 select
   status,
@@ -151,7 +171,7 @@ SQL
 
   echo
   echo "===== 8. CAMPAIGN EVENTS (LAST 2H) ====="
-  "${dc[@]}" exec -T postgres sh -lc '
+  "${dc[@]}" exec -T -e CAMPAIGN_ID="$CAMPAIGN_ID" postgres sh -lc '
     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -x -v cid="$CAMPAIGN_ID" <<'"'"'SQL'"'"'
 select
   me.type,
