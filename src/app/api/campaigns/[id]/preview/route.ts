@@ -5,6 +5,7 @@ import { campaigns, lists, templates } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { preflightAudience } from "@/lib/audience-preflight";
 import { samplePersonalization } from "@/lib/personalization";
+import { isUuid } from "@/lib/id";
 
 function value(input: unknown) {
   const v = String(input ?? "").trim();
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   const body = await request.json().catch(() => null) as { listId?: string; templateId?: string } | null;
   if (!body) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
