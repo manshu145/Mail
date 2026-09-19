@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
 import { campaigns, contacts, lists, sendingAccounts, suppressions, templates, validationJobs } from "@/db/schema";
-import { inboxTests, seedInboxes, sendingDomains } from "@/db/operations-schema";
+import { sendingDomains } from "@/db/operations-schema";
 import { getSession, canManageInfrastructure } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { isValidEmail, normalizeEmail } from "@/lib/contact-utils";
 import { createDkimMaterial } from "@/lib/dkim-keys";
-import { isUuid } from "@/lib/id";
 function text(value:unknown){return String(value??"").trim()}
 export async function POST(request:NextRequest,{params}:{params:Promise<{resource:string}>}){
  const session=await getSession();if(!session)return NextResponse.json({error:"Unauthorized"},{status:401});if(!databaseConfigured)return NextResponse.json({error:"Database is not configured."},{status:503});
@@ -39,20 +38,6 @@ export async function POST(request:NextRequest,{params}:{params:Promise<{resourc
    if(!rows.length)return NextResponse.json({error:"Domain already exists."},{status:409});
    await audit("domain.created",session,"domain",rows[0].id,{domain,dkimSelector:selector});
    return NextResponse.json({ok:true,id:rows[0].id,dkim:{host:`${selector}._domainkey.${domain}`,type:"TXT",value:dkim.publicRecord}},{status:201})
-  }
-  if(resource==="seed-inboxes"){if(!canManageInfrastructure(session.role))return NextResponse.json({error:"Owner role required."},{status:403});const email=text(body.email).toLowerCase();if(!isValidEmail(email))return NextResponse.json({error:"Enter a valid seed email."},{status:400});const raw=text(body.provider);const provider=raw==="gmail"||raw==="outlook"?raw:"other";const rows=await db.insert(seedInboxes).values({email,provider,label:text(body.label)||null}).onConflictDoNothing({target:seedInboxes.email}).returning({id:seedInboxes.id});if(!rows.length)return NextResponse.json({error:"Seed inbox already exists."},{status:409});await audit("seed_inbox.created",session,"seed_inbox",rows[0].id,{email,provider});return NextResponse.json({ok:true,id:rows[0].id},{status:201})}
-  if(resource==="inbox-tests"){
-   const name=text(body.name);
-   if(!name)return NextResponse.json({error:"Test name is required."},{status:400});
-   const campaignId=text(body.campaignId)||null;
-   if(campaignId&&!isUuid(campaignId))return NextResponse.json({error:"Choose a valid campaign."},{status:400});
-   if(campaignId){
-    const [campaign]=await db.select({id:campaigns.id}).from(campaigns).where(eq(campaigns.id,campaignId)).limit(1);
-    if(!campaign)return NextResponse.json({error:"Selected campaign does not exist."},{status:400});
-   }
-   const rows=await db.insert(inboxTests).values({name,campaignId,status:"draft"}).returning({id:inboxTests.id});
-   await audit("inbox_test.created",session,"inbox_test",rows[0].id,{name,campaignId});
-   return NextResponse.json({ok:true,id:rows[0].id},{status:201})
   }
   return NextResponse.json({error:"Unknown resource."},{status:404});
  }catch(error){console.error(error);return NextResponse.json({error:"Could not save this resource."},{status:500})}
