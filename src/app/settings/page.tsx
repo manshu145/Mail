@@ -23,15 +23,15 @@ export default async function SettingsPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mb-7">
+      <div className="page-intro"><div>
         <p className="page-eyebrow mb-2">Workspace</p>
         <h1 className="page-title">Settings</h1>
         <p className="page-description">Control sending limits, reputation protection and retry behavior without exposing infrastructure secrets.</p>
-      </div>
+      </div></div>
 
       {!settingsReady ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Delivery settings are temporarily unavailable.</b> Current runtime defaults remain active.</div> : null}
 
-      <section className="premium-panel p-4 sm:p-6">
+      <section className="section-card p-4 sm:p-6">
         <div className="mb-5 flex items-start gap-3">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-500/10 text-violet-700 dark:text-violet-300"><Gauge className="h-5 w-5" /></div>
           <div>
@@ -44,14 +44,14 @@ export default async function SettingsPage() {
       </section>
 
       <section className="mt-5 grid gap-4 md:grid-cols-2">
-        <Link href="/provider-cooldowns" className="premium-panel p-5 transition hover:-translate-y-0.5 hover:border-violet-500/30">
+        <Link href="/provider-cooldowns" className="premium-panel surface-lift p-5">
           <div className="flex items-start gap-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-300"><TimerReset className="h-5 w-5" /></div>
             <div><h2 className="font-black">Provider cooldowns</h2><p className="mt-1 text-sm leading-6 text-[var(--muted)]">See when Gmail, Yahoo, Microsoft or another mailbox provider is temporarily holding or throttling delivery.</p></div>
           </div>
         </Link>
 
-        <article className="premium-panel p-5">
+        <article className="premium-panel surface-lift p-5">
           <div className="flex items-start gap-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"><ShieldCheck className="h-5 w-5" /></div>
             <div><h2 className="font-black">Protected configuration</h2><p className="mt-1 text-sm leading-6 text-[var(--muted)]">Credentials, signing keys and service-level secrets remain outside this customer-facing page.</p></div>
