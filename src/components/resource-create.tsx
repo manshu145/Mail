@@ -2,7 +2,7 @@
 
 import { Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Option = string | { label: string; value: string };
 type Field = {
@@ -62,12 +62,26 @@ export function ResourceCreate({
     setOpen(false);
   }
 
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, busy]);
+
   return <>
     <button type="button" disabled={disabled} className="btn-primary" onClick={() => { setError(""); setOpen(true); }}>
       <Plus className="h-4 w-4" />{buttonLabel}
     </button>
-    {open ? <div className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-4 backdrop-blur-sm">
-      <section role="dialog" aria-modal="true" aria-labelledby="resource-create-title" className="premium-panel w-full max-w-lg p-6">
+    {open ? <div className="fixed inset-0 z-[90] grid place-items-center overflow-y-auto bg-black/55 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="resource-create-title" className="premium-panel max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto p-5 sm:p-6">
         <div className="mb-6 flex items-start justify-between">
           <div>
             <p className="text-xs font-extrabold uppercase tracking-[.16em] text-zinc-400">NexiMail</p>
