@@ -197,12 +197,15 @@ async function runOnce() {
       failed++; continue;
     }
 
+    // Check owner-configured sender/global capacity before reserving a cooldown
+    // probe slot. Otherwise a rate-limited sender could consume the next probe
+    // time without actually sending the probe.
+    const limit = await accountWithinLimits(account, settings);
+    if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
+
     const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
     if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.cooldownKey, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
     if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope,retryAt:gate.retryAt?.toISOString()}); }
-
-    const limit = await accountWithinLimits(account, settings);
-    if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
     let campaignAttachments = campaignAttachmentCache.get(campaign.id);
     if (!campaignAttachments) { campaignAttachments = await loadCampaignAttachments(campaign.id); campaignAttachmentCache.set(campaign.id, campaignAttachments); }
