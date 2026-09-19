@@ -4,7 +4,6 @@ import { redirect } from "next/navigation";
 import { desc, sql } from "drizzle-orm";
 import { AppShell } from "@/components/app-shell";
 import { MessageStatusBadge } from "@/components/message-status-badge";
-import { LiveRefresh } from "@/components/live-refresh";
 import { db, databaseConfigured } from "@/db";
 import { messageEvents, messages } from "@/db/schema";
 import { getCampaignMetricsList } from "@/lib/campaign-reporting";
@@ -114,7 +113,7 @@ export default async function ReportsPage(){
   return <AppShell session={session}>
     <div className="mb-7 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div><p className="page-eyebrow mb-2">Analytics</p><h1 className="page-title">Reports</h1><p className="page-description">Delivery performance, engagement and recipient activity across your campaigns.</p></div>
-      <LiveRefresh intervalMs={10000} label="Live metrics"/>
+      
     </div>
 
     {!usable?<div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Reports are temporarily unavailable.</b> Please refresh shortly.</div>:null}
