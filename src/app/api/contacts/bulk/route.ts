@@ -4,6 +4,7 @@ import { db, databaseConfigured } from "@/db";
 import { contactLists, contacts, lists, messages } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
+import { isUuid } from "@/lib/id";
 
 type Action = "add_to_list" | "remove_from_list" | "archive" | "restore" | "delete";
 
@@ -13,9 +14,9 @@ export async function POST(request: NextRequest) {
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
   const body = await request.json().catch(() => null) as { contactIds?: string[]; action?: Action; listId?: string } | null;
-  const ids = [...new Set((body?.contactIds || []).filter((x) => typeof x === "string" && x.length > 0))].slice(0, 500);
+  const ids = [...new Set((body?.contactIds || []).filter((x): x is string => isUuid(x)))].slice(0, 500);
   const action = body?.action;
-  if (!ids.length) return NextResponse.json({ error: "Select at least one contact." }, { status: 400 });
+  if (!ids.length) return NextResponse.json({ error: "Select at least one valid contact." }, { status: 400 });
   if (!action || !["add_to_list","remove_from_list","archive","restore","delete"].includes(action)) {
     return NextResponse.json({ error: "Unknown bulk action." }, { status: 400 });
   }
