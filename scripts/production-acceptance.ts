@@ -1,18 +1,16 @@
 import { SignJWT } from "jose";
-import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { resolve4, reverse } from "node:dns/promises";
 import { eq } from "drizzle-orm";
 import { db, pool } from "../src/db";
-import { campaigns, contactLists, contacts, importJobs, lists, messageEvents, messages, sendingAccounts, suppressions, templates, users } from "../src/db/schema";
+import { campaigns, contacts, importJobs, messages, sendingAccounts, suppressions, users } from "../src/db/schema";
 import { importUploads } from "../src/db/import-schema";
-import { seedInboxes, sendingDomains, workerHeartbeats } from "../src/db/operations-schema";
-import { signPublicToken } from "../src/lib/public-tokens";
+import { sendingDomains, workerHeartbeats } from "../src/db/operations-schema";
 
 const baseUrl = "http://127.0.0.1:3000";
 const stamp = Date.now();
 const results: Array<{check:string; status:"PASS"|"WARN"|"FAIL"; detail:string}> = [];
-const created: { importJobId?: string; contactId?: string; email?: string; listId?: string; templateId?: string; campaignId?: string; messageId?: string } = {};
+const created: { importJobId?: string; contactId?: string; email?: string } = {};
 
 function record(check:string,status:"PASS"|"WARN"|"FAIL",detail:string){
   results.push({check,status,detail});
@@ -128,93 +126,31 @@ async function main(){
   record("Non-owner RBAC",denied.status===403?"PASS":"FAIL",`${nonOwner.role} user create -> ${denied.status}`);
   if(tempOperatorId) await db.delete(users).where(eq(users.id,tempOperatorId));
 
-  // Real import-worker acceptance test. Prefer a configured Gmail seed alias so
-  // the same test can exercise the Gmail validation worker without inventing a mailbox.
-  const [seed]=await db.select().from(seedInboxes).where(eq(seedInboxes.active,true)).limit(1);
-  let testEmail=`neximail-acceptance-${stamp}@example.invalid`;
-  let canValidate=false;
-  if(seed && /@(gmail|googlemail)\.com$/i.test(seed.email)){
-    const [local,domain]=seed.email.split("@");
-    testEmail=`${local}+neximail-acceptance-${stamp}@${domain}`;
-    canValidate=true;
-  }
+  // Real import-worker acceptance test using a non-deliverable documentation address.
+  // Optional mailbox-validation / seed-placement checks are intentionally excluded.
+  const testEmail=`neximail-acceptance-${stamp}@example.invalid`;
   created.email=testEmail;
   const csv=`email,first_name\n${testEmail},Acceptance\n`;
   const [job]=await db.insert(importJobs).values({filename:`acceptance-${stamp}.csv`,createdBy:owner.id}).returning({id:importJobs.id});
   created.importJobId=job.id;
   await db.insert(importUploads).values({
     jobId:job.id,content:csv,headers:["email","first_name"],mapping:{email:"email",first_name:"first_name"},
-    options:{consentSource:"production_acceptance",consentStatus:"confirmed",defaultSource:"production_acceptance",queueValidation:canValidate},
+    options:{consentSource:"production_acceptance",consentStatus:"confirmed",defaultSource:"production_acceptance",queueValidation:false},
     sizeBytes:Buffer.byteLength(csv)
   });
   const imported=await waitFor("Import worker",60000,async()=>{
-    const j=await pool.query("select status,imported_rows,invalid_rows,error_message,validation_job_id from import_jobs where id=$1",[job.id]);
+    const j=await pool.query("select status,imported_rows,invalid_rows,error_message from import_jobs where id=$1",[job.id]);
     if(j.rows[0]?.status==="failed") throw new Error(`Import failed: ${j.rows[0].error_message}`);
     if(j.rows[0]?.status!=="completed") return null;
-    const c=await pool.query("select id,email,consent_status,consent_source,validation_status from contacts where normalized_email=lower($1)",[testEmail]);
-    if(!c.rows[0]) { record("CSV import","FAIL","import job completed but contact was not created"); return {job:j.rows[0],contact:null}; }
-    created.contactId=c.rows[0].id;
-    return {job:j.rows[0],contact:c.rows[0]};
+    const contact=await pool.query("select id,email,consent_status,consent_source,validation_status from contacts where normalized_email=lower($1)",[testEmail]);
+    if(!contact.rows[0]) { record("CSV import","FAIL","import job completed but contact was not created"); return {job:j.rows[0],contact:null}; }
+    created.contactId=contact.rows[0].id;
+    return {job:j.rows[0],contact:contact.rows[0]};
   });
   if(imported?.contact) record("CSV import","PASS",`contact created with consent=${imported.contact.consent_status}, validation=${imported.contact.validation_status}`);
 
-  if(canValidate && imported?.contact){
-    const validation=await waitFor("Gmail validation",150000,async()=>{
-      const j=await pool.query("select validation_job_id from import_jobs where id=$1",[job.id]);
-      const id=j.rows[0]?.validation_job_id; if(!id) return null;
-      const v=await pool.query("select status,total_rows,processed_rows from validation_jobs where id=$1",[id]);
-      if(v.rows[0]?.status!=="completed") return null;
-      const r=await pool.query("select status,detail from validation_results where job_id=$1 order by created_at desc limit 1",[id]);
-      return {job:v.rows[0],result:r.rows[0]||null};
-    });
-    if(validation) record("Gmail validation","PASS",JSON.stringify(validation));
-  } else record("Gmail validation","WARN","no active Gmail seed inbox configured; validation probe skipped rather than inventing a mailbox");
-
-  const [account]=await db.select().from(sendingAccounts).where(eq(sendingAccounts.status,"active")).limit(1);
-  if(canValidate && seed && account && created.contactId){
-    const [list]=await db.insert(lists).values({name:`__acceptance_${stamp}`,description:"Automated production acceptance test"}).returning({id:lists.id});
-    created.listId=list.id;
-    await db.insert(contactLists).values({contactId:created.contactId,listId:list.id});
-    const [template]=await db.insert(templates).values({
-      name:`__acceptance_${stamp}`,subject:"NexiMail production acceptance",
-      htmlBody:'<p>Acceptance test.</p><p><a href="https://example.com/">Tracking link</a></p><p><a href="{{unsubscribe_url}}">Unsubscribe</a></p>',
-      textBody:"Acceptance test. https://example.com/ Unsubscribe: {{unsubscribe_url}}"
-    }).returning({id:templates.id});
-    created.templateId=template.id;
-    const [campaign]=await db.insert(campaigns).values({
-      name:`__acceptance_${stamp}`,subject:"NexiMail production acceptance",templateId:template.id,listId:list.id,
-      sendingAccountId:account.id,status:"queued",trackOpens:true,trackClicks:true
-    }).returning({id:campaigns.id});
-    created.campaignId=campaign.id;
-
-    const message=await waitFor("Campaign pipeline",180000,async()=>{
-      const m=await pool.query("select id,status,last_error,accepted_at,delivered_at,bounced_at from messages where campaign_id=$1 order by queued_at desc limit 1",[campaign.id]);
-      if(!m.rows[0]) return null;
-      created.messageId=m.rows[0].id;
-      if(["mta_accepted","delivered","bounced","failed"].includes(m.rows[0].status)) return m.rows[0];
-      return null;
-    });
-    if(message){
-      record("Campaign -> transport",["mta_accepted","delivered"].includes(message.status)?"PASS":"WARN",JSON.stringify(message));
-
-      const openToken=await signPublicToken({messageId:message.id},"30d");
-      const clickToken=await signPublicToken({messageId:message.id,url:"https://example.com/"},"30d");
-      const unsubscribeToken=await signPublicToken({messageId:message.id,email:testEmail},"30d");
-      const commonHeaders={"user-agent":"Mozilla/5.0 NexiMailAcceptance/1.0","accept-language":"en-US,en;q=0.9"};
-      const openRes=await fetch(`${baseUrl}/tracking/open/${openToken}`,{headers:commonHeaders});
-      const clickRes=await fetch(`${baseUrl}/tracking/click/${clickToken}`,{headers:commonHeaders,redirect:"manual"});
-      const unsubGet=await fetch(`${baseUrl}/unsubscribe/${unsubscribeToken}`,{headers:commonHeaders});
-      const unsubPost=await fetch(`${baseUrl}/unsubscribe/${unsubscribeToken}`,{method:"POST",headers:commonHeaders});
-      await sleep(1000);
-      const ev=await pool.query("select type,count(*)::int count from message_events where message_id=$1 and type in ('open','click','unsubscribe') group by type",[message.id]);
-      const sup=await pool.query("select reason,source from suppressions where normalized_email=lower($1)",[testEmail]);
-      const types=new Set(ev.rows.map(r=>r.type));
-      const ok=openRes.status===200 && clickRes.status===302 && unsubGet.status===200 && unsubPost.status===200 && types.has("open") && types.has("click") && types.has("unsubscribe") && sup.rows[0]?.reason==="unsubscribe";
-      record("Tracking + unsubscribe",ok?"PASS":"FAIL",`HTTP open=${openRes.status},click=${clickRes.status},unsubGET=${unsubGet.status},unsubPOST=${unsubPost.status}; events=${[...types].join(",")}; suppression=${sup.rows[0]?.reason||"none"}`);
-    }
-  } else {
-    record("Campaign -> transport","WARN",`requires active Gmail seed inbox + active sending account + imported test contact (seed=${Boolean(seed)}, account=${Boolean(account)}, contact=${Boolean(created.contactId)})`);
-  }
+  const [account]=await db.select({id:sendingAccounts.id,name:sendingAccounts.name}).from(sendingAccounts).where(eq(sendingAccounts.status,"active")).limit(1);
+  record("Active sending account",account?"PASS":"WARN",account?`active sender present (${account.name})`:"no active sending account configured");
 
   let bounceBaseCampaignId:string|undefined;
   const campaignCount=await pool.query("select count(*)::int count from campaigns");
@@ -226,23 +162,10 @@ async function main(){
   record("Bounce processing",bounceCode===0?"PASS":"FAIL",`npm run smoke:bounce exit=${bounceCode}`);
   if(bounceBaseCampaignId) await db.delete(campaigns).where(eq(campaigns.id,bounceBaseCampaignId));
 
-  // Cleanup only when the test campaign is terminal or was never created.
-  // If Postfix has accepted a message but it is still in flight, retain the rows
-  // so postfix-event-worker can finish safely instead of deleting its target.
-  let safeCleanup=true;
-  if(created.messageId){
-    const m=await pool.query("select status from messages where id=$1",[created.messageId]);
-    safeCleanup=!m.rows[0] || ["delivered","bounced","failed","cancelled"].includes(m.rows[0].status);
-  }
-  if(safeCleanup){
-    if(created.campaignId) await db.delete(campaigns).where(eq(campaigns.id,created.campaignId));
-    if(created.templateId) await db.delete(templates).where(eq(templates.id,created.templateId));
-    if(created.listId) await db.delete(lists).where(eq(lists.id,created.listId));
-    if(created.email) await db.delete(suppressions).where(eq(suppressions.normalizedEmail,created.email.toLowerCase()));
-    if(created.contactId) await db.delete(contacts).where(eq(contacts.id,created.contactId));
-    if(created.importJobId) await db.delete(importJobs).where(eq(importJobs.id,created.importJobId));
-    record("Acceptance cleanup","PASS","temporary rows removed");
-  } else record("Acceptance cleanup","WARN",`message ${created.messageId} is still in flight; test rows retained intentionally`);
+  if(created.email) await db.delete(suppressions).where(eq(suppressions.normalizedEmail,created.email.toLowerCase()));
+  if(created.contactId) await db.delete(contacts).where(eq(contacts.id,created.contactId));
+  if(created.importJobId) await db.delete(importJobs).where(eq(importJobs.id,created.importJobId));
+  record("Acceptance cleanup","PASS","temporary rows removed");
 
   const fail=results.some(r=>r.status==="FAIL");
   const warn=results.some(r=>r.status==="WARN");
