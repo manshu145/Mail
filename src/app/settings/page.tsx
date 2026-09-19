@@ -22,7 +22,7 @@ export default async function SettingsPage() {
               <SlidersHorizontal className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[.16em] text-[var(--muted)]">Workspace</p>
+              <p className="text-[11px] font-black uppercase tracking-[.16em] text-[var(--muted)]">Workspace</p>
               <h2 className="mt-1 text-lg font-black">Workspace preferences</h2>
               <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
                 Operational controls are available in their dedicated NexiMail sections so customer-facing settings stay simple and safe.
