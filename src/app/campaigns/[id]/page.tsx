@@ -8,7 +8,6 @@ import { CampaignEditor } from "@/components/campaign-editor";
 import { CampaignReuseAction } from "@/components/campaign-reuse-action";
 import { LiveRefresh } from "@/components/live-refresh";
 import { MessageStatusBadge } from "@/components/message-status-badge";
-import { DuplicateCampaignButton } from "@/components/duplicate-campaign-button";
 import { db, databaseConfigured } from "@/db";
 import { campaignPreflights } from "@/db/campaign-ops-schema";
 import { campaigns, lists, sendingAccounts, templates } from "@/db/schema";
@@ -152,7 +151,7 @@ export default async function CampaignDetailPage({
       <Link className="mb-5 inline-flex items-center gap-2 text-sm font-bold text-[var(--muted)] hover:text-[var(--foreground)]" href="/campaigns"><ArrowLeft className="h-4 w-4"/>Campaigns</Link>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="page-eyebrow">Campaign report</p><h1 className="mt-2 text-3xl font-black tracking-[-.035em] sm:text-4xl">{campaign.name}</h1><p className="mt-2 text-sm text-[var(--muted)]">{campaign.subject}</p></div>
-        <div className="flex flex-wrap items-center justify-end gap-2"><span className="rounded-full bg-violet-500/10 px-3 py-1.5 text-xs font-extrabold capitalize text-violet-700 dark:text-violet-300">{campaign.status}</span><DuplicateCampaignButton id={campaign.id}/><CampaignControl id={campaign.id} status={campaign.status} failed={metrics?.failed||0}/></div>
+        <div className="flex flex-wrap items-center justify-end gap-2"><span className="rounded-full bg-violet-500/10 px-3 py-1.5 text-xs font-extrabold capitalize text-violet-700 dark:text-violet-300">{campaign.status}</span><CampaignReuseAction campaignId={campaign.id} lists={listRows} currentListId={campaign.listId}/><CampaignControl id={campaign.id} status={campaign.status} failed={metrics?.failed||0}/></div>
       </div>
     </div>
 
