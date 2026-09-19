@@ -87,6 +87,9 @@ on_error() {
 trap 'on_error "$LINENO"' ERR
 "${old_dc[@]}" stop --timeout 120 "${workers[@]}"
 "${dc[@]}" run --rm --no-deps app npm run db:migrate
+# Repair legacy terminal bounces that predate automatic all-bounce suppression.
+# This command is idempotent and only inserts currently missing suppressions.
+"${dc[@]}" run --rm --no-deps app npm run backfill:bounced-suppressions
 # Ensure the persistent CSV spool is writable by the non-root runtime user.
 "${dc[@]}" run --rm --no-deps import-volume-init
 # Persist the CURRENT queue before replacing the MTA container. Never mount an empty
