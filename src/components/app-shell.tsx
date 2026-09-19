@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3, Blocks, ChevronDown, ContactRound, FileUp, Gauge,
-  Globe2, Inbox, Layers3, ListOrdered, Mail, MailCheck, Menu, Network,
+  Globe2, Layers3, ListOrdered, Mail, MailCheck, Menu, Network,
   PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldBan, Users, X,
 } from "lucide-react";
 import { BrandMark } from "./brand-mark";
@@ -39,7 +39,6 @@ const navGroups: NavGroup[] = [
     { href: "/domains", label: "Sending domains", icon: Globe2 },
     { href: "/sender-identities", label: "Sender identities", icon: Network },
     { href: "/suppressions", label: "Suppressions", icon: ShieldBan },
-    { href: "/inbox-placement", label: "Inbox placement", icon: Inbox },
   ]},
   { label: "Workspace", items: [
     { href: "/users", label: "Team access", icon: Users, roles: ["owner"] },
