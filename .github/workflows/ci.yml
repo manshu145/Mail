@@ -40,13 +40,18 @@ jobs:
       - run: npm install
       - name: Release sanitization gate
         run: npm run release:sanitize
-      - name: Validate deployment script syntax
+      - name: Validate release/deployment script syntax
         run: |
+          bash -n scripts/build-release-bundle.sh
           bash -n deploy/install-isolated.sh
           bash -n deploy/deploy-reviewed.sh
           bash -n deploy/run-production-acceptance.sh
           bash -n deploy/provision-mta-tls.sh
           bash -n deploy/issue-smtp-certificate.sh
+      - name: Build metadata-free release bundle
+        env:
+          NEXIMAIL_RELEASE_OUT_DIR: /tmp/neximail-release
+        run: npm run release:bundle
       - run: npm run db:migrate
       - run: npm run test
       - run: npm run typecheck
