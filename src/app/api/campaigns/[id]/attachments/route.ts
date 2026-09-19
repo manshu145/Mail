@@ -4,6 +4,7 @@ import { db, databaseConfigured, pool } from "@/db";
 import { campaigns } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { isUuid } from "@/lib/id";
 import {
   ALLOWED_ATTACHMENT_TYPES,
   MAX_ATTACHMENT_BYTES,
@@ -25,6 +26,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   const campaign = await campaignForEdit(id);
   if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   return NextResponse.json({ attachments: await listCampaignAttachments(id) });
@@ -35,6 +37,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   const campaign = await campaignForEdit(id);
   if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   if (!EDITABLE.has(campaign.status)) return NextResponse.json({ error: "Attachments are locked after sending begins." }, { status: 409 });
@@ -70,6 +73,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   const campaign = await campaignForEdit(id);
   if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   if (!EDITABLE.has(campaign.status)) return NextResponse.json({ error: "Attachments are locked after sending begins." }, { status: 409 });
