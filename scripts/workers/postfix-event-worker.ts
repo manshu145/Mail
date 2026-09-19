@@ -5,6 +5,8 @@ import { completeLogLines, parsePostfixLog } from "../../src/lib/postfix-log";
 import { handlePostfixEvent } from "../../src/lib/postfix-events";
 import { db, pool } from "../../src/db";
 import { workerHeartbeats } from "../../src/db/operations-schema";
+import { deleteMtaQueueMessage } from "../../src/lib/mta-control";
+import { providerForDelivery, SENDER_COOLDOWN_KEY } from "../../src/lib/provider";
 async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "postfix-events", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
 }
@@ -46,6 +48,110 @@ async function ingestFile(filename: string) {
   } finally { await file.close(); }
 }
 
+
+type ActiveCooldown = {
+  sending_account_id: string;
+  provider: string;
+  next_probe_at: Date | null;
+};
+type AcceptedQueueMessage = {
+  id: string;
+  recipient_email: string;
+  provider_message_id: string;
+  last_error: string | null;
+  sending_account_id: string;
+  provider_probe: boolean;
+};
+
+async function evacuateActiveCooldownQueues() {
+  const cooldowns = await pool.query<ActiveCooldown>(`
+    select sending_account_id,provider,next_probe_at
+    from provider_cooldowns
+    where active=true
+  `);
+  if (!cooldowns.rows.length) return { cooldowns: 0, candidates: 0, evacuated: 0, errors: 0 };
+
+  const candidates = await pool.query<AcceptedQueueMessage>(`
+    select
+      m.id,
+      m.recipient_email,
+      m.provider_message_id,
+      m.last_error,
+      c.sending_account_id,
+      coalesce((
+        select (me.payload->>'providerProbe')::boolean
+        from message_events me
+        where me.message_id=m.id and me.type='mta_accepted'
+        order by me.created_at desc
+        limit 1
+      ),false) as provider_probe
+    from messages m
+    join campaigns c on c.id=m.campaign_id
+    where m.status='mta_accepted'
+      and m.provider_message_id is not null
+  `);
+
+  let evacuated = 0;
+  let errors = 0;
+  for (const message of candidates.rows) {
+    const provider = providerForDelivery(message.recipient_email, message.last_error);
+    const cooldown = cooldowns.rows.find((row) =>
+      row.sending_account_id === message.sending_account_id
+      && (row.provider === SENDER_COOLDOWN_KEY || row.provider === provider)
+    );
+    if (!cooldown) continue;
+
+    // Leave the one scheduled probe in Postfix until it gets a real SMTP
+    // outcome. If it is deferred, last_error becomes non-null and the next
+    // reconciliation evacuates it back to the app queue.
+    if (message.provider_probe && !message.last_error) continue;
+
+    try {
+      const deleted = await deleteMtaQueueMessage(message.provider_message_id);
+      if (!deleted.deleted) continue;
+      const retryAt = cooldown.next_probe_at || new Date(Date.now() + 15 * 60_000);
+      const marker = cooldown.provider === SENDER_COOLDOWN_KEY
+        ? "sender_cooldown"
+        : `provider_cooldown:${cooldown.provider}`;
+      const updated = await pool.query<{ id: string }>(`
+        update messages
+        set status='ready_for_transport',
+            provider_message_id=null,
+            accepted_at=null,
+            next_attempt_at=$3,
+            last_error=$4,
+            attempt_count=greatest(attempt_count-1,0)
+        where id=$1
+          and status='mta_accepted'
+          and provider_message_id=$2
+        returning id
+      `, [message.id, message.provider_message_id, retryAt, marker]);
+      if (!updated.rowCount) continue;
+
+      await pool.query(`
+        insert into message_events(message_id,type,payload)
+        values($1,'postfix_queue_evacuated',$2::jsonb)
+      `, [message.id, JSON.stringify({
+        queueId: message.provider_message_id,
+        cooldownKey: cooldown.provider,
+        provider,
+        retryAt: retryAt.toISOString(),
+      })]);
+      evacuated++;
+    } catch (error) {
+      errors++;
+      console.error("[postfix-event-worker] queue evacuation", message.provider_message_id, error);
+    }
+  }
+
+  return {
+    cooldowns: cooldowns.rows.length,
+    candidates: candidates.rows.length,
+    evacuated,
+    errors,
+  };
+}
+
 async function runOnce() {
   // All retained plain-text rotations are read, oldest first, including the initial deployment.
   const files = await readdir(logDirectory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
@@ -74,7 +180,8 @@ async function runOnce() {
       }
     });
   }
-  await heartbeat({ state: "online", matched, pendingBatch: pending.rows.length, files: logs.length });
+  const queueControl = await evacuateActiveCooldownQueues();
+  await heartbeat({ state: "online", matched, pendingBatch: pending.rows.length, files: logs.length, queueControl });
 }
 
 async function main() {
