@@ -11,6 +11,7 @@ import {
 import { BrandMark } from "./brand-mark";
 import { PwaStatus } from "./pwa-status";
 import { ThemeToggle } from "./theme-toggle";
+import { LiveRefresh } from "./live-refresh";
 
 type SessionView = { name: string; email: string; role: "owner" | "admin" | "operator" };
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string; strokeWidth?: number }>; roles?: SessionView["role"][] };
@@ -117,7 +118,7 @@ export function AppShell({ session, children }: { session: SessionView; children
     <div className={`transition-[padding] duration-200 ${collapsed?"lg:pl-[76px]":"lg:pl-[248px]"}`}>
       <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-[var(--border)] bg-[color:var(--header-bg)] px-4 backdrop-blur-xl sm:px-6 lg:px-8">
         <div className="flex min-w-0 items-center gap-3"><button className="icon-button grid lg:hidden" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu className="h-[18px] w-[18px]"/></button><button className="icon-button hidden lg:grid" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"} onClick={()=>setCollapsed(v=>{const next=!v;try{window.localStorage.setItem("neximail.sidebar.collapsed",next?"1":"0")}catch{}return next})}>{collapsed?<PanelLeftOpen className="h-[17px] w-[17px]"/>:<PanelLeftClose className="h-[17px] w-[17px]"/>}</button><div className="min-w-0"><p className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-[var(--muted)]">Workspace</p><p className="truncate text-[14px] font-extrabold tracking-[-0.01em]">{current.label}</p></div></div>
-        <div className="flex items-center gap-2"><PwaStatus/><ThemeToggle/></div>
+        <div className="flex items-center gap-2"><LiveRefresh intervalMs={5000} label="Live 5s"/><PwaStatus/><ThemeToggle/></div>
       </header>
       <main className="mx-auto w-full max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
     </div>
