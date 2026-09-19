@@ -11,10 +11,12 @@ type Props={
   fromName:string;
   fromEmail:string;
   replyTo:string|null;
+  hourlyLimit:number;
+  dailyLimit:number;
   canEdit:boolean;
 };
 
-export function SendingAccountActions({id,status,name,fromName,fromEmail,replyTo,canEdit}:Props) {
+export function SendingAccountActions({id,status,name,fromName,fromEmail,replyTo,hourlyLimit,dailyLimit,canEdit}:Props) {
   const router=useRouter();
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState("");
@@ -52,6 +54,8 @@ export function SendingAccountActions({id,status,name,fromName,fromEmail,replyTo
         fromName:String(formData.get("fromName")||""),
         fromEmail:String(formData.get("fromEmail")||""),
         replyTo:String(formData.get("replyTo")||""),
+        hourlyLimit:Number(formData.get("hourlyLimit")||0),
+        dailyLimit:Number(formData.get("dailyLimit")||0),
       });
       setOpen(false);
       setMessage("Sender identity updated.");
@@ -85,6 +89,10 @@ export function SendingAccountActions({id,status,name,fromName,fromEmail,replyTo
           <label className="block"><span className="mb-1.5 block text-sm font-bold">From name</span><input name="fromName" defaultValue={fromName} required className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none"/></label>
           <label className="block"><span className="mb-1.5 block text-sm font-bold">From email</span><input name="fromEmail" type="email" defaultValue={fromEmail} required className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none"/><span className="mt-1.5 block text-[11px] leading-4 text-[var(--muted)]">Changing the sender domain still has to pass NexiMail domain/auth checks before delivery.</span></label>
           <label className="block"><span className="mb-1.5 block text-sm font-bold">Reply-to</span><input name="replyTo" type="email" defaultValue={replyTo||""} placeholder="Leave blank to use From email" className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none"/></label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block"><span className="mb-1.5 block text-sm font-bold">Sender hourly limit</span><input name="hourlyLimit" type="number" min="0" step="1" defaultValue={hourlyLimit} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none"/><span className="mt-1.5 block text-[11px] leading-4 text-[var(--muted)]">0 = unlimited. Global workspace limits can still apply.</span></label>
+            <label className="block"><span className="mb-1.5 block text-sm font-bold">Sender 24-hour limit</span><input name="dailyLimit" type="number" min="0" step="1" defaultValue={dailyLimit} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none"/><span className="mt-1.5 block text-[11px] leading-4 text-[var(--muted)]">0 = unlimited. No hidden platform cap.</span></label>
+          </div>
           {error?<p role="alert" className="text-sm font-semibold text-rose-600">{error}</p>:null}
           <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
             <button type="button" disabled={busy} onClick={()=>setOpen(false)} className="btn-secondary w-full sm:w-auto">Cancel</button>

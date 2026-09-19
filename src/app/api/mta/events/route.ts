@@ -68,19 +68,17 @@ export async function POST(request: NextRequest) {
     await tx.insert(messageEvents).values({
       messageId: message.id,
       type: "mta_bounced",
-      payload: { detail: body.detail || null, remoteCode: body.remoteCode || null, bounceKind: classification.kind, bounceReason: classification.reason, recipientSuppressed: classification.suppressRecipient, providerPressure: classification.providerPressure },
+      payload: { detail: body.detail || null, remoteCode: body.remoteCode || null, bounceKind: classification.kind, bounceReason: classification.reason, recipientSuppressed: true, providerPressure: classification.providerPressure },
     });
-    if (classification.suppressRecipient) {
-      // Never downgrade an existing unsubscribe/complaint/manual suppression just
-      // because another delivery path later reports a hard bounce.
-      await tx.insert(suppressions).values({
-        email: message.recipientEmail,
-        normalizedEmail: normalizeEmail(message.recipientEmail),
-        reason: "hard_bounce",
-        source: "mta_event",
-        note: detail || classification.reason,
-      }).onConflictDoNothing({ target: suppressions.normalizedEmail });
-    }
+    // Every terminal bounce is globally blocked from future sends. Existing
+    // unsubscribe/complaint/manual suppressions keep their stronger reason.
+    await tx.insert(suppressions).values({
+      email: message.recipientEmail,
+      normalizedEmail: normalizeEmail(message.recipientEmail),
+      reason: classification.suppressRecipient ? "hard_bounce" : "bounce",
+      source: "mta_event",
+      note: detail || classification.reason,
+    }).onConflictDoNothing({ target: suppressions.normalizedEmail });
   } else {
     await tx.insert(messageEvents).values({ messageId: message.id, type: `mta_${status}`, payload: { detail: body.detail || null, remoteCode: body.remoteCode || null } });
   }

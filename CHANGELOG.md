@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.1 — 2026-09-19
+
+### Live operations and reporting
+- Workspace operational data now refreshes automatically every five seconds while the tab is visible.
+- Reports support All time, Today, Yesterday, Last 7 days, Last 30 days and custom IST date ranges.
+- Message log and recipient detail expose the full delivery lifecycle, including transport attempts, MTA queue IDs, provider responses, retries, cooldowns and engagement.
+- Campaign read-only states now match the actual campaign state.
+- Campaign provider impact is intentionally compact; full SMTP/cooldown evidence remains on the Provider cooldowns page.
+
+### Sender limits and cooldown safety
+- New and untouched legacy sender identities no longer carry hidden 500/hour and 1,000/day caps.
+- Per-sender hourly/24-hour limits are editable and show live usage plus the effective cap after global settings.
+- Generic 4.x, mailbox-full, quota and recipient-policy conditions no longer trigger provider-wide cooldowns.
+- Genuine provider restrictions pause only the affected provider/domain scope; sender/outbound-path restrictions pause the sender.
+- Manual Clear/Reactivate controls are replaced by controlled automatic probes and an owner-triggered Check now action.
+- Already accepted Postfix queue items under an active restriction are removed from the MTA retry loop and safely returned to NexiMail until the next controlled probe.
+
+### Compliance
+- Added a searchable Unsubscribers view with campaign/message context.
+- Every terminal bounce is automatically added to global suppression; legacy bounced recipients are repaired idempotently during deployment.
+
 ## 1.0.0 — 2026-09-19
 
 NexiMail v1.0.0 is the first production release of the self-hosted email marketing control plane.

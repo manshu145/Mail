@@ -2,7 +2,6 @@ import { ArrowUpRight, CircleGauge, Eye, FileUp, Globe2, Mail, MailCheck, MouseP
 import { redirect } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { AppShell } from "@/components/app-shell";
-import { LiveRefresh } from "@/components/live-refresh";
 import { db, databaseConfigured } from "@/db";
 import { contacts, messages } from "@/db/schema";
 import { getSession } from "@/lib/auth";
@@ -100,7 +99,7 @@ export default async function DashboardPage() {
   return <AppShell session={session}>
     <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
       <div><p className="page-eyebrow mb-2">Overview</p><h1 className="page-title">Dashboard</h1><p className="page-description">Campaign performance, audience activity and delivery results at a glance.</p></div>
-      <div className="flex flex-wrap items-center gap-2"><LiveRefresh intervalMs={10000} label="Live"/><a href="/imports" className="btn-secondary"><FileUp className="h-4 w-4"/> Import contacts</a><a href="/campaigns" className="btn-primary"><Plus className="h-4 w-4"/> New campaign</a></div>
+      <div className="flex flex-wrap items-center gap-2"><a href="/imports" className="btn-secondary"><FileUp className="h-4 w-4"/> Import contacts</a><a href="/campaigns" className="btn-primary"><Plus className="h-4 w-4"/> New campaign</a></div>
     </div>
 
     {!dataReady?<div className="mb-4 rounded-2xl border border-amber-500/15 bg-amber-500/[0.055] px-4 py-3 text-sm text-amber-800 dark:text-amber-200">Workspace data is temporarily unavailable. Please refresh shortly.</div>:null}

@@ -1,6 +1,6 @@
 {
   "name": "neximail",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12,6 +12,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "bootstrap:owner": "tsx scripts/bootstrap-owner.ts",
+    "backfill:bounced-suppressions": "tsx scripts/backfill-bounced-suppressions.ts",
     "smoke:bounce": "tsx scripts/smoke-bounce.ts",
     "worker:import": "tsx scripts/workers/import-worker.ts",
     "worker:campaign": "tsx scripts/workers/campaign-worker.ts",
