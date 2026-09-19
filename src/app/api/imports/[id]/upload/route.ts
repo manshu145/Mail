@@ -7,6 +7,7 @@ import { importJobs } from "@/db/schema";
 import { importUploads } from "@/db/import-schema";
 import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
+import { isUuid } from "@/lib/id";
 
 export const runtime = "nodejs";
 
@@ -36,6 +37,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!databaseConfigured) return NextResponse.json({ error: "Import storage is unavailable." }, { status: 503 });
 
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Invalid import id." }, { status: 400 });
   if (!request.body) return NextResponse.json({ error: "CSV upload body is empty." }, { status: 400 });
 
