@@ -20,6 +20,7 @@ export function providerForEmail(email: string): MailboxProvider {
   if (domain === "proton.me" || domain === "protonmail.com" || domain === "pm.me") return "proton";
   if (domain === "rediffmail.com" || domain === "rediff.com") return "rediff";
   if (domain === "mail.com") return "mailcom";
+  if (domain === "zoho.com" || domain === "zohomail.com" || domain === "zoho.in" || domain === "zohomail.in") return "zoho";
   return `domain:${domain}`;
 }
 
