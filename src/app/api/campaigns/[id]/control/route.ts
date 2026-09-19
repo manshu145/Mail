@@ -3,12 +3,14 @@ import { databaseConfigured } from "@/db";
 import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
 import { CampaignControlError, controlCampaign } from "@/lib/campaign-control";
+import { isUuid } from "@/lib/id";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
   const { id } = await params;
+  if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return NextResponse.json({ error: "Invalid campaign ID" }, { status: 400 });
   const body = await request.json().catch(() => null) as { action?: string } | null;
   if (!body?.action || !["cancel", "pause", "resume", "retry_failed"].includes(body.action)) return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
