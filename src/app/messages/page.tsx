@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, sql } from "drizzle-orm";
 import { CircleGauge, MailCheck, Search, ShieldAlert, Send } from "lucide-react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
