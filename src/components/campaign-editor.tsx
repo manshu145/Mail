@@ -28,6 +28,25 @@ function scheduledValue(formData: FormData) {
   const date = new Date(`${raw}:00+05:30`);
   return Number.isNaN(date.getTime()) ? raw : date.toISOString();
 }
+
+function previewDocument(html: string) {
+  const responsive = `<style id="neximail-preview-responsive">
+    html,body{margin:0!important;width:100%!important;max-width:100%!important;overflow-x:hidden!important}
+    body{box-sizing:border-box!important}
+    body>table,body>div,body>center{max-width:100%!important}
+    table{max-width:100%!important}
+    img{max-width:100%!important;height:auto!important}
+    pre{max-width:100%!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important}
+    [style*="min-width"]{min-width:0!important}
+    @media(max-width:480px){
+      body{padding-left:0!important;padding-right:0!important}
+      table[width]{width:100%!important}
+      td,th{max-width:100%!important}
+    }
+  </style>`;
+  if (/<head[\s>]/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1><meta name="viewport" content="width=device-width,initial-scale=1">${responsive}`);
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">${responsive}</head><body>${html}</body></html>`;
+}
 export function CampaignEditor({ campaign, lists, templates, accounts, runtimePolicy }: { campaign: Campaign; lists: Option[]; templates: Option[]; accounts: AccountOption[]; runtimePolicy: RuntimePolicyView }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -183,12 +202,12 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
         <button type="button" disabled={previewBusy || !listId || !templateId} onClick={()=>void loadPreview()} className="btn-secondary !min-h-9 w-full sm:w-auto"><RefreshCw className={`h-3.5 w-3.5 ${previewBusy?"animate-spin":""}`}/> Refresh review</button>
       </div>
 
-      {preview ? <div className="grid gap-px bg-[var(--border)] xl:grid-cols-[.72fr_1.28fr]">
-        <div className="bg-[var(--surface)] p-4 sm:p-5">
+      {preview ? <div className="grid min-w-0 gap-px bg-[var(--border)] xl:grid-cols-[.72fr_1.28fr]">
+        <div className="min-w-0 bg-[var(--surface)] p-4 sm:p-5">
           <p className="page-eyebrow">Final audience estimate</p>
           <p className="mt-2 text-4xl font-black tracking-[-.05em] text-emerald-600">{preview.audience.eligibleCount.toLocaleString()}</p>
           <p className="mt-1 text-xs font-bold text-[var(--muted)]">currently eligible recipients</p>
-          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+          <div className="mt-4 grid min-w-0 grid-cols-1 gap-2 text-xs min-[360px]:grid-cols-2">
             {[
               ["Matched",preview.audience.rawCount,"violet"],
               ["Valid",preview.audience.validCount,"emerald"],
@@ -197,20 +216,20 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
               ["Unknown",preview.audience.unknownCount,"orange"],
               ["Suppressed",preview.audience.suppressedCount,"rose"],
               ["Invalid",preview.audience.invalidCount,"rose"],
-            ].map(([label,count,tone])=><div key={String(label)} className={`rounded-xl border p-3 ${tone==="emerald"?"border-emerald-500/15 bg-emerald-500/[0.05]":tone==="amber"?"border-amber-500/15 bg-amber-500/[0.05]":tone==="orange"?"border-orange-500/15 bg-orange-500/[0.05]":tone==="rose"?"border-rose-500/15 bg-rose-500/[0.05]":"border-violet-500/15 bg-violet-500/[0.05]"}`}><div className="font-black">{Number(count).toLocaleString()}</div><div className="mt-0.5 text-[11px] font-bold text-[var(--muted)]">{label}</div></div>)}
+            ].map(([label,count,tone])=><div key={String(label)} className={`min-w-0 overflow-hidden rounded-xl border p-3 ${tone==="emerald"?"border-emerald-500/15 bg-emerald-500/[0.05]":tone==="amber"?"border-amber-500/15 bg-amber-500/[0.05]":tone==="orange"?"border-orange-500/15 bg-orange-500/[0.05]":tone==="rose"?"border-rose-500/15 bg-rose-500/[0.05]":"border-violet-500/15 bg-violet-500/[0.05]"}`}><div className="font-black">{Number(count).toLocaleString()}</div><div className="mt-0.5 break-words text-[11px] font-bold leading-4 text-[var(--muted)]">{label}</div></div>)}
           </div>
           {runtimePolicy.maxRecipientsPerCampaign!==null && preview.audience.eligibleCount>runtimePolicy.maxRecipientsPerCampaign ? <p className="mt-4 rounded-xl bg-rose-500/10 p-3 text-xs font-bold text-rose-700 dark:text-rose-300">Audience exceeds the runtime limit of {runtimePolicy.maxRecipientsPerCampaign.toLocaleString()} recipients.</p> : null}
         </div>
-        <div className="bg-[#e9edf5] p-3 sm:p-4">
+        <div className="min-w-0 overflow-hidden bg-[#e9edf5] p-3 sm:p-4">
           <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0"><p className="text-[11px] font-black uppercase tracking-[.12em] text-zinc-500">Template preview</p><p className="mt-1 truncate text-xs font-bold text-zinc-700">{preview.template.name}{preview.template.subject ? ` · ${preview.template.subject}` : ""}</p></div>
+            <div className="min-w-0"><p className="text-[11px] font-black uppercase tracking-[.12em] text-zinc-500">Template preview</p><p className="mt-1 line-clamp-2 break-words text-xs font-bold leading-5 text-zinc-700">{preview.template.name}{preview.template.subject ? ` · ${preview.template.subject}` : ""}</p></div>
             <div className="flex items-center gap-2 self-start sm:self-auto"><div className="flex rounded-xl border border-zinc-300 bg-white p-1">
               <button type="button" aria-label="Desktop campaign preview" onClick={()=>setPreviewMode("desktop")} className={`rounded-lg p-2 ${previewMode==="desktop"?"bg-violet-500/10 text-violet-600":"text-zinc-500"}`}><Monitor className="h-4 w-4"/></button>
               <button type="button" aria-label="Mobile campaign preview" onClick={()=>setPreviewMode("mobile")} className={`rounded-lg p-2 ${previewMode==="mobile"?"bg-violet-500/10 text-violet-600":"text-zinc-500"}`}><Smartphone className="h-4 w-4"/></button>
             </div><button type="button" aria-label="Open full preview" onClick={()=>setFullPreview(true)} className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-600"><Maximize2 className="h-4 w-4"/></button></div>
           </div>
           <div className={`mx-auto w-full overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm transition-all ${previewMode==="mobile"?"max-w-[390px]":"max-w-[760px]"}`}>
-            {preview.template.html ? <iframe title="Campaign email preview" sandbox="" srcDoc={preview.template.html} className="h-[58dvh] min-h-[420px] w-full bg-white sm:h-[580px]"/> : <pre className="h-[58dvh] min-h-[420px] overflow-auto whitespace-pre-wrap p-4 text-sm text-zinc-800 sm:h-[580px] sm:p-5">{preview.template.text || "Template has no content."}</pre>}
+            {preview.template.html ? <iframe title="Campaign email preview" sandbox="" srcDoc={previewDocument(preview.template.html)} className="h-[58dvh] min-h-[420px] w-full bg-white sm:h-[580px]"/> : <pre className="h-[58dvh] min-h-[420px] overflow-auto whitespace-pre-wrap p-4 text-sm text-zinc-800 sm:h-[580px] sm:p-5">{preview.template.text || "Template has no content."}</pre>}
           </div>
         </div>
       </div> : <div className="p-6 text-center text-sm text-[var(--muted)]">{listId&&templateId ? (previewBusy ? "Calculating audience and rendering template…" : "Preview unavailable. Refresh review.") : "Choose an audience list and template to see the final recipient estimate and email preview."}</div>}
@@ -251,7 +270,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
           <div className="min-w-0"><p className="page-eyebrow">Campaign preview</p><p className="mt-1 truncate text-sm font-black sm:text-base">{preview.template.subject || preview.template.name}</p></div>
           <div className="flex shrink-0 items-center gap-2"><div className="flex rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-1"><button type="button" aria-label="Desktop preview" onClick={()=>setPreviewMode("desktop")} className={`rounded-lg p-2 ${previewMode==="desktop"?"bg-[var(--surface)] text-violet-600 shadow-sm":"text-[var(--muted)]"}`}><Monitor className="h-4 w-4"/></button><button type="button" aria-label="Mobile preview" onClick={()=>setPreviewMode("mobile")} className={`rounded-lg p-2 ${previewMode==="mobile"?"bg-[var(--surface)] text-violet-600 shadow-sm":"text-[var(--muted)]"}`}><Smartphone className="h-4 w-4"/></button></div><button type="button" aria-label="Close preview" onClick={()=>setFullPreview(false)} className="icon-button grid"><X className="h-4 w-4"/></button></div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto bg-[#e9edf5] p-2 sm:p-5"><div className={`mx-auto w-full overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm ${previewMode==="mobile"?"max-w-[390px]":"max-w-[760px]"}`}>{preview.template.html ? <iframe title="Full campaign email preview" sandbox="" srcDoc={preview.template.html} className="h-[82dvh] w-full bg-white"/> : <pre className="h-[82dvh] overflow-auto whitespace-pre-wrap p-4 text-sm text-zinc-800">{preview.template.text || "Template has no content."}</pre>}</div></div>
+        <div className="min-h-0 flex-1 overflow-auto bg-[#e9edf5] p-2 sm:p-5"><div className={`mx-auto w-full overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm ${previewMode==="mobile"?"max-w-[390px]":"max-w-[760px]"}`}>{preview.template.html ? <iframe title="Full campaign email preview" sandbox="" srcDoc={previewDocument(preview.template.html)} className="h-[82dvh] w-full bg-white"/> : <pre className="h-[82dvh] overflow-auto whitespace-pre-wrap p-4 text-sm text-zinc-800">{preview.template.text || "Template has no content."}</pre>}</div></div>
       </section>
     </div> : null}
   </form>;
