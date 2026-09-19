@@ -127,24 +127,24 @@ export function ValidationControls({
         </div>
       </div>
 
-      {!validationReady && providerConfigured !== null ? <div className="border-b border-amber-500/15 bg-amber-500/[0.05] px-4 py-2.5 text-[10.5px] font-bold text-amber-800 dark:text-amber-200">Add a Supersend API key in the Provider panel to enable Gmail validation. Campaign sending is unaffected.</div> : null}
+      {!validationReady && providerConfigured !== null ? <div className="border-b border-amber-500/15 bg-amber-500/[0.05] px-4 py-2.5 text-[12px] font-bold text-amber-800 dark:text-amber-200">Add a Supersend API key in the Provider panel to enable Gmail validation. Campaign sending is unaffected.</div> : null}
 
       {activeJob ? <div className="border-b border-[var(--border)] bg-blue-500/[0.035] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500"/><b className="text-xs">Active validation job</b><span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[9px] font-black uppercase text-blue-700 dark:text-blue-300">{paused ? "paused" : activeJob.status}</span></div><div className="mt-1 truncate font-mono text-[9.5px] text-[var(--muted)]">{activeJob.scope} · {activeJob.id.slice(0,8)}</div></div>
-          <div className="text-right text-[10px] font-bold text-[var(--muted)]">{activeJob.processedRows.toLocaleString()} / {activeJob.totalRows.toLocaleString()}</div>
+          <div className="min-w-0"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500"/><b className="text-xs">Active validation job</b><span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-black uppercase text-blue-700 dark:text-blue-300">{paused ? "paused" : activeJob.status}</span></div><div className="mt-1 truncate font-mono text-[11px] text-[var(--muted)]">{activeJob.scope} · {activeJob.id.slice(0,8)}</div></div>
+          <div className="text-right text-[11px] font-bold text-[var(--muted)]">{activeJob.processedRows.toLocaleString()} / {activeJob.totalRows.toLocaleString()}</div>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-violet-500 transition-all" style={{width:(activeJob.totalRows ? Math.min(100, activeJob.processedRows / activeJob.totalRows * 100) : 0) + "%"}}/></div>
       </div> : null}
 
       <div className="grid gap-3 p-4 md:grid-cols-2">
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3.5">
-          <div className="mb-3 flex items-start gap-3"><div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-700 dark:text-violet-300"><SearchCheck className="h-4 w-4"/></div><div><h3 className="text-[12px] font-black">Validate one contact</h3><p className="mt-0.5 text-[10.5px] leading-4 text-[var(--muted)]">Existing Gmail contact with Pending, Unknown or Error status.</p></div></div>
+          <div className="mb-3 flex items-start gap-3"><div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-700 dark:text-violet-300"><SearchCheck className="h-4 w-4"/></div><div><h3 className="text-[12px] font-black">Validate one contact</h3><p className="mt-0.5 text-[12px] leading-4 text-[var(--muted)]">Existing Gmail contact with Pending, Unknown or Error status.</p></div></div>
           <div className="flex gap-2"><input value={email} onChange={(e)=>setEmail(e.target.value)} type="email" placeholder="person@gmail.com" className="form-control min-w-0 flex-1"/><button type="button" disabled={busy || !!activeJob || !email.trim() || !validationReady} onClick={()=>act("start_single")} className="btn-secondary !min-h-10 shrink-0 !px-3">Validate</button></div>
         </div>
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3.5">
-          <div className="mb-3 flex items-start gap-3"><div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-500/10 text-blue-700 dark:text-blue-300"><UploadCloud className="h-4 w-4"/></div><div><h3 className="text-[12px] font-black">Validate recent import</h3><p className="mt-0.5 text-[10.5px] leading-4 text-[var(--muted)]">Only unresolved Gmail contacts from that CSV import.</p></div></div>
+          <div className="mb-3 flex items-start gap-3"><div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-500/10 text-blue-700 dark:text-blue-300"><UploadCloud className="h-4 w-4"/></div><div><h3 className="text-[12px] font-black">Validate recent import</h3><p className="mt-0.5 text-[12px] leading-4 text-[var(--muted)]">Only unresolved Gmail contacts from that CSV import.</p></div></div>
           <div className="flex gap-2"><select value={importId} onChange={(e)=>setImportId(e.target.value)} className="form-control min-w-0 flex-1">{imports.length ? imports.map((item)=><option key={item.id} value={item.id}>{item.filename} · {item.unresolved}</option>) : <option value="">No imports need validation</option>}</select><button type="button" disabled={busy || !!activeJob || !importId || !validationReady} onClick={()=>act("start_import")} className="btn-secondary !min-h-10 shrink-0 !px-3">Validate import</button></div>
         </div>
       </div>
@@ -157,11 +157,11 @@ export function ValidationControls({
         <div className="section-header"><div><p className="page-eyebrow">Provider</p><h2 className="section-title mt-1">Supersend API key</h2></div><KeyRound className="h-5 w-5 text-violet-600"/></div>
         <div className="p-4">
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2.5">
-            <div><p className="text-[10px] font-bold text-[var(--muted)]">Status</p><p className="mt-0.5 text-[11.5px] font-black">{providerConfigured===null?"Checking…":providerConfigured?"Configured":"Not configured"}</p></div>
-            <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${providerConfigured?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":"bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>{providerConfigured ? (providerSource==="workspace"?"Workspace":"Environment") : "Required"}</span>
+            <div><p className="text-[11px] font-bold text-[var(--muted)]">Status</p><p className="mt-0.5 text-[11.5px] font-black">{providerConfigured===null?"Checking…":providerConfigured?"Configured":"Not configured"}</p></div>
+            <span className={`rounded-full px-2 py-1 text-[11px] font-black uppercase ${providerConfigured?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":"bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>{providerConfigured ? (providerSource==="workspace"?"Workspace":"Environment") : "Required"}</span>
           </div>
 
-          {providerConfigured && providerHint ? <p className="mb-3 rounded-lg bg-[var(--surface-soft)] px-3 py-2 font-mono text-[10.5px] text-[var(--muted)]">Saved key: {providerHint}</p> : null}
+          {providerConfigured && providerHint ? <p className="mb-3 rounded-lg bg-[var(--surface-soft)] px-3 py-2 font-mono text-[12px] text-[var(--muted)]">Saved key: {providerHint}</p> : null}
 
           {providerManage ? <div className="space-y-2">
             <input type="password" autoComplete="new-password" value={providerKey} onChange={(e)=>setProviderKey(e.target.value)} placeholder={providerConfigured?"Paste a new key to replace current":"Paste Supersend API key"} className="form-control"/>
@@ -169,10 +169,10 @@ export function ValidationControls({
               <button type="button" disabled={providerBusy || !providerKey.trim()} onClick={()=>void saveProviderKey()} className="btn-primary !min-h-9 flex-1 !px-3">{providerBusy?"Saving…":providerConfigured?"Replace key":"Save key"}</button>
               {providerSource==="workspace"?<button type="button" disabled={providerBusy} onClick={()=>void removeProviderKey()} className="btn-danger !min-h-9 !px-3" aria-label="Remove Supersend API key"><Trash2 className="h-3.5 w-3.5"/></button>:null}
             </div>
-          </div> : <p className="text-[10.5px] leading-4 text-[var(--muted)]">Owner access is required to manage the provider key.</p>}
+          </div> : <p className="text-[12px] leading-4 text-[var(--muted)]">Owner access is required to manage the provider key.</p>}
 
-          {providerMessage?<p className="mt-2 text-[10.5px] font-bold text-[var(--muted)]">{providerMessage}</p>:null}
-          <p className="mt-3 text-[9.5px] leading-4 text-[var(--muted)]">Stored encrypted. The full key is never shown again after saving. Campaign sending does not depend on this key.</p>
+          {providerMessage?<p className="mt-2 text-[12px] font-bold text-[var(--muted)]">{providerMessage}</p>:null}
+          <p className="mt-3 text-[11px] leading-4 text-[var(--muted)]">Stored encrypted. The full key is never shown again after saving. Campaign sending does not depend on this key.</p>
         </div>
       </section>
 
@@ -184,7 +184,7 @@ export function ValidationControls({
             ["Positive","Provider returned a positive mailbox verdict. Inbox placement is still separate."],
             ["Invalid","Provider returned an invalid mailbox verdict. NexiMail adds an invalid suppression."],
             ["Unknown / Error","Temporary, provider or ambiguous result. Contact remains send-eligible and can be checked again."],
-          ].map(([title,body])=><div key={title} className="px-4 py-3"><p className="text-[11px] font-black">{title}</p><p className="mt-1 text-[10.5px] leading-4 text-[var(--muted)]">{body}</p></div>)}
+          ].map(([title,body])=><div key={title} className="px-4 py-3"><p className="text-[11px] font-black">{title}</p><p className="mt-1 text-[12px] leading-4 text-[var(--muted)]">{body}</p></div>)}
         </div>
       </section>
     </aside>
