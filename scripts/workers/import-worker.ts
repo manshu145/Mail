@@ -116,7 +116,7 @@ async function queueScopedValidation(jobId: string) {
     where j.id=$1
   `, [jobId]);
   const row = state.rows[0];
-  if (!row || row.validation_job_id || row.options?.queueValidation === false) return;
+  if (!row || row.validation_job_id || row.options?.queueValidation !== true) return;
 
   const count = await pool.query<{ total: number }>(`
     select count(distinct c.id)::int as total
