@@ -78,6 +78,14 @@ jobs:
           done
           docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta postfix status
           docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta sh -lc 'test -s /run/opendkim/opendkim.pid && kill -0 "$(cat /run/opendkim/opendkim.pid)"'
+          docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta python3 - <<'PY'
+          import json
+          import urllib.request
+          with urllib.request.urlopen("http://127.0.0.1:10026/health", timeout=5) as response:
+              payload = json.load(response)
+          assert payload.get("ok") is True and payload.get("control") is True, payload
+          print("MTA queue control health verified.")
+          PY
           docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta sh -c 'echo persisted > /var/spool/postfix/.neximail-ci'
           docker compose -p neximail-ci -f docker-compose.prod.yml up -d --no-deps --force-recreate --wait --wait-timeout 60 mta
           docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta sh -c 'test "$(cat /var/spool/postfix/.neximail-ci)" = persisted && rm /var/spool/postfix/.neximail-ci'
