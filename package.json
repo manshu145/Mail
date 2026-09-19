@@ -26,6 +26,7 @@
     "worker:reputation": "tsx scripts/workers/reputation-worker.ts",
     "worker:webhook": "tsx scripts/workers/webhook-worker.ts",
     "release:sanitize": "tsx scripts/release-sanitize.ts",
+    "release:bundle": "bash scripts/build-release-bundle.sh",
     "release:check": "npm run release:sanitize && npm run test && npm run typecheck && npm run build"
   },
   "dependencies": {
