@@ -6,7 +6,6 @@ import { AppShell } from "@/components/app-shell";
 import { CampaignControl } from "@/components/campaign-control";
 import { CampaignEditor } from "@/components/campaign-editor";
 import { CampaignReuseAction } from "@/components/campaign-reuse-action";
-import { LiveRefresh } from "@/components/live-refresh";
 import { MessageStatusBadge } from "@/components/message-status-badge";
 import { db, databaseConfigured } from "@/db";
 import { campaignPreflights } from "@/db/campaign-ops-schema";
