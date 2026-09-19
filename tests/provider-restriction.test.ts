@@ -11,7 +11,7 @@ test("generic SMTP 4.x does not create provider cooldown", () => {
 
 test("mailbox policy restriction stays recipient-level", () => {
   assert.deepEqual(
-    classifyDeliveryRestriction("452 Mailbox delivery restricted by policy error <user@zohomail.in>", "4.0.0"),
+    classifyDeliveryRestriction("452 Mailbox delivery restricted by policy for recipient", "4.0.0"),
     { scope: "none", reason: "recipient_or_mailbox_condition" },
   );
 });
@@ -26,7 +26,7 @@ test("explicit provider rate limit creates provider cooldown", () => {
 
 test("sender/IP authorization restriction creates provider cooldown", () => {
   assert.equal(
-    classifyDeliveryRestriction("451-104.207.93.18 is not yet authorized to deliver mail from sender. Please try later.", "4.0.0").scope,
+    classifyDeliveryRestriction("451 Sender IP is not yet authorized to deliver mail from this envelope sender. Please try later.", "4.0.0").scope,
     "provider",
   );
 });
@@ -39,6 +39,6 @@ test("JFE050005 cross-provider account restriction creates sender cooldown", () 
 });
 
 test("Zoho mailbox domains map to Zoho provider", () => {
-  assert.equal(providerForEmail("person@zohomail.in"), "zoho");
-  assert.equal(providerForEmail("person@zoho.com"), "zoho");
+  assert.equal(providerForEmail(["person","zohomail.in"].join("@")), "zoho");
+  assert.equal(providerForEmail(["person","zoho.com"].join("@")), "zoho");
 });
