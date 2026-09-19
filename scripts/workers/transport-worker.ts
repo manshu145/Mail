@@ -11,7 +11,7 @@ import { makeBounceAddress } from "../../src/lib/bounce-address";
 import { injectPreheader } from "../../src/lib/email-preheader";
 import { hasConfirmedConsent } from "../../src/lib/consent-policy";
 import { getRuntimePolicy } from "../../src/lib/runtime-policy";
-import { providerForEmail } from "../../src/lib/provider";
+import { providerForEmail, SENDER_COOLDOWN_KEY } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
@@ -73,20 +73,44 @@ async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect,
 
 async function providerGate(accountId: string, recipientEmail: string, cooldownMinutes: number) {
   const provider = providerForEmail(recipientEmail);
-  const [cooldown] = await db.select().from(providerCooldowns).where(and(eq(providerCooldowns.sendingAccountId, accountId), eq(providerCooldowns.provider, provider), eq(providerCooldowns.active, true))).limit(1);
-  if (!cooldown) return { allowed: true, provider, probe: false, retryAt: null as Date | null };
+  const active = await db.select().from(providerCooldowns).where(and(
+    eq(providerCooldowns.sendingAccountId, accountId),
+    eq(providerCooldowns.active, true),
+  ));
+  const cooldown = active.find((row) => row.provider === SENDER_COOLDOWN_KEY)
+    || active.find((row) => row.provider === provider);
+  if (!cooldown) {
+    return {
+      allowed: true,
+      provider,
+      probe: false,
+      retryAt: null as Date | null,
+      cooldownKey: null as string | null,
+      cooldownScope: null as "provider" | "sender" | null,
+    };
+  }
+
+  const cooldownScope = cooldown.provider === SENDER_COOLDOWN_KEY ? "sender" as const : "provider" as const;
+  const cooldownKey = cooldown.provider;
   const now = new Date();
-  if (cooldown.nextProbeAt && cooldown.nextProbeAt > now) return { allowed: false, provider, probe: false, retryAt: cooldown.nextProbeAt };
+  if (cooldown.nextProbeAt && cooldown.nextProbeAt > now) {
+    return { allowed: false, provider, probe: false, retryAt: cooldown.nextProbeAt, cooldownKey, cooldownScope };
+  }
+
   const retryAt = new Date(Date.now() + cooldownMinutes * 60_000);
   await db.update(providerCooldowns).set({ lastProbeAt: now, nextProbeAt: retryAt, updatedAt: now }).where(eq(providerCooldowns.id, cooldown.id));
-  await pool.query(`insert into provider_cooldown_events(cooldown_id,sending_account_id,provider,event_type,reason,response,metadata) values($1,$2,$3,'probe_started',$4,$5,$6::jsonb)`, [cooldown.id, accountId, provider, cooldown.reason, cooldown.lastResponse, JSON.stringify({ nextProbeAt: retryAt.toISOString(), recipientEmail })]);
-  return { allowed: true, provider, probe: true, retryAt };
+  await pool.query(
+    `insert into provider_cooldown_events(cooldown_id,sending_account_id,provider,event_type,reason,response,metadata) values($1,$2,$3,'probe_started',$4,$5,$6::jsonb)`,
+    [cooldown.id, accountId, cooldownKey, cooldown.reason, cooldown.lastResponse, JSON.stringify({ nextProbeAt: retryAt.toISOString(), recipientEmail, scope: cooldownScope })],
+  );
+  return { allowed: true, provider, probe: true, retryAt, cooldownKey, cooldownScope };
 }
 
-async function releaseProviderCooldown(id: string, provider: string, retryAt: Date | null, cooldownMinutes: number) {
+async function releaseProviderCooldown(id: string, cooldownKey: string | null, retryAt: Date | null, cooldownMinutes: number) {
   const next = retryAt || new Date(Date.now() + cooldownMinutes * 60_000);
-  await pool.query(`update messages set status='ready_for_transport',next_attempt_at=$2,last_error=$3,attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'`, [id, next, `provider_cooldown:${provider}`]);
-  await event(id,"provider_cooldown",{provider,retryAt:next.toISOString()});
+  const key = cooldownKey || "provider";
+  await pool.query(`update messages set status='ready_for_transport',next_attempt_at=$2,last_error=$3,attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'`, [id, next, `provider_cooldown:${key}`]);
+  await event(id,"provider_cooldown",{cooldownKey:key,retryAt:next.toISOString()});
 }
 
 type Claimed = { id: string; attempt_count: number };
@@ -174,8 +198,8 @@ async function runOnce() {
     }
 
     const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
-    if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.provider, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
-    if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,retryAt:gate.retryAt?.toISOString()}); }
+    if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.cooldownKey, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
+    if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope,retryAt:gate.retryAt?.toISOString()}); }
 
     const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
@@ -243,7 +267,7 @@ async function runOnce() {
       mtaAccepted = true;
       if (!result.queueId) throw new SmtpSubmissionUncertainError("MTA accepted message without returning a queue id");
       await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]);
-      await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled,provider:gate.provider,providerProbe:gate.probe});
+      await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled,provider:gate.provider,providerProbe:gate.probe,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope});
       accepted++;
     } catch (error) {
       if (mtaAccepted || error instanceof SmtpSubmissionUncertainError) {
