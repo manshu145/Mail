@@ -31,6 +31,7 @@ export default async function InboxPlacementPage() {
   }
 
   const usable = databaseConfigured && !bad;
+  const activeSeeds = seeds.filter((seed) => seed.active);
   const byTest = new Map<string, typeof results>();
   for (const result of results) byTest.set(result.testId, [...(byTest.get(result.testId) || []), result]);
 
@@ -69,7 +70,7 @@ export default async function InboxPlacementPage() {
         </div>
         <div className="mt-8 grid place-items-center text-center">
           <MailSearch className="h-9 w-9 text-zinc-400" />
-          <p className="mt-3 text-xs leading-5 text-zinc-500">NexiMail sends the campaign to each active seed inbox. Placement is never guessed; the authenticated seed agent must report inbox, promotions, updates, spam or not found.</p>
+          <p className="mt-3 text-sm leading-6 text-zinc-500">NexiMail sends the campaign to each active seed inbox. Placement is never guessed; the authenticated seed agent must report inbox, promotions, updates, spam or not found.</p>
         </div>
       </section>
     </div>
