@@ -30,6 +30,6 @@ export function UserRowActions({id,status,role}:{id:string;status:"active"|"disa
       </select>
       <button disabled={busy} onClick={()=>void patch({status:status==="active"?"disabled":"active"})} className={status==="active"?"btn-danger !min-h-8 !px-2.5 !py-1 text-xs":"btn-secondary !min-h-8 !px-2.5 !py-1 text-xs"}>{status==="active"?"Disable":"Enable"}</button>
     </div>
-    {error?<p role="alert" className="mt-1.5 max-w-52 text-[10px] font-bold text-rose-600">{error}</p>:null}
+    {error?<p role="alert" className="mt-1.5 max-w-52 text-[11px] font-bold text-rose-600">{error}</p>:null}
   </div>;
 }
