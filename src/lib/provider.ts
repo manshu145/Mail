@@ -1,5 +1,17 @@
 export type MailboxProvider = "gmail" | "yahoo" | "microsoft" | "proton" | "rediff" | "mailcom" | "zoho" | "mailhostbox" | "titan" | "netcore" | "godaddy" | "mailcore" | `domain:${string}`;
 
+export type DeliveryRestrictionScope = "none" | "provider" | "sender";
+export type DeliveryRestriction = {
+  scope: DeliveryRestrictionScope;
+  reason:
+    | "none"
+    | "recipient_or_mailbox_condition"
+    | "provider_restriction"
+    | "sender_or_outbound_path_restriction";
+};
+
+export const SENDER_COOLDOWN_KEY = "__sender__";
+
 export function providerForEmail(email: string): MailboxProvider {
   const domain = String(email || "").trim().toLowerCase().split("@").pop() || "unknown";
   if (domain === "gmail.com" || domain === "googlemail.com") return "gmail";
@@ -33,6 +45,7 @@ export function providerForDelivery(email: string, response?: string | null): Ma
 }
 
 export function providerLabel(provider: string) {
+  if (provider === SENDER_COOLDOWN_KEY) return "Sender / outbound path";
   if (provider === "gmail") return "Gmail / Google Workspace";
   if (provider === "yahoo") return "Yahoo / AOL";
   if (provider === "microsoft") return "Microsoft 365 / Outlook";
@@ -50,16 +63,40 @@ export function providerLabel(provider: string) {
 }
 
 /**
- * Provider cooldown is only for temporary provider-level pressure/restrictions.
- * Permanent 5.x policy/spam rejections are message-level failures and must not
- * pause the entire provider from a single rejection.
+ * Decide whether an SMTP response represents a recipient-level temporary
+ * condition, a mailbox-provider restriction, or a sender/outbound-path
+ * restriction. Enhanced status class alone is intentionally insufficient:
+ * 4.x responses are also used for mailbox-full, recipient policy, DNS and
+ * resource conditions and must not pause an entire provider.
  */
-export function isProviderPressureResponse(response: string, dsn?: string | null) {
+export function classifyDeliveryRestriction(response: string, dsn?: string | null): DeliveryRestriction {
   const text = String(response || "").toLowerCase();
-  if (dsn?.startsWith("5.")) return false;
-  if (dsn?.startsWith("4.")) return true;
 
-  // Only explicit temporary SMTP/provider signals qualify when DSN is absent.
-  if (/\b(?:421|450|451|452)\b|\b4\.\d+\.\d+\b/i.test(text)) return true;
-  return /temporar(?:y|ily)?|try again|rate limit|too many|throttl|greylist|resources? temporarily unavailable|unusual traffic.*try again/i.test(text);
+  const recipientOrMailbox =
+    /mailbox full|over quota|quota exceeded|recipient temporarily unavailable|mailbox temporarily unavailable|mailbox delivery restricted by policy|user unknown|unknown user|no such (?:user|mailbox)|mailbox (?:does not exist|not found)|recipient (?:does not exist|not found)/i.test(text);
+  if (recipientOrMailbox) {
+    return { scope: "none", reason: "recipient_or_mailbox_condition" };
+  }
+
+  const senderOrOutboundPath =
+    /jfe050005|unusual amount of content policy violations originating from your account|sending account (?:is )?(?:restricted|blocked|suspended)|outbound (?:mail|smtp).*(?:account|sender).*(?:restricted|blocked|suspended)/i.test(text);
+  if (senderOrOutboundPath) {
+    return { scope: "sender", reason: "sender_or_outbound_path_restriction" };
+  }
+
+  const explicitProviderRestriction =
+    /rate[ -]?limit|too many (?:messages|connections|requests)|throttl|unusual traffic|temporar(?:y|ily) blocked|temporary block|not yet authorized to deliver mail from|sender(?: ip)? reputation|ip reputation|greylist(?:ed|ing)?(?:.*(?:sender|ip))?|try again later(?:.*(?:rate|sender|ip|reputation))?/i.test(text);
+  if (explicitProviderRestriction) {
+    return { scope: "provider", reason: "provider_restriction" };
+  }
+
+  // A bare SMTP 4xx/4.x enhanced status is deliberately not enough evidence
+  // for a provider-wide cooldown.
+  void dsn;
+  return { scope: "none", reason: "none" };
+}
+
+/** Backward-compatible helper for provider-scoped pressure only. */
+export function isProviderPressureResponse(response: string, dsn?: string | null) {
+  return classifyDeliveryRestriction(response, dsn).scope === "provider";
 }
