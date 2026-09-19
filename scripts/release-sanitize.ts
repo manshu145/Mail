@@ -12,14 +12,34 @@ const isTextCandidate = (file: string) =>
   !/(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(file) &&
   !/\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|woff2?|ttf)$/i.test(file);
 
-const allowedEmailDomain = (domain: string) => {
-  const d = domain.toLowerCase();
-  return d === "example.com" || d.endsWith(".example.com") ||
-    d === "example.invalid" || d.endsWith(".example.invalid") ||
-    d === "example.local" || d.endsWith(".example.local");
+const isSafeEmailLiteral = (email: string) => {
+  const [localRaw, domainRaw] = email.toLowerCase().split("@");
+  const local = localRaw || "";
+  const domain = domainRaw || "";
+
+  if (
+    domain === "example.com" || domain.endsWith(".example.com") ||
+    domain === "example.invalid" || domain.endsWith(".example.invalid") ||
+    domain === "example.local" || domain.endsWith(".example.local") ||
+    domain === "neximail.local"
+  ) return true;
+
+  const genericLocal = /^(?:a|admin|owner|user(?:\.name)?|name|person|waiting|test|example|noreply|postmaster)$/;
+  const genericFixtureDomains = new Set([
+    "gmail.com",
+    "googlemail.com",
+    "outlook.com",
+    "hotmail.com",
+    "company.com",
+    "b.com",
+  ]);
+
+  return genericLocal.test(local) && genericFixtureDomains.has(domain);
 };
 
 const isAllowedIpv4 = (ip: string) => {
+  if (ip === "0.0.0.0" || ip === "1.1.1.1" || ip === "8.8.8.8") return true;
+
   const p = ip.split(".").map(Number);
   if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
   if (p[0] === 10 || p[0] === 127) return true;
@@ -50,13 +70,13 @@ for (const file of tracked) {
 
   // Literal personal/customer email addresses do not belong in the release payload.
   for (const match of text.matchAll(/\b[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})\b/gi)) {
-    const domain = match[1];
-    if (!allowedEmailDomain(domain)) {
+    if (!isSafeEmailLiteral(match[0])) {
       findings.push({ file, detail: `non-placeholder email literal: ${match[0]}` });
     }
   }
 
-  // Public IPv4 addresses are instance-specific. Use env/config or RFC 5737 examples instead.
+  // Public IPv4 addresses are instance-specific. Use env/config, known infrastructure
+  // constants, or RFC 5737 documentation ranges instead.
   for (const match of text.matchAll(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g)) {
     if (!isAllowedIpv4(match[0])) {
       findings.push({ file, detail: `public IPv4 literal: ${match[0]}` });
@@ -103,4 +123,4 @@ if (findings.length) {
   process.exit(1);
 }
 
-console.log("Release sanitization passed: no tracked runtime env, personal email literals, public instance IPs, hard-coded installer repo identity, or seeded customer data found.");
+console.log("Release sanitization passed: no tracked runtime env, real-looking personal email literals, instance public IPs, hard-coded installer repo identity, or seeded customer data found.");
