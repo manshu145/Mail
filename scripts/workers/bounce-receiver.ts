@@ -45,7 +45,7 @@ async function processDsn(messageId: string, raw: string) {
     }
     // Preserve DSN evidence even when Postfix already observed the same terminal
     // outcome, but emit the external message.bounced webhook only once.
-    await tx.insert(messageEvents).values({ messageId: message.id, type: "dsn_bounced", payload: { ...payload, duplicateTerminalObservation: wasAlreadyBounced } });
+    await tx.insert(messageEvents).values({ messageId: message.id, type: "dsn_bounced", payload: { ...payload, suppressRecipient: true, duplicateTerminalObservation: wasAlreadyBounced } });
 
     await tx.insert(suppressions).values({
       email: message.recipientEmail,
