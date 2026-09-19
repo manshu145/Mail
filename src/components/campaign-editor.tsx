@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, Monitor, RefreshCw, Smartphone } from "lucide-react";
+import { Eye, Maximize2, Monitor, RefreshCw, Smartphone, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { CampaignAttachments } from "@/components/campaign-attachments";
@@ -41,6 +41,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const [accountId, setAccountId] = useState(campaign.sendingAccountId || "");
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop"|"mobile">("desktop");
+  const [fullPreview, setFullPreview] = useState(false);
   const selectedAccount = useMemo(() => accounts.find((x) => x.id === accountId) || null, [accounts, accountId]);
   const initialAccount = accounts.find((x) => x.id === campaign.sendingAccountId) || null;
   const [fromName, setFromName] = useState(initialAccount?.fromName || "");
@@ -88,6 +89,14 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
       setPreviewBusy(false);
     }
   }
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 640px)");
+    const sync = () => { if (query.matches) setPreviewMode("mobile"); };
+    sync();
+    query.addEventListener?.("change", sync);
+    return () => query.removeEventListener?.("change", sync);
+  }, []);
 
   useEffect(() => {
     if (!listId || !templateId) { setPreview(null); return; }
@@ -155,7 +164,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     }
   }
 
-  return <form className="space-y-5" action={async (formData) => submit(formData, "save")}>
+  return <form className="min-w-0 space-y-4 sm:space-y-5" action={async (formData) => submit(formData, "save")}>
     <div className="grid gap-4 lg:grid-cols-2">
       <label><span className="mb-1.5 block text-sm font-bold">Internal name</span><input name="name" defaultValue={campaign.name} required className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none" /></label>
       <label><span className="mb-1.5 block text-sm font-bold">Subject</span><input name="subject" defaultValue={campaign.subject} required className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none" /></label>
@@ -165,13 +174,13 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     <div className="grid gap-4 lg:grid-cols-3">
       <label><span className="mb-1.5 block text-sm font-bold">Audience list</span><select name="listId" value={listId} onChange={(e)=>{setListId(e.target.value);setPreview(null)}} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select list</option>{lists.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
       <label><span className="mb-1.5 block text-sm font-bold">Template</span><select name="templateId" value={templateId} onChange={(e)=>{setTemplateId(e.target.value);setPreview(null)}} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select template</option>{templates.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-      <label><span className="mb-1.5 block text-sm font-bold">Sending identity</span><select name="sendingAccountId" value={accountId} onChange={(e)=>chooseAccount(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select approved identity</option>{accounts.map(x=><option key={x.id} value={x.id}>{x.name} — {x.fromName} &lt;{x.fromEmail}&gt;</option>)}</select></label>
+      <label><span className="mb-1.5 block text-sm font-bold">Sending identity</span><select name="sendingAccountId" value={accountId} onChange={(e)=>chooseAccount(e.target.value)} className="w-full min-w-0 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select approved identity</option>{accounts.map(x=><option key={x.id} value={x.id}>{x.name} — {x.fromName} &lt;{x.fromEmail}&gt;</option>)}</select></label>
     </div>
 
     <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)]">
       <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-center sm:justify-between">
         <div><div className="flex items-center gap-2"><Eye className="h-4 w-4 text-violet-600"/><p className="text-sm font-black">Review & preview</p></div><p className="mt-1 text-xs text-[var(--muted)]">Audience count updates from the same resolver used at send time. Final send runs one more preflight.</p></div>
-        <button type="button" disabled={previewBusy || !listId || !templateId} onClick={()=>void loadPreview()} className="btn-secondary !min-h-9"><RefreshCw className={`h-3.5 w-3.5 ${previewBusy?"animate-spin":""}`}/> Refresh review</button>
+        <button type="button" disabled={previewBusy || !listId || !templateId} onClick={()=>void loadPreview()} className="btn-secondary !min-h-9 w-full sm:w-auto"><RefreshCw className={`h-3.5 w-3.5 ${previewBusy?"animate-spin":""}`}/> Refresh review</button>
       </div>
 
       {preview ? <div className="grid gap-px bg-[var(--border)] xl:grid-cols-[.72fr_1.28fr]">
@@ -193,15 +202,15 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
           {runtimePolicy.maxRecipientsPerCampaign!==null && preview.audience.eligibleCount>runtimePolicy.maxRecipientsPerCampaign ? <p className="mt-4 rounded-xl bg-rose-500/10 p-3 text-xs font-bold text-rose-700 dark:text-rose-300">Audience exceeds the runtime limit of {runtimePolicy.maxRecipientsPerCampaign.toLocaleString()} recipients.</p> : null}
         </div>
         <div className="bg-[#e9edf5] p-3 sm:p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0"><p className="text-[11px] font-black uppercase tracking-[.12em] text-zinc-500">Template preview</p><p className="mt-1 truncate text-xs font-bold text-zinc-700">{preview.template.name}{preview.template.subject ? ` · ${preview.template.subject}` : ""}</p></div>
-            <div className="flex rounded-xl border border-zinc-300 bg-white p-1">
+            <div className="flex items-center gap-2 self-start sm:self-auto"><div className="flex rounded-xl border border-zinc-300 bg-white p-1">
               <button type="button" aria-label="Desktop campaign preview" onClick={()=>setPreviewMode("desktop")} className={`rounded-lg p-2 ${previewMode==="desktop"?"bg-violet-500/10 text-violet-600":"text-zinc-500"}`}><Monitor className="h-4 w-4"/></button>
               <button type="button" aria-label="Mobile campaign preview" onClick={()=>setPreviewMode("mobile")} className={`rounded-lg p-2 ${previewMode==="mobile"?"bg-violet-500/10 text-violet-600":"text-zinc-500"}`}><Smartphone className="h-4 w-4"/></button>
-            </div>
+            </div><button type="button" aria-label="Open full preview" onClick={()=>setFullPreview(true)} className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-600"><Maximize2 className="h-4 w-4"/></button></div>
           </div>
-          <div className={`mx-auto overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm transition-all ${previewMode==="mobile"?"max-w-[390px]":"max-w-[760px]"}`}>
-            {preview.template.html ? <iframe title="Campaign email preview" sandbox="" srcDoc={preview.template.html} className="h-[520px] w-full bg-white"/> : <pre className="h-[520px] overflow-auto whitespace-pre-wrap p-5 text-sm text-zinc-800">{preview.template.text || "Template has no content."}</pre>}
+          <div className={`mx-auto w-full overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm transition-all ${previewMode==="mobile"?"max-w-[390px]":"max-w-[760px]"}`}>
+            {preview.template.html ? <iframe title="Campaign email preview" sandbox="" srcDoc={preview.template.html} className="h-[58dvh] min-h-[420px] w-full bg-white sm:h-[580px]"/> : <pre className="h-[58dvh] min-h-[420px] overflow-auto whitespace-pre-wrap p-4 text-sm text-zinc-800 sm:h-[580px] sm:p-5">{preview.template.text || "Template has no content."}</pre>}
           </div>
         </div>
       </div> : <div className="p-6 text-center text-sm text-[var(--muted)]">{listId&&templateId ? (previewBusy ? "Calculating audience and rendering template…" : "Preview unavailable. Refresh review.") : "Choose an audience list and template to see the final recipient estimate and email preview."}</div>}
@@ -226,14 +235,24 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     <div className="flex flex-wrap gap-5 rounded-2xl bg-[var(--surface-soft)] p-4 text-sm font-bold"><label className="flex items-center gap-2"><input type="checkbox" name="trackOpens" defaultChecked={campaign.trackOpens} /> Track opens</label><label className="flex items-center gap-2"><input type="checkbox" name="trackClicks" defaultChecked={campaign.trackClicks} /> Track clicks</label></div>
     <p className="text-xs text-[var(--muted)]">NexiMail automatically adds a visible unsubscribe link and one-click unsubscribe headers at send time.</p>
 
-    {showTest ? <div className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.05] p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><label className="flex-1"><span className="mb-1.5 block text-sm font-bold">Test recipient</span><input type="email" value={testRecipient} onChange={(e)=>setTestRecipient(e.target.value)} placeholder="you@example.com" className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm outline-none" /></label><button type="button" disabled={busy || !testReady} onClick={(event)=>{const form=event.currentTarget.form;if(form)void sendTest(form)}} className="btn-primary">{busy ? "Sending…" : "Send test"}</button><button type="button" onClick={()=>setShowTest(false)} className="btn-secondary">Cancel</button></div><p className="mt-2 text-[11px] text-[var(--muted)]">One real message through the configured MTA, with the same template and attachments, without joining the campaign audience.</p></div> : null}
+    {showTest ? <div className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.05] p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><label className="min-w-0 flex-1"><span className="mb-1.5 block text-sm font-bold">Test recipient</span><input type="email" value={testRecipient} onChange={(e)=>setTestRecipient(e.target.value)} placeholder="you@example.com" className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm outline-none" /></label><button type="button" disabled={busy || !testReady} onClick={(event)=>{const form=event.currentTarget.form;if(form)void sendTest(form)}} className="btn-primary w-full sm:w-auto">{busy ? "Sending…" : "Send test"}</button><button type="button" onClick={()=>setShowTest(false)} className="btn-secondary w-full sm:w-auto">Cancel</button></div><p className="mt-2 text-[11px] text-[var(--muted)]">One real message through the configured MTA, with the same template and attachments, without joining the campaign audience.</p></div> : null}
 
     {error ? <p role="alert" aria-live="polite" className="rounded-xl border border-rose-500/15 bg-rose-500/[0.06] px-3.5 py-3 text-sm font-semibold text-rose-600">{error}</p> : null}
     {notice ? <p role="status" aria-live="polite" className="rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-3.5 py-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">{notice}</p> : null}
 
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-5">
-      <div className="flex flex-wrap gap-2"><button disabled={busy} className="btn-secondary" type="submit">Save draft</button><button disabled={busy || !testReady} className="btn-secondary" type="button" onClick={()=>setShowTest(true)}>Send test</button></div>
-      <div className="flex flex-wrap gap-2"><button disabled={busy || !deliveryReady || !reviewReady || !schedule} className="btn-secondary" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"schedule")}}>Schedule</button><button disabled={busy || !deliveryReady || !reviewReady} className="btn-primary" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"send_now")}}>{busy ? "Working…" : preview ? `Send to ~${preview.audience.eligibleCount.toLocaleString()}` : "Send now"}</button></div>
+    <div className="grid grid-cols-2 gap-2 border-t border-[var(--border)] pt-5 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
+      <div className="contents sm:flex sm:flex-wrap sm:gap-2"><button disabled={busy} className="btn-secondary w-full sm:w-auto" type="submit">Save draft</button><button disabled={busy || !testReady} className="btn-secondary w-full sm:w-auto" type="button" onClick={()=>setShowTest(true)}>Send test</button></div>
+      <div className="contents sm:flex sm:flex-wrap sm:gap-2"><button disabled={busy || !deliveryReady || !reviewReady || !schedule} className="btn-secondary w-full sm:w-auto" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"schedule")}}>Schedule</button><button disabled={busy || !deliveryReady || !reviewReady} className="btn-primary col-span-2 w-full sm:w-auto" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"send_now")}}>{busy ? "Working…" : preview ? `Send to ~${preview.audience.eligibleCount.toLocaleString()}` : "Send now"}</button></div>
     </div>
+
+    {fullPreview && preview ? <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-2 backdrop-blur-sm sm:p-5">
+      <section role="dialog" aria-modal="true" aria-label="Campaign template preview" className="flex max-h-[96dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-3 sm:px-5">
+          <div className="min-w-0"><p className="page-eyebrow">Campaign preview</p><p className="mt-1 truncate text-sm font-black sm:text-base">{preview.template.subject || preview.template.name}</p></div>
+          <div className="flex shrink-0 items-center gap-2"><div className="flex rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-1"><button type="button" aria-label="Desktop preview" onClick={()=>setPreviewMode("desktop")} className={`rounded-lg p-2 ${previewMode==="desktop"?"bg-[var(--surface)] text-violet-600 shadow-sm":"text-[var(--muted)]"}`}><Monitor className="h-4 w-4"/></button><button type="button" aria-label="Mobile preview" onClick={()=>setPreviewMode("mobile")} className={`rounded-lg p-2 ${previewMode==="mobile"?"bg-[var(--surface)] text-violet-600 shadow-sm":"text-[var(--muted)]"}`}><Smartphone className="h-4 w-4"/></button></div><button type="button" aria-label="Close preview" onClick={()=>setFullPreview(false)} className="icon-button grid"><X className="h-4 w-4"/></button></div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto bg-[#e9edf5] p-2 sm:p-5"><div className={`mx-auto w-full overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm ${previewMode==="mobile"?"max-w-[390px]":"max-w-[760px]"}`}>{preview.template.html ? <iframe title="Full campaign email preview" sandbox="" srcDoc={preview.template.html} className="h-[82dvh] w-full bg-white"/> : <pre className="h-[82dvh] overflow-auto whitespace-pre-wrap p-4 text-sm text-zinc-800">{preview.template.text || "Template has no content."}</pre>}</div></div>
+      </section>
+    </div> : null}
   </form>;
 }
