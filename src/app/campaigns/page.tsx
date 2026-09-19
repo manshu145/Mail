@@ -45,6 +45,8 @@ export default async function CampaignsPage() {
           endpoint="/api/resources/campaigns"
           title="Create campaign"
           buttonLabel="Create campaign"
+          submitLabel="Next"
+          redirectBasePath="/campaigns"
           fields={[
             { name: "name", label: "Internal campaign name", required: true, placeholder: "September customers" },
             { name: "subject", label: "Subject", required: true, placeholder: "Your subject line" },
