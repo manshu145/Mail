@@ -18,6 +18,15 @@ import { providerLabel } from "@/lib/provider";
 
 const fmt=(value:Date|string|null|undefined)=>value?new Intl.DateTimeFormat("en",{dateStyle:"short",timeStyle:"short", timeZone:"Asia/Kolkata"}).format(new Date(value)):"—";
 type DrillView="targeted"|"delivered"|"opens"|"clicks"|"bounce_failed";
+type ProviderImpactRow={
+  provider:string;
+  affected_recipients:number;
+  cooldown_events:number;
+  probes:number;
+  first_event:Date|string|null;
+  last_event:Date|string|null;
+  state:Record<string,unknown>|null;
+};
 
 function one(value:string|string[]|undefined){return Array.isArray(value)?value[0]:value}
 function viewLabel(view:DrillView){
@@ -167,10 +176,18 @@ export default async function CampaignDetailPage({
   const selectedRows=selectedResult.rows as Array<Record<string,unknown>>;
   const selectedRecipient=selectedRows[0]||null;
   const providerStates=new Map((providerStateResult.rows as Array<Record<string,unknown>>).map((row)=>[String(row.provider),row]));
-  const providerImpact=(providerImpactResult.rows as Array<Record<string,unknown>>).map((row)=>({
-    ...row,
-    state:providerStates.get(String(row.provider))||null,
-  }));
+  const providerImpact:ProviderImpactRow[]=(providerImpactResult.rows as Array<Record<string,unknown>>).map((row)=>{
+    const provider=String(row.provider||"");
+    return {
+      provider,
+      affected_recipients:Number(row.affected_recipients||0),
+      cooldown_events:Number(row.cooldown_events||0),
+      probes:Number(row.probes||0),
+      first_event:(row.first_event as Date|string|null)||null,
+      last_event:(row.last_event as Date|string|null)||null,
+      state:providerStates.get(provider)||null,
+    };
+  });
   const preflight=preflightRows[0]||null;
   const editable=["draft","paused","scheduled"].includes(campaign.status);
   const runtimePolicy=getRuntimePolicy();
