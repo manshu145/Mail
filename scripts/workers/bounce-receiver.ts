@@ -36,7 +36,7 @@ async function processDsn(messageId: string, raw: string) {
   const dsn = parseDsn(raw);
   const classification = classifyBounce(dsn.status, dsn.diagnostic || raw.slice(-1000));
   const failed = dsn.action === "failed" || Boolean(dsn.status?.startsWith("5."));
-  const payload = { action: dsn.action, status: dsn.status, diagnostic: dsn.diagnostic, source: "verp_dsn", bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient };
+  const payload = { action: dsn.action, status: dsn.status, diagnostic: dsn.diagnostic, source: "verp_dsn", bounceKind: classification.kind, suppressRecipient: true };
 
   if (failed) {
     const wasAlreadyBounced = message.status === "bounced";
@@ -47,18 +47,16 @@ async function processDsn(messageId: string, raw: string) {
     // outcome, but emit the external message.bounced webhook only once.
     await tx.insert(messageEvents).values({ messageId: message.id, type: "dsn_bounced", payload: { ...payload, duplicateTerminalObservation: wasAlreadyBounced } });
 
-    if (classification.suppressRecipient) {
-      await tx.insert(suppressions).values({
-        email: message.recipientEmail,
-        normalizedEmail: normalizeEmail(message.recipientEmail),
-        reason: "hard_bounce",
-        source: "verp_dsn",
-        note: dsn.diagnostic || dsn.status || "Remote DSN recipient hard bounce",
-      }).onConflictDoNothing({ target: suppressions.normalizedEmail });
-    }
+    await tx.insert(suppressions).values({
+      email: message.recipientEmail,
+      normalizedEmail: normalizeEmail(message.recipientEmail),
+      reason: classification.suppressRecipient ? "hard_bounce" : "bounce",
+      source: "verp_dsn",
+      note: dsn.diagnostic || dsn.status || "Remote DSN final bounce",
+    }).onConflictDoNothing({ target: suppressions.normalizedEmail });
 
     if (!wasAlreadyBounced) {
-      await emitWebhookEvent("message.bounced", { messageId: message.id, campaignId: message.campaignId, recipientEmail: message.recipientEmail, dsn: dsn.status, diagnostic: dsn.diagnostic, bounceKind: classification.kind, suppressRecipient: classification.suppressRecipient }, tx);
+      await emitWebhookEvent("message.bounced", { messageId: message.id, campaignId: message.campaignId, recipientEmail: message.recipientEmail, dsn: dsn.status, diagnostic: dsn.diagnostic, bounceKind: classification.kind, suppressRecipient: true }, tx);
     }
     return "bounced";
   }
