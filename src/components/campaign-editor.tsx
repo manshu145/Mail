@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, Maximize2, Monitor, RefreshCw, Smartphone, X } from "lucide-react";
+import { CheckCircle2, Circle, Eye, ListChecks, Maximize2, Monitor, RefreshCw, Rocket, Smartphone, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { CampaignAttachments } from "@/components/campaign-attachments";
@@ -69,6 +69,13 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const deliveryReady = Boolean(listId && templateId && accountId && runtimePolicy.sendingEnabled);
   const reviewReady = Boolean(preview && preview.audience.eligibleCount > 0 && (runtimePolicy.maxRecipientsPerCampaign === null || preview.audience.eligibleCount <= runtimePolicy.maxRecipientsPerCampaign));
   const testReady = Boolean(templateId && accountId && runtimePolicy.sendingEnabled);
+  const readinessSteps=[
+    {label:"Audience",ready:Boolean(listId)},
+    {label:"Template",ready:Boolean(templateId)},
+    {label:"Sender",ready:Boolean(accountId&&runtimePolicy.sendingEnabled)},
+    {label:"Review",ready:reviewReady},
+  ];
+  const readyCount=readinessSteps.filter((step)=>step.ready).length;
 
   function chooseAccount(id: string) {
     setAccountId(id);
@@ -184,19 +191,35 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   }
 
   return <form className="min-w-0 space-y-4 sm:space-y-5" action={async (formData) => submit(formData, "save")}>
+    <section className="section-card overflow-hidden">
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2"><div className="grid h-9 w-9 place-items-center rounded-xl bg-violet-500/10 text-[var(--accent)]"><Rocket className="h-4.5 w-4.5"/></div><div><p className="page-eyebrow">Launch readiness</p><h3 className="mt-0.5 text-sm font-black">{readyCount} of 4 checks complete</h3></div></div>
+          <p className="mt-2 text-xs leading-5 text-[var(--muted)]">Build the audience, content and sender setup, then review the final estimate before launch.</p>
+        </div>
+        <div className="min-w-0 lg:w-[46%]">
+          <div className="progress-track"><div className="progress-fill" style={{width:`${readyCount/4*100}%`}}/></div>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{readinessSteps.map((step)=><div key={step.label} className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[10px] font-black ${step.ready?"border-emerald-500/15 bg-emerald-500/[.06] text-emerald-700 dark:text-emerald-300":"border-[var(--border)] bg-[var(--surface-soft)] text-[var(--muted)]"}`}>{step.ready?<CheckCircle2 className="h-3.5 w-3.5"/>:<Circle className="h-3.5 w-3.5"/>}{step.label}</div>)}</div>
+        </div>
+      </div>
+    </section>
+
+    <section className="section-card p-4 sm:p-5">
+      <div className="mb-4 flex items-start gap-3"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-violet-500/10 text-[var(--accent)]"><ListChecks className="h-4 w-4"/></div><div><p className="text-sm font-black">Campaign setup</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Define the message, audience, template and approved sending identity.</p></div></div>
     <div className="grid gap-4 lg:grid-cols-2">
-      <label><span className="mb-1.5 block text-sm font-bold">Internal name</span><input name="name" defaultValue={campaign.name} required className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none" /></label>
-      <label><span className="mb-1.5 block text-sm font-bold">Subject</span><input name="subject" defaultValue={campaign.subject} required className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none" /></label>
+      <label><span className="mb-1.5 block text-sm font-bold">Internal name</span><input name="name" defaultValue={campaign.name} required className="form-control" /></label>
+      <label><span className="mb-1.5 block text-sm font-bold">Subject</span><input name="subject" defaultValue={campaign.subject} required className="form-control" /></label>
     </div>
-    <label><span className="mb-1.5 block text-sm font-bold">Preheader</span><input name="preheader" defaultValue={campaign.preheader || ""} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none" /></label>
+    <label><span className="mb-1.5 block text-sm font-bold">Preheader</span><input name="preheader" defaultValue={campaign.preheader || ""} className="form-control" /></label>
 
     <div className="grid gap-4 lg:grid-cols-3">
-      <label><span className="mb-1.5 block text-sm font-bold">Audience list</span><select name="listId" value={listId} onChange={(e)=>{setListId(e.target.value);setPreview(null)}} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select list</option>{lists.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-      <label><span className="mb-1.5 block text-sm font-bold">Template</span><select name="templateId" value={templateId} onChange={(e)=>{setTemplateId(e.target.value);setPreview(null)}} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select template</option>{templates.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-      <label><span className="mb-1.5 block text-sm font-bold">Sending identity</span><select name="sendingAccountId" value={accountId} onChange={(e)=>chooseAccount(e.target.value)} className="w-full min-w-0 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm"><option value="">Select approved identity</option>{accounts.map(x=><option key={x.id} value={x.id}>{x.name} — {x.fromName} &lt;{x.fromEmail}&gt;</option>)}</select></label>
+      <label><span className="mb-1.5 block text-sm font-bold">Audience list</span><select name="listId" value={listId} onChange={(e)=>{setListId(e.target.value);setPreview(null)}} className="form-control"><option value="">Select list</option>{lists.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+      <label><span className="mb-1.5 block text-sm font-bold">Template</span><select name="templateId" value={templateId} onChange={(e)=>{setTemplateId(e.target.value);setPreview(null)}} className="form-control"><option value="">Select template</option>{templates.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+      <label><span className="mb-1.5 block text-sm font-bold">Sending identity</span><select name="sendingAccountId" value={accountId} onChange={(e)=>chooseAccount(e.target.value)} className="form-control"><option value="">Select approved identity</option>{accounts.map(x=><option key={x.id} value={x.id}>{x.name} — {x.fromName} &lt;{x.fromEmail}&gt;</option>)}</select></label>
     </div>
+    </section>
 
-    <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)]">
+    <section className="section-card overflow-hidden">
       <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-center sm:justify-between">
         <div><div className="flex items-center gap-2"><Eye className="h-4 w-4 text-violet-600"/><p className="text-sm font-black">Review & preview</p></div><p className="mt-1 text-xs text-[var(--muted)]">Audience count updates from the same resolver used at send time. Final send runs one more preflight.</p></div>
         <button type="button" disabled={previewBusy || !listId || !templateId} onClick={()=>void loadPreview()} className="btn-secondary !min-h-9 w-full sm:w-auto"><RefreshCw className={`h-3.5 w-3.5 ${previewBusy?"animate-spin":""}`}/> Refresh review</button>
@@ -246,20 +269,20 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
       <div className="grid gap-4 lg:grid-cols-3">
         <label><span className="mb-1.5 block text-sm font-bold">From name</span><div className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-muted)] px-3.5 py-3 text-sm font-bold text-[var(--foreground)]">{fromName || "Select a sending identity"}</div><input type="hidden" name="fromName" value={fromName} /></label>
         <label><span className="mb-1.5 block text-sm font-bold">From email</span><div className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-muted)] px-3.5 py-3 text-sm font-bold text-[var(--foreground)]">{fromEmail || "Select a sending identity"}</div><input type="hidden" name="fromEmail" value={fromEmail} /></label>
-        <label><span className="mb-1.5 block text-sm font-bold">Schedule for later (IST)</span><input name="scheduledAt" type="datetime-local" value={schedule} onChange={(e)=>setSchedule(e.target.value)} className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm" /></label>
+        <label><span className="mb-1.5 block text-sm font-bold">Schedule for later (IST)</span><input name="scheduledAt" type="datetime-local" value={schedule} onChange={(e)=>setSchedule(e.target.value)} className="form-control" /></label>
       </div>
       {selectedAccount ? <p className="mt-3 text-xs text-[var(--muted)]">Identity: {selectedAccount.fromName} &lt;{selectedAccount.fromEmail}&gt;{selectedAccount.replyTo ? ` · Reply-to: ${selectedAccount.replyTo}` : ""}</p> : null}
     </div>
 
-    <div className="flex flex-wrap gap-5 rounded-2xl bg-[var(--surface-soft)] p-4 text-sm font-bold"><label className="flex items-center gap-2"><input type="checkbox" name="trackOpens" defaultChecked={campaign.trackOpens} /> Track opens</label><label className="flex items-center gap-2"><input type="checkbox" name="trackClicks" defaultChecked={campaign.trackClicks} /> Track clicks</label></div>
+    <div className="flex flex-wrap gap-5 rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4 text-sm font-bold"><label className="flex items-center gap-2"><input className="accent-violet-600" type="checkbox" name="trackOpens" defaultChecked={campaign.trackOpens} /> Track opens</label><label className="flex items-center gap-2"><input className="accent-violet-600" type="checkbox" name="trackClicks" defaultChecked={campaign.trackClicks} /> Track clicks</label></div>
     <p className="text-xs text-[var(--muted)]">NexiMail automatically adds a visible unsubscribe link and one-click unsubscribe headers at send time.</p>
 
-    {showTest ? <div className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.05] p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><label className="min-w-0 flex-1"><span className="mb-1.5 block text-sm font-bold">Test recipient</span><input type="email" value={testRecipient} onChange={(e)=>setTestRecipient(e.target.value)} placeholder="you@example.com" className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 py-3 text-sm outline-none" /></label><button type="button" disabled={busy || !testReady} onClick={(event)=>{const form=event.currentTarget.form;if(form)void sendTest(form)}} className="btn-primary w-full sm:w-auto">{busy ? "Sending…" : "Send test"}</button><button type="button" onClick={()=>setShowTest(false)} className="btn-secondary w-full sm:w-auto">Cancel</button></div><p className="mt-2 text-[11px] text-[var(--muted)]">One real message through the configured MTA, with the same template and attachments, without joining the campaign audience.</p></div> : null}
+    {showTest ? <div className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.05] p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><label className="min-w-0 flex-1"><span className="mb-1.5 block text-sm font-bold">Test recipient</span><input type="email" value={testRecipient} onChange={(e)=>setTestRecipient(e.target.value)} placeholder="you@example.com" className="form-control" /></label><button type="button" disabled={busy || !testReady} onClick={(event)=>{const form=event.currentTarget.form;if(form)void sendTest(form)}} className="btn-primary w-full sm:w-auto">{busy ? "Sending…" : "Send test"}</button><button type="button" onClick={()=>setShowTest(false)} className="btn-secondary w-full sm:w-auto">Cancel</button></div><p className="mt-2 text-[11px] text-[var(--muted)]">One real message through the configured MTA, with the same template and attachments, without joining the campaign audience.</p></div> : null}
 
     {error ? <p role="alert" aria-live="polite" className="rounded-xl border border-rose-500/15 bg-rose-500/[0.06] px-3.5 py-3 text-sm font-semibold text-rose-600">{error}</p> : null}
     {notice ? <p role="status" aria-live="polite" className="rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-3.5 py-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">{notice}</p> : null}
 
-    <div className="grid grid-cols-2 gap-2 border-t border-[var(--border)] pt-5 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
+    <div className="sticky bottom-2 z-20 grid grid-cols-2 gap-2 rounded-2xl border border-[var(--border)] bg-[color:var(--header-bg)] p-3 shadow-[0_18px_50px_rgba(20,28,45,.14)] backdrop-blur-xl sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
       <div className="contents sm:flex sm:flex-wrap sm:gap-2"><button disabled={busy} className="btn-secondary w-full sm:w-auto" type="submit">Save draft</button><button disabled={busy || !testReady} className="btn-secondary w-full sm:w-auto" type="button" onClick={()=>setShowTest(true)}>Send test</button></div>
       <div className="contents sm:flex sm:flex-wrap sm:gap-2"><button disabled={busy || !deliveryReady || !reviewReady || !schedule} className="btn-secondary w-full sm:w-auto" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"schedule")}}>Schedule</button><button disabled={busy || !deliveryReady || !reviewReady} className="btn-primary col-span-2 w-full sm:w-auto" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"send_now")}}>{busy ? "Working…" : preview ? `Send to ~${preview.audience.eligibleCount.toLocaleString()}` : "Send now"}</button></div>
     </div>
