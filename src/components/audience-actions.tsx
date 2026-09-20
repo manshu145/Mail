@@ -106,43 +106,45 @@ export function AudienceActions({
     </div>
     {error && !open ? <p role="alert" className="mt-2 max-w-sm text-xs font-bold text-rose-600">{error}</p> : null}
 
-    {open ? <ModalPortal><div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black/55 p-4 py-6 backdrop-blur-sm sm:items-center" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="edit-audience-title" className="premium-panel max-h-[calc(100dvh-3rem)] w-full max-w-lg overflow-y-auto p-5 sm:p-6">
-        <div className="mb-5 flex items-start justify-between gap-4">
+    {open ? <ModalPortal><div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black/55 p-3 py-4 backdrop-blur-sm sm:items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="edit-audience-title" className="premium-panel flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden sm:max-h-[calc(100dvh-3rem)]">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-4 sm:px-6 sm:py-5">
           <div><p className="page-eyebrow">Audience</p><h2 id="edit-audience-title" className="mt-1 text-xl font-black">Edit {audience.isDynamic ? "segment" : "list"}</h2></div>
           <button type="button" disabled={busy} aria-label="Close edit audience" onClick={() => setOpen(false)} className="icon-button grid"><X className="h-4 w-4"/></button>
         </div>
-        <form action={save} className="space-y-4">
-          <label className="block text-sm font-bold">Name
-            <input name="name" required defaultValue={audience.name} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3 py-2.5 outline-none" />
-          </label>
-          <label className="block text-sm font-bold">Description
-            <textarea name="description" defaultValue={audience.description || ""} rows={3} className="mt-1.5 w-full resize-y rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3 py-2.5 outline-none" />
-          </label>
-          {audience.isDynamic ? <div className="grid gap-3 rounded-2xl border border-violet-500/15 bg-violet-500/[0.04] p-4 sm:grid-cols-2">
-            <label className="text-xs font-bold">Rule field
-              <select name="field" value={field} onChange={(e)=>setField(e.target.value as typeof field)} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm">
-                <option value="email_domain">Email domain</option>
-                <option value="validation_status">Validation status</option>
-                <option value="contact_status">Contact status</option>
-                <option value="custom_attribute">Custom attribute</option>
-              </select>
+        <form action={save} className="flex min-h-0 flex-1 flex-col">
+          <div className="modal-scroll min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5">
+            <label className="block text-sm font-bold">Name
+              <input name="name" required defaultValue={audience.name} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3 py-2.5 outline-none" />
             </label>
-            <label className="text-xs font-bold">Operator
-              <select name="operator" defaultValue={rule?.operator || "equals"} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm">
-                <option value="equals">Equals</option>
-                <option value="not_equals">Not equals</option>
-              </select>
+            <label className="block text-sm font-bold">Description
+              <textarea name="description" defaultValue={audience.description || ""} rows={3} className="mt-1.5 w-full resize-y rounded-xl border border-[var(--border-strong)] bg-[var(--surface-soft)] px-3 py-2.5 outline-none" />
             </label>
-            {field==="custom_attribute"?<label className="text-xs font-bold sm:col-span-2">Attribute key
-              <input name="attributeKey" required defaultValue={rule?.attributeKey || ""} placeholder="city / category / industry" className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm" />
-            </label>:null}
-            <label className="text-xs font-bold sm:col-span-2">Rule value
-              <input name="value" required defaultValue={rule?.value || ""} placeholder={field==="custom_attribute"?"Attribute value":"gmail.com / valid / active"} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm" />
-            </label>
-          </div> : <input type="hidden" name="field" value="" />}
-          {error ? <p role="alert" className="text-sm font-bold text-rose-600">{error}</p> : null}
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            {audience.isDynamic ? <div className="grid gap-3 rounded-2xl border border-violet-500/15 bg-violet-500/[0.04] p-4 sm:grid-cols-2">
+              <label className="text-xs font-bold">Rule field
+                <select name="field" value={field} onChange={(e)=>setField(e.target.value as typeof field)} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm">
+                  <option value="email_domain">Email domain</option>
+                  <option value="validation_status">Validation status</option>
+                  <option value="contact_status">Contact status</option>
+                  <option value="custom_attribute">Custom attribute</option>
+                </select>
+              </label>
+              <label className="text-xs font-bold">Operator
+                <select name="operator" defaultValue={rule?.operator || "equals"} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm">
+                  <option value="equals">Equals</option>
+                  <option value="not_equals">Not equals</option>
+                </select>
+              </label>
+              {field==="custom_attribute"?<label className="text-xs font-bold sm:col-span-2">Attribute key
+                <input name="attributeKey" required defaultValue={rule?.attributeKey || ""} placeholder="city / category / industry" className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm" />
+              </label>:null}
+              <label className="text-xs font-bold sm:col-span-2">Rule value
+                <input name="value" required defaultValue={rule?.value || ""} placeholder={field==="custom_attribute"?"Attribute value":"gmail.com / valid / active"} className="mt-1.5 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-sm" />
+              </label>
+            </div> : <input type="hidden" name="field" value="" />}
+            {error ? <p role="alert" className="text-sm font-bold text-rose-600">{error}</p> : null}
+          </div>
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
             <button type="button" disabled={busy} onClick={() => setOpen(false)} className="btn-secondary">Cancel</button>
             <button disabled={busy} className="btn-primary">{busy ? "Saving…" : "Save changes"}</button>
           </div>
