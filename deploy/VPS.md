@@ -22,7 +22,7 @@ Download the installer from the repository:
 curl -fsSL https://raw.githubusercontent.com/manshu145/Mail/main/deploy/install-isolated.sh \
   -o /root/neximail-install.sh
 chmod +x /root/neximail-install.sh
-sudo REPO_URL=https://github.com/manshu145/Mail.git /root/neximail-install.sh
+sudo REPO_URL=<your-release-repository> /root/neximail-install.sh
 ```
 
 The fresh-install command passes the repository explicitly, then the installer resolves the requested release once and pins that exact commit in `/opt/neximail-next/.neximail-install-revision`. This prevents the second install pass from silently moving to a newer commit.
