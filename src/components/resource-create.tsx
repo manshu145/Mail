@@ -3,6 +3,7 @@
 import { Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ModalPortal } from "@/components/modal-portal";
 
 type Option = string | { label: string; value: string };
 type Field = {
@@ -88,8 +89,8 @@ export function ResourceCreate({
     <button type="button" disabled={disabled} className="btn-primary" onClick={() => { setError(""); setOpen(true); }}>
       <Plus className="h-4 w-4" />{buttonLabel}
     </button>
-    {open ? <div className="fixed inset-0 z-[90] grid place-items-center overflow-y-auto bg-black/55 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="resource-create-title" className="premium-panel max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto p-5 sm:p-6">
+    {open ? <ModalPortal><div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black/55 p-4 py-6 backdrop-blur-sm sm:items-center" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="resource-create-title" className="premium-panel max-h-[calc(100dvh-3rem)] w-full max-w-lg overflow-y-auto p-5 sm:p-6">
         <div className="mb-6 flex items-start justify-between">
           <div>
             <p className="text-xs font-extrabold uppercase tracking-[.16em] text-zinc-400">NexiMail</p>
@@ -112,6 +113,6 @@ export function ResourceCreate({
           <button disabled={busy} className="btn-primary w-full">{busy ? "Saving…" : (submitLabel || buttonLabel)}</button>
         </form>
       </section>
-    </div> : null}
+    </div></ModalPortal> : null}
   </>;
 }
