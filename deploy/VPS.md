@@ -12,6 +12,18 @@ The new NexiMail stack must run independently from any existing installation unt
 - Never reuse another customer's database, Redis instance, Postfix spool/configuration, volumes, sender identity or DNS.
 - A fresh install starts in sending-locked staging mode.
 
+## Clean replacement of an old NexiMail install
+
+If this VPS previously hosted NexiMail and the old application/database/queue state must be discarded, run the scoped reset first. It removes only the known NexiMail Compose projects and app directories; it does not run a global Docker prune and preserves Nginx/Let's Encrypt.
+
+```bash
+curl -fsSL <raw-reset-script-url> -o /root/neximail-reset.sh
+chmod +x /root/neximail-reset.sh
+sudo NEXIMAIL_RESET_CONFIRM=DELETE_OLD_NEXIMAIL /root/neximail-reset.sh
+```
+
+Review the final output before installing the fresh stack.
+
 ## First install
 
 Prerequisites: Ubuntu 24.04 or equivalent, Docker Engine with Compose v2, Git, outbound TCP/25 available, and control of PTR/rDNS for the sending IP.
