@@ -3,7 +3,7 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/neximail-next}"
 PROJECT_NAME="${PROJECT_NAME:-neximail-next}"
-REPO_URL="${REPO_URL:-https://github.com/manshu145/Mail.git}"
+REPO_URL="${REPO_URL:-}"
 REQUESTED_REF="${NEXIMAIL_RELEASE_REF:-main}"
 LOCK_FILE="${APP_DIR}/.neximail-install-revision"
 
