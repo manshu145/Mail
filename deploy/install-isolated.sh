@@ -3,8 +3,9 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/neximail-next}"
 PROJECT_NAME="${PROJECT_NAME:-neximail-next}"
-REPO_URL="${REPO_URL:-}"
-RELEASE_REF="${NEXIMAIL_RELEASE_REF:-release/v0.1.0}"
+REPO_URL="${REPO_URL:-https://github.com/manshu145/Mail.git}"
+REQUESTED_REF="${NEXIMAIL_RELEASE_REF:-main}"
+LOCK_FILE="${APP_DIR}/.neximail-install-revision"
 
 if [ "${EUID}" -ne 0 ]; then
   echo "Run as root."
@@ -21,17 +22,31 @@ if [ -e "$APP_DIR" ] && [ ! -d "$APP_DIR/.git" ]; then
 fi
 
 if [ ! -d "$APP_DIR/.git" ]; then
-  [ -n "$REPO_URL" ] || {
-    echo "REPO_URL is required for a fresh install."
-    echo "Example: sudo REPO_URL=<your-release-repository> APP_DIR=/opt/neximail-next PROJECT_NAME=neximail-next bash deploy/install-isolated.sh"
-    exit 1
-  }
   git clone --no-checkout "$REPO_URL" "$APP_DIR"
 fi
 
-git -C "$APP_DIR" fetch --depth=1 origin "$RELEASE_REF"
-git -C "$APP_DIR" checkout --detach FETCH_HEAD
-echo "Installing NexiMail release: $RELEASE_REF ($(git -C "$APP_DIR" rev-parse --short=12 HEAD))"
+resolve_revision() {
+  local revision
+
+  if [ -z "${NEXIMAIL_RELEASE_REF:-}" ] && [ -s "$LOCK_FILE" ]; then
+    revision="$(tr -d '[:space:]' < "$LOCK_FILE")"
+    if [[ "$revision" =~ ^[0-9a-f]{40}$ ]] && git -C "$APP_DIR" cat-file -e "$revision^{commit}" 2>/dev/null; then
+      printf '%s\n' "$revision"
+      return
+    fi
+    echo "Ignoring invalid or unavailable install revision lock: $LOCK_FILE" >&2
+  fi
+
+  git -C "$APP_DIR" fetch --depth=1 origin "$REQUESTED_REF"
+  revision="$(git -C "$APP_DIR" rev-parse FETCH_HEAD)"
+  printf '%s\n' "$revision" > "$LOCK_FILE"
+  chmod 600 "$LOCK_FILE"
+  printf '%s\n' "$revision"
+}
+
+REVISION="$(resolve_revision)"
+git -C "$APP_DIR" checkout --detach "$REVISION"
+echo "Installing NexiMail revision: $REVISION"
 
 cd "$APP_DIR"
 
@@ -40,7 +55,9 @@ if [ ! -f .env ]; then
   chmod 600 .env
   echo
   echo "Created $APP_DIR/.env"
-  echo "Edit all passwords/secrets, APP_URL and MTA_HOSTNAME before starting."
+  echo "The install revision is pinned in $LOCK_FILE."
+  echo "Edit APP_URL, MTA_HOSTNAME, MTA_PUBLIC_IP, OWNER_EMAIL, OWNER_PASSWORD and all placeholder secrets/passwords."
+  echo "Keep NEXIMAIL_RUNTIME_MODE=staging and NEXIMAIL_SEND_ENABLED=false until DNS and mail acceptance tests pass."
   exit 2
 fi
 
@@ -58,6 +75,7 @@ APP_BIND_PORT="${APP_BIND_PORT:-3100}"
 for _ in $(seq 1 30); do
   if curl -fsS "http://127.0.0.1:${APP_BIND_PORT}/api/health" >/dev/null 2>&1; then
     echo "NexiMail isolated stack is healthy on 127.0.0.1:${APP_BIND_PORT}"
+    echo "Pinned revision: $REVISION"
     docker compose -p "$PROJECT_NAME" -f docker-compose.prod.yml ps
     exit 0
   fi
