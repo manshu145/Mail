@@ -30,8 +30,8 @@ export function ApiKeyManager({ disabled }: { disabled?: boolean }) {
 
   return <>
     <button disabled={disabled} className="btn-primary" onClick={() => setOpen(true)}><KeyRound className="h-4 w-4" /> Create API key</button>
-    {open ? <div className="fixed inset-0 z-[90] grid place-items-center bg-black/50 p-4 backdrop-blur-sm">
-      <section className="premium-panel w-full max-w-lg p-6">
+    {open ? <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-4 backdrop-blur-sm sm:items-center sm:py-6">
+      <section className="premium-panel max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto p-6">
         <div className="mb-5 flex items-start justify-between gap-4"><div><p className="page-eyebrow">Developer access</p><h2 className="mt-1 text-2xl font-black">Create API key</h2></div><button className="icon-button" onClick={() => { setOpen(false); setSecret(""); setError(""); }}><X className="h-4 w-4" /></button></div>
         {secret ? <div><p className="text-sm font-bold">Copy this key now. It will not be shown again.</p><code className="mt-3 block break-all rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-4 text-xs">{secret}</code><button className="btn-primary mt-4 w-full" onClick={async () => { await navigator.clipboard.writeText(secret); }}>Copy key</button></div> : <form action={create} className="space-y-4">
           <label className="block"><span className="mb-1.5 block text-sm font-bold">Key name</span><input name="name" required maxLength={120} className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none" placeholder="Automation server" /></label>
