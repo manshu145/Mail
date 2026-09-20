@@ -27,7 +27,7 @@ export function WebhookCreate({ disabled }: { disabled?: boolean }) {
 
   return <>
     <button disabled={disabled} className="btn-primary" onClick={() => setOpen(true)}><Webhook className="h-4 w-4" /> Add endpoint</button>
-    {open ? <div className="fixed inset-0 z-[90] grid place-items-center bg-black/50 p-4 backdrop-blur-sm"><section className="premium-panel w-full max-w-lg p-6">
+    {open ? <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-4 backdrop-blur-sm sm:items-center sm:py-6"><section className="premium-panel max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto p-6">
       <div className="mb-5 flex items-start justify-between gap-4"><div><p className="page-eyebrow">Developer platform</p><h2 className="mt-1 text-2xl font-black">Add webhook</h2></div><button className="icon-button" onClick={() => { setOpen(false); setSecret(""); setError(""); }}><X className="h-4 w-4" /></button></div>
       {secret ? <div><p className="text-sm font-bold">Copy the signing secret now. It will not be shown again.</p><code className="mt-3 block break-all rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-4 text-xs">{secret}</code><button className="btn-primary mt-4 w-full" onClick={() => navigator.clipboard.writeText(secret)}>Copy secret</button></div> : <form action={create} className="space-y-4">
         <label className="block"><span className="mb-1.5 block text-sm font-bold">Name</span><input required name="name" maxLength={120} className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-3.5 py-3 text-sm outline-none" placeholder="CRM events" /></label>
