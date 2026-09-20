@@ -2,7 +2,8 @@
 
 import { Pencil, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ModalPortal } from "@/components/modal-portal";
 
 type SegmentField = "email_domain" | "validation_status" | "contact_status" | "custom_attribute";
 
@@ -78,6 +79,20 @@ export function AudienceActions({
     }
   }
 
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, busy]);
+
   const buttonClass = compact ? "!min-h-8 !px-2.5 !py-1 text-xs" : "";
 
   return <>
@@ -91,8 +106,8 @@ export function AudienceActions({
     </div>
     {error && !open ? <p role="alert" className="mt-2 max-w-sm text-xs font-bold text-rose-600">{error}</p> : null}
 
-    {open ? <div className="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-black/55 p-4 backdrop-blur-sm">
-      <section role="dialog" aria-modal="true" aria-labelledby="edit-audience-title" className="premium-panel max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto p-5 sm:p-6">
+    {open ? <ModalPortal><div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black/55 p-4 py-6 backdrop-blur-sm sm:items-center" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="edit-audience-title" className="premium-panel max-h-[calc(100dvh-3rem)] w-full max-w-lg overflow-y-auto p-5 sm:p-6">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div><p className="page-eyebrow">Audience</p><h2 id="edit-audience-title" className="mt-1 text-xl font-black">Edit {audience.isDynamic ? "segment" : "list"}</h2></div>
           <button type="button" disabled={busy} aria-label="Close edit audience" onClick={() => setOpen(false)} className="icon-button grid"><X className="h-4 w-4"/></button>
@@ -133,6 +148,6 @@ export function AudienceActions({
           </div>
         </form>
       </section>
-    </div> : null}
+    </div></ModalPortal> : null}
   </>;
 }
