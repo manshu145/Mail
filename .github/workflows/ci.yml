@@ -44,6 +44,7 @@ jobs:
         run: |
           bash -n scripts/build-release-bundle.sh
           bash -n deploy/install-isolated.sh
+          bash -n deploy/reset-client-vps.sh
           bash -n deploy/deploy-reviewed.sh
           bash -n deploy/run-production-acceptance.sh
           bash -n deploy/provision-mta-tls.sh
