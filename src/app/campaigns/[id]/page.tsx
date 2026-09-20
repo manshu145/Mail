@@ -65,6 +65,12 @@ export default async function CampaignDetailPage({
     : sql`exists(select 1 from message_events ce where ce.message_id=m.id and ce.type='click' and coalesce((ce.payload->>'automated')::boolean,false)=false)`;
   if(view==="bounce_failed")drillCondition=sql`m.status in ('bounced','failed')`;
 
+  let drillOrder=sql`m.queued_at desc`;
+  if(view==="delivered")drillOrder=sql`m.delivered_at desc nulls last, m.queued_at desc`;
+  if(view==="opens")drillOrder=sql`max(e.created_at) filter(where e.type='open' and ${human}) desc nulls last, m.queued_at desc`;
+  if(view==="clicks")drillOrder=sql`max(e.created_at) filter(where e.type='click' and ${human}) desc nulls last, m.queued_at desc`;
+  if(view==="bounce_failed")drillOrder=sql`coalesce(m.bounced_at,max(e.created_at),m.queued_at) desc nulls last, m.queued_at desc`;
+
   const [listRows,templateRows,accountRows,metrics,recipientResult,recipientCountResult,linkResult,preflightRows,selectedResult,providerImpactResult,providerStateResult]=await Promise.all([
     db.select({id:lists.id,name:lists.name}).from(lists),
     db.select({id:templates.id,name:templates.name}).from(templates),
@@ -99,7 +105,7 @@ export default async function CampaignDetailPage({
       left join message_events e on e.message_id=m.id
       where m.campaign_id=${id} and ${drillCondition}
       group by m.id,c.id
-      order by m.queued_at desc
+      order by ${drillOrder}
       limit ${pageSize} offset ${offset}
     `),
     db.execute(sql`select count(*)::int total from messages m where m.campaign_id=${id} and ${drillCondition}`),
