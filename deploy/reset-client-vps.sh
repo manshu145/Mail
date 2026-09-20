@@ -3,7 +3,7 @@ set -Eeuo pipefail
 umask 077
 
 CONFIRM="${NEXIMAIL_RESET_CONFIRM:-}"
-APP_DIRS=(/opt/neximail-next /opt/neximail)
+APP_DIRS=(/opt/neximail-next /opt/neximail /opt/neximail-releases /opt/neximail-backups)
 PROJECTS=(neximail-next neximail)
 BACKUP_DIR="/root/neximail-reset-backup-$(date -u +%Y%m%dT%H%M%SZ)"
 
@@ -34,11 +34,6 @@ if [[ -d /etc/nginx ]]; then
   tar -C /etc -czf "$BACKUP_DIR/nginx-config.tgz" nginx 2>/dev/null || true
 fi
 
-for dir in "${APP_DIRS[@]}"; do
-  if [[ -f "$dir/.env" ]]; then
-    cp -a "$dir/.env" "$BACKUP_DIR/$(basename "$dir").env" || true
-  fi
-done
 
 stop_project_from_dir() {
   local project="$1"
@@ -87,6 +82,12 @@ if (("${#named_networks[@]}")); then
   docker network rm "${named_networks[@]}" || true
 fi
 
+# Remove old NexiMail-only images after their containers are gone.
+mapfile -t named_images < <(docker image ls --format '{{.Repository}} {{.ID}}' | awk '$1 ~ /^(neximail|neximail-next)([-_:]|$)/ {print $2}' | sort -u)
+if (("${#named_images[@]}")); then
+  docker image rm -f "${named_images[@]}" || true
+fi
+
 for dir in "${APP_DIRS[@]}"; do
   if [[ -e "$dir" ]]; then
     echo "Deleting old app directory: $dir"
@@ -99,6 +100,7 @@ echo "=== Remaining NexiMail-named Docker resources ==="
 docker ps -a --format '{{.Names}}' | grep -Ei 'neximail' || true
 docker volume ls --format '{{.Name}}' | grep -Ei 'neximail' || true
 docker network ls --format '{{.Name}}' | grep -Ei 'neximail' || true
+docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -Ei '^neximail' || true
 
 echo
 echo "Scoped NexiMail cleanup complete."
