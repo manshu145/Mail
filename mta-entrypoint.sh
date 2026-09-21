@@ -46,10 +46,16 @@ postconf -e "mydestination = localhost"
 postconf -e "inet_interfaces = all"
 postconf -e "inet_protocols = ipv4"
 postconf -e "mynetworks = ${MTA_NETWORKS}"
+cat > /etc/postfix/bounce_recipient_access <<'EOF'
+/^b\+[0-9A-Fa-f]{32}\.[0-9A-Fa-f]{24}@[A-Za-z0-9.-]+$/ OK
+EOF
+cat > /etc/postfix/bounce_transport <<EOF
+/^b\+[0-9A-Fa-f]{32}\.[0-9A-Fa-f]{24}@[A-Za-z0-9.-]+$/ smtp:[${BOUNCE_RECEIVER_HOST}]:${BOUNCE_RECEIVER_PORT}
+EOF
 postconf -e "relay_domains ="
-postconf -e "transport_maps ="
-postconf -e "smtpd_relay_restrictions = permit_mynetworks,reject_unauth_destination"
-postconf -e "smtpd_recipient_restrictions = permit_mynetworks,reject_unauth_destination"
+postconf -e "transport_maps = regexp:/etc/postfix/bounce_transport"
+postconf -e "smtpd_relay_restrictions = permit_mynetworks,check_recipient_access regexp:/etc/postfix/bounce_recipient_access,reject_unauth_destination"
+postconf -e "smtpd_recipient_restrictions = permit_mynetworks,check_recipient_access regexp:/etc/postfix/bounce_recipient_access,reject_unauth_destination"
 postconf -e "disable_vrfy_command = yes"
 postconf -e "smtpd_helo_required = yes"
 postconf -e "message_size_limit = ${MTA_MESSAGE_SIZE_LIMIT}"
@@ -84,16 +90,14 @@ postconf -e "milter_default_action = tempfail"
 touch /etc/postfix/aliases
 newaliases
 
+# Public SMTP accepts only signed NexiMail VERP-shaped recipients and always
+# routes them to the internal bounce receiver. The receiver validates the HMAC
+# and authorizes the recipient domain from sending_domains. BOUNCE_DOMAIN stays
+# available only as a legacy fallback for existing deployments and held mail.
 if [ -n "$BOUNCE_DOMAIN" ]; then
   case "$BOUNCE_DOMAIN" in
     *[!a-zA-Z0-9.-]*|'') echo "Invalid BOUNCE_DOMAIN" >&2; exit 1 ;;
   esac
-  cat > /etc/postfix/transport <<EOF
-${BOUNCE_DOMAIN} smtp:[${BOUNCE_RECEIVER_HOST}]:${BOUNCE_RECEIVER_PORT}
-EOF
-  postmap lmdb:/etc/postfix/transport
-  postconf -e "relay_domains = ${BOUNCE_DOMAIN}"
-  postconf -e "transport_maps = lmdb:/etc/postfix/transport"
 fi
 
 if ! grep -q '^10025[[:space:]]' /etc/postfix/master.cf; then
