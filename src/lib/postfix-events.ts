@@ -140,6 +140,10 @@ export async function handlePostfixEvent(db: EventDb, line: string, mappedMessag
   if (!queueId) return false;
   const [message] = await db.select().from(messages).where(mappedMessageId ? eq(messages.id, mappedMessageId) : eq(messages.providerMessageId, queueId)).limit(1).for("update");
   if (!message || message.status === "sending") return false;
+  // A historical log mapping can outlive a manually evacuated/requeued Postfix
+  // item. Once the message no longer owns this queue id, consume the stale event
+  // without mutating the current delivery state.
+  if (mappedMessageId && message.providerMessageId !== queueId) return true;
   const status = line.match(/status=(sent|deferred|bounced|expired)/i)?.[1]?.toLowerCase();
   if (!status) return false;
 
