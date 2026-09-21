@@ -33,11 +33,15 @@ export async function POST(request:NextRequest,{params}:{params:Promise<{resourc
    if(!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i.test(domain))return NextResponse.json({error:"Enter a valid domain."},{status:400});
    const selector=(text(body.dkimSelector)||"default").toLowerCase();
    if(!/^[a-z0-9][a-z0-9_-]{0,62}$/i.test(selector))return NextResponse.json({error:"Enter a valid DKIM selector."},{status:400});
+   const requestedBounceDomain=text(body.bounceDomain).toLowerCase().replace(/^https?:\/\//,"").replace(/\/$/,"");
+   const bounceDomain=requestedBounceDomain||`nm-bounce.${domain}`;
+   if(!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i.test(bounceDomain))return NextResponse.json({error:"Enter a valid bounce domain."},{status:400});
+   if(bounceDomain===domain)return NextResponse.json({error:"Bounce domain must be a subdomain or separate domain, not the sending domain itself."},{status:400});
    const dkim=createDkimMaterial(selector);
-   const rows=await db.insert(sendingDomains).values({domain,trackingDomain:text(body.trackingDomain)||null,dkimSelector:dkim.selector,dkimPublicKey:dkim.publicKey,dkimPrivateKeyCiphertext:dkim.privateKeyCiphertext}).onConflictDoNothing({target:sendingDomains.domain}).returning({id:sendingDomains.id});
+   const rows=await db.insert(sendingDomains).values({domain,trackingDomain:text(body.trackingDomain)||null,bounceDomain,dkimSelector:dkim.selector,dkimPublicKey:dkim.publicKey,dkimPrivateKeyCiphertext:dkim.privateKeyCiphertext}).onConflictDoNothing({target:sendingDomains.domain}).returning({id:sendingDomains.id});
    if(!rows.length)return NextResponse.json({error:"Domain already exists."},{status:409});
-   await audit("domain.created",session,"domain",rows[0].id,{domain,dkimSelector:selector});
-   return NextResponse.json({ok:true,id:rows[0].id,dkim:{host:`${selector}._domainkey.${domain}`,type:"TXT",value:dkim.publicRecord}},{status:201})
+   await audit("domain.created",session,"domain",rows[0].id,{domain,dkimSelector:selector,bounceDomain});
+   return NextResponse.json({ok:true,id:rows[0].id,dkim:{host:`${selector}._domainkey.${domain}`,type:"TXT",value:dkim.publicRecord},bounce:{domain:bounceDomain,mx:process.env.MTA_HOSTNAME||null,spfIp:process.env.MTA_PUBLIC_IP||null}},{status:201})
   }
   return NextResponse.json({error:"Unknown resource."},{status:404});
  }catch(error){console.error(error);return NextResponse.json({error:"Could not save this resource."},{status:500})}
