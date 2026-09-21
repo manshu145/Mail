@@ -152,9 +152,22 @@ fi
 # service's pre-deploy running/stopped state so an intentionally paused transport
 # worker cannot be accidentally resumed during a code rollout.
 services_to_start=()
+services_to_recreate_stopped=()
 for service in "${services[@]}"; do
-  if [[ "${service_was_running[$service]:-0}" == 1 ]]; then services_to_start+=("$service"); fi
+  if [[ "${service_was_running[$service]:-0}" == 1 ]]; then
+    services_to_start+=("$service")
+  else
+    services_to_recreate_stopped+=("$service")
+  fi
 done
+
+# Recreate intentionally stopped services against the freshly built runtime image,
+# but keep them stopped. Without this, a later `docker compose start` could revive
+# an old container from the previous release.
+if [[ "${#services_to_recreate_stopped[@]}" -gt 0 ]]; then
+  "${dc[@]}" up --no-start --no-deps --force-recreate "${services_to_recreate_stopped[@]}"
+fi
+
 if [[ "${#services_to_start[@]}" -gt 0 ]]; then
   "${dc[@]}" up -d --no-deps "${services_to_start[@]}"
 fi
