@@ -284,7 +284,7 @@ async function runOnce() {
       mtaAccepted = true;
       if (!result.queueId) throw new SmtpSubmissionUncertainError("MTA accepted message without returning a queue id");
       await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]);
-      await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled,provider:gate.provider,providerProbe:gate.probe,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope});
+      await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:Boolean(bounceSigningEnabled && bounceDomain),provider:gate.provider,providerProbe:gate.probe,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope});
       accepted++;
     } catch (error) {
       if (mtaAccepted || error instanceof SmtpSubmissionUncertainError) {
@@ -301,7 +301,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
 }
 
 async function main() {
@@ -318,7 +318,7 @@ async function main() {
         }
       } finally { lock.release(); }
     }
-    catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort, bounceTracking: bounceEnabled }).catch(() => {}); }
+    catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort, bounceTracking: bounceSigningEnabled }).catch(() => {}); }
     await sleep(intervalMs);
   }
 }
