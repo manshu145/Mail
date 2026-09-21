@@ -79,6 +79,20 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
     assert.equal((await pg.query<{status:string}>("select status from messages where id=$1", [message.id])).rows[0].status, "delivered");
     assert.equal((await pg.query("select * from message_events")).rows.length, 1);
     assert.equal((await pg.query("select * from webhook_events")).rows.length, 1);
+
+    // Once a queue item has been manually evacuated and returned to the app
+    // queue, a historical deferred line for the old queue id must be consumed
+    // without moving the message back to mta_accepted.
+    await pg.query("update messages set status='ready_for_transport',provider_message_id=null,last_error='requeued_after_manual_postfix_cleanup' where id=$1", [message.id]);
+    assert.equal(await orm.transaction(tx => handlePostfixEvent(tx as unknown as EventDb, sent.replace("status=sent", "status=deferred"), message.id)), true);
+    assert.equal((await pg.query<{status:string}>("select status from messages where id=$1", [message.id])).rows[0].status, "ready_for_transport");
+    assert.equal((await pg.query("select * from message_events")).rows.length, 1);
+
+    // Restore the delivered fixture before the unrelated engagement-audience
+    // assertions below; the stale-replay case intentionally moved it back to
+    // ready_for_transport for the regression check above.
+    await pg.query("update messages set status='delivered',delivered_at=now() where id=$1", [message.id]);
+
     const [dynamic] = await orm.insert(lists).values({ name: "Dynamic", isDynamic: true }).returning();
     await orm.insert(segmentDefinitions).values({ listId: dynamic.id, field: "validation_status", operator: "equals", value: "accepted" });
     const dynamicSql = await audienceSelection(dynamic, orm as unknown as Parameters<typeof audienceSelection>[1]);
