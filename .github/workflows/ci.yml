@@ -80,6 +80,12 @@ jobs:
           done
           docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta postfix status
           docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta sh -lc 'test -s /run/opendkim/opendkim.pid && kill -0 "$(cat /run/opendkim/opendkim.pid)"'
+          docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta sh -lc '
+            addr="b+123e4567e89b12d3a456426614174000.0123456789abcdef01234567@nm-bounce.example.com"
+            test "$(postmap -q "$addr" regexp:/etc/postfix/bounce_recipient_access)" = "OK"
+            test "$(postmap -q "$addr" regexp:/etc/postfix/bounce_transport)" = "smtp:[bounce-receiver]:2526"
+            test -z "$(postmap -q "normal@example.com" regexp:/etc/postfix/bounce_transport)"
+          '
           docker compose -p neximail-ci -f docker-compose.prod.yml exec -T mta python3 - <<'PY'
           import json
           import urllib.request

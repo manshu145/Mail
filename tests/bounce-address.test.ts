@@ -13,11 +13,18 @@ test.after(() => {
   if (previousSecret === undefined) delete process.env.BOUNCE_SECRET; else process.env.BOUNCE_SECRET = previousSecret;
 });
 
-test("VERP bounce address round-trips a message id", () => {
+test("legacy VERP bounce address round-trips a message id", () => {
   const messageId = "123e4567-e89b-12d3-a456-426614174000";
   const address = makeBounceAddress(messageId);
   assert.match(address, /^b\+[0-9a-f]{32}\.[0-9a-f]{24}@bounce\.example\.com$/);
-  assert.deepEqual(parseBounceAddress(address), { messageId });
+  assert.deepEqual(parseBounceAddress(address), { messageId, bounceDomain: "bounce.example.com" });
+});
+
+test("per-domain VERP address uses the supplied bounce domain", () => {
+  const messageId = "123e4567-e89b-12d3-a456-426614174000";
+  const address = makeBounceAddress(messageId, "nm-bounce.customer.example");
+  assert.match(address, /@nm-bounce\.customer\.example$/);
+  assert.deepEqual(parseBounceAddress(address), { messageId, bounceDomain: "nm-bounce.customer.example" });
 });
 
 test("tampered VERP signature is rejected", () => {
@@ -27,8 +34,8 @@ test("tampered VERP signature is rejected", () => {
   assert.equal(parseBounceAddress(tampered), null);
 });
 
-test("wrong bounce domain is rejected", () => {
+test("a syntactically valid signed address preserves its bounce domain for DB authorization", () => {
   const messageId = "123e4567-e89b-12d3-a456-426614174000";
-  const address = makeBounceAddress(messageId).replace("bounce.example.com", "evil.example.com");
-  assert.equal(parseBounceAddress(address), null);
+  const address = makeBounceAddress(messageId, "nm-bounce.other.example");
+  assert.deepEqual(parseBounceAddress(address), { messageId, bounceDomain: "nm-bounce.other.example" });
 });

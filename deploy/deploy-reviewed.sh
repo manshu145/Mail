@@ -10,6 +10,7 @@ BACKUP_DIR="/opt/neximail-backups/$(date -u +%Y%m%dT%H%M%SZ)"
 workers=(import-worker campaign-worker policy-worker transport-worker bounce-receiver event-worker postfix-event-worker dkim-worker validation-worker domain-health-worker reputation-worker webhook-worker)
 services=(app "${workers[@]}")
 build_services=(mta app)
+declare -A service_was_running=()
 
 [[ $EUID -eq 0 ]] || { echo 'Run this script as root.'; exit 1; }
 for tool in git docker curl sha256sum tar python3; do command -v "$tool" >/dev/null || { echo "$tool is required"; exit 1; }; done
@@ -59,6 +60,13 @@ dc=(docker compose --project-directory "$RELEASE_DIR" -p "$PROJECT_NAME" -f "$RE
 # Preserve inspectable rollback information without dumping container secrets.
 "${old_dc[@]}" ps > "$BACKUP_DIR/services-before.txt"
 git -C "$APP_DIR" rev-parse HEAD > "$BACKUP_DIR/source-before.txt"
+for service in "${services[@]}"; do
+  if [[ -n "$("${old_dc[@]}" ps --status running -q "$service")" ]]; then
+    service_was_running["$service"]=1
+  else
+    service_was_running["$service"]=0
+  fi
+done
 for service in "${build_services[@]}"; do
   id=$("${old_dc[@]}" ps -q "$service")
   if [[ -n "$id" ]]; then
@@ -140,8 +148,19 @@ elif [[ "$spool_mount" != "$spool_volume" ]]; then
   echo "Existing MTA spool is mounted from $spool_mount; refusing to replace it."; exit 1
 fi
 "${dc[@]}" up -d --no-deps mta
-# Postgres and Redis are deliberately preserved.
-"${dc[@]}" up -d --no-deps "${services[@]}"
+# Postgres and Redis are deliberately preserved. Preserve each application
+# service's pre-deploy running/stopped state so an intentionally paused transport
+# worker cannot be accidentally resumed during a code rollout.
+services_to_start=()
+for service in "${services[@]}"; do
+  if [[ "${service_was_running[$service]:-0}" == 1 ]]; then services_to_start+=("$service"); fi
+done
+if [[ "${#services_to_start[@]}" -gt 0 ]]; then
+  "${dc[@]}" up -d --no-deps "${services_to_start[@]}"
+fi
+
+# The live deployment contract requires the app itself to have been running.
+[[ "${service_was_running[app]:-0}" == 1 ]] || { echo 'App was not running before deploy; preserved stopped state. Health verification cannot continue.'; exit 1; }
 
 # Exercise the reports SQL inside the deployed app image against the real database.
 "${dc[@]}" exec -T app node --import tsx scripts/check-reports.ts
@@ -150,7 +169,9 @@ for attempt in $(seq 1 40); do
   if curl -fsS --max-time 10 "$HEALTH_URL" > "$BACKUP_DIR/health.json"; then
     ready=1
     for service in "${services[@]}"; do
-      [[ -n "$("${dc[@]}" ps --status running -q "$service")" ]] || ready=0
+      running_now=0
+      [[ -n "$("${dc[@]}" ps --status running -q "$service")" ]] && running_now=1
+      [[ "$running_now" == "${service_was_running[$service]:-0}" ]] || ready=0
     done
     mta_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$("${dc[@]}" ps -q mta)")
     [[ "$mta_state" == healthy ]] || ready=0

@@ -2,7 +2,7 @@ import net from "node:net";
 import { eq } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { messageEvents, messages, suppressions } from "../../src/db/schema";
-import { workerHeartbeats } from "../../src/db/operations-schema";
+import { sendingDomains, workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import { parseBounceAddress } from "../../src/lib/bounce-address";
 import { classifyBounce } from "../../src/lib/bounce-classification";
@@ -27,6 +27,15 @@ function parseDsn(raw: string) {
 async function heartbeat(meta: Record<string, unknown>) {
   await db.insert(workerHeartbeats).values({ workerName: "bounce-receiver", metadata: meta })
     .onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
+}
+
+async function bounceDomainAllowed(domain: string) {
+  const normalized = domain.trim().toLowerCase();
+  const legacy = process.env.BOUNCE_DOMAIN?.trim().toLowerCase();
+  if (legacy && normalized === legacy) return true;
+  const rows = await db.select({ id: sendingDomains.id }).from(sendingDomains)
+    .where(eq(sendingDomains.bounceDomain, normalized)).limit(1);
+  return rows.length > 0;
 }
 
 async function processDsn(messageId: string, raw: string) {
@@ -115,6 +124,7 @@ function session(socket: net.Socket) {
           try {
             const parsed = parseBounceAddress(extractAddress(rawLine.slice(8)));
             if (!parsed) { reply("550 5.1.1 Invalid bounce recipient"); continue; }
+            if (!(await bounceDomainAllowed(parsed.bounceDomain))) { reply("550 5.1.1 Unknown bounce domain"); continue; }
             messageId = parsed.messageId;
             reply("250 2.1.5 Ok");
           } catch { reply("451 4.3.0 Bounce configuration unavailable"); }

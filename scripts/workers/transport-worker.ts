@@ -2,7 +2,7 @@ import { submitToMta, SmtpSubmissionUncertainError, SmtpResponseError } from "..
 import { and, eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { campaigns, contacts, messageEvents, messages, sendingAccounts, templates } from "../../src/db/schema";
-import { providerCooldowns, sendingAccountWarmups, workerHeartbeats } from "../../src/db/operations-schema";
+import { providerCooldowns, sendingAccountWarmups, sendingDomains, workerHeartbeats } from "../../src/db/operations-schema";
 import { signPublicToken } from "../../src/lib/public-tokens";
 import { combinedAttachmentLimitError, loadCampaignAttachments, type CampaignAttachment } from "../../src/lib/campaign-attachments";
 import { loadTemplateAttachments } from "../../src/lib/template-attachments";
@@ -22,7 +22,7 @@ const mtaPort = Math.max(1, Number(process.env.MTA_PORT || "10025"));
 const smtpTimeoutMs = Math.max(3000, Number(process.env.MTA_SMTP_TIMEOUT_MS || "15000"));
 const intervalMs = Math.max(1000, Number(process.env.TRANSPORT_WORKER_INTERVAL_MS || "3000"));
 const claimBatch = Math.min(200, Math.max(1, Number(process.env.TRANSPORT_BATCH_SIZE || "50")));
-const bounceEnabled = Boolean(process.env.BOUNCE_DOMAIN?.trim() && process.env.BOUNCE_SECRET?.trim());
+const bounceSigningEnabled = Boolean(process.env.BOUNCE_SECRET?.trim());
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
@@ -171,6 +171,7 @@ async function runOnce() {
   let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
   const templateAttachmentCache = new Map<string, CampaignAttachment[]>();
+  const bounceDomainCache = new Map<string, string | null>();
 
   for (const claim of claimed) {
     const [message] = await db.select().from(messages).where(eq(messages.id, claim.id)).limit(1);
@@ -237,7 +238,20 @@ async function runOnce() {
     const fromEmail = headerValue(account.fromEmail).toLowerCase();
     const replyTo = headerValue(account.replyTo || account.fromEmail);
     const recipient = headerValue(contact.email);
-    const envelopeFrom = bounceEnabled ? makeBounceAddress(message.id) : fromEmail;
+    const senderDomain = fromEmail.split("@")[1]?.toLowerCase() || "";
+    let bounceDomain: string | null;
+    if (bounceDomainCache.has(senderDomain)) {
+      bounceDomain = bounceDomainCache.get(senderDomain) ?? null;
+    } else {
+      const [domainRow] = senderDomain
+        ? await db.select({ bounceDomain: sendingDomains.bounceDomain }).from(sendingDomains).where(eq(sendingDomains.domain, senderDomain)).limit(1)
+        : [];
+      const dynamicDomain = domainRow?.bounceDomain?.trim().toLowerCase() || null;
+      const legacyDomain = process.env.BOUNCE_DOMAIN?.trim().toLowerCase() || null;
+      bounceDomain = dynamicDomain || legacyDomain;
+      bounceDomainCache.set(senderDomain, bounceDomain);
+    }
+    const envelopeFrom = bounceSigningEnabled && bounceDomain ? makeBounceAddress(message.id, bounceDomain) : fromEmail;
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
     const raw = [
       `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
@@ -270,7 +284,7 @@ async function runOnce() {
       mtaAccepted = true;
       if (!result.queueId) throw new SmtpSubmissionUncertainError("MTA accepted message without returning a queue id");
       await pool.query(`update messages set status='mta_accepted',accepted_at=now(),provider_message_id=$2,last_error=null,next_attempt_at=null where id=$1 and status='sending'`, [message.id, result.queueId]);
-      await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:bounceEnabled,provider:gate.provider,providerProbe:gate.probe,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope});
+      await event(message.id,"mta_accepted",{attempt:claim.attempt_count,queueId:result.queueId,attachments:attachments.length,envelopeFrom,bounceTracking:Boolean(bounceSigningEnabled && bounceDomain),provider:gate.provider,providerProbe:gate.probe,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope});
       accepted++;
     } catch (error) {
       if (mtaAccepted || error instanceof SmtpSubmissionUncertainError) {
@@ -287,7 +301,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
 }
 
 async function main() {
@@ -304,7 +318,7 @@ async function main() {
         }
       } finally { lock.release(); }
     }
-    catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort, bounceTracking: bounceEnabled }).catch(() => {}); }
+    catch (error) { console.error("[transport-worker]", error); await heartbeat({ state: "error", mtaHost, mtaPort, bounceTracking: bounceSigningEnabled }).catch(() => {}); }
     await sleep(intervalMs);
   }
 }

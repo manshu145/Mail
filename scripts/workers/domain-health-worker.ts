@@ -1,4 +1,4 @@
-import { resolve4, resolveTxt } from "node:dns/promises";
+import { resolve4, resolveMx, resolveTxt } from "node:dns/promises";
 import { db, pool } from "../../src/db";
 import { sendingDomains, workerHeartbeats } from "../../src/db/operations-schema";
 import { eq } from "drizzle-orm";
@@ -9,6 +9,7 @@ const configuredPublicIp = String(process.env.MTA_PUBLIC_IP || "").trim();
 
 async function txt(name:string){ try { return (await resolveTxt(name)).map(x=>x.join("")).join("\n"); } catch { return ""; } }
 async function ipv4(name:string){ try { return await resolve4(name); } catch { return []; } }
+async function mx(name:string){ try { return await resolveMx(name); } catch { return []; } }
 async function heartbeat(meta:Record<string,unknown>={}){ await db.insert(workerHeartbeats).values({workerName:"domain-health",metadata:meta}).onConflictDoUpdate({target:workerHeartbeats.workerName,set:{lastSeenAt:new Date(),metadata:meta}}); }
 
 function normalizeDkim(value:string){return value.replace(/\s+/g,"").replace(/"/g,"").toLowerCase()}
@@ -28,7 +29,14 @@ async function run(){
   const outboundIps=await outboundIpv4s();
   for(const row of domains){
     const selector=row.dkimSelector||"default";
-    const [spf,dkim,dmarc]=await Promise.all([txt(row.domain),txt(`${selector}._domainkey.${row.domain}`),txt(`_dmarc.${row.domain}`)]);
+    const bounceDomain=row.bounceDomain?.trim().toLowerCase()||null;
+    const [spf,dkim,dmarc,bounceSpf,bounceMx]=await Promise.all([
+      txt(row.domain),
+      txt(`${selector}._domainkey.${row.domain}`),
+      txt(`_dmarc.${row.domain}`),
+      bounceDomain?txt(bounceDomain):Promise.resolve(""),
+      bounceDomain?mx(bounceDomain):Promise.resolve([]),
+    ]);
     const spfRecordPresent=/v=spf1/i.test(spf);
     const spfIpAuthorized=outboundIps.length>0&&outboundIps.some(ip=>spfAuthorizesIp(spf,ip));
     const spfOk=spfRecordPresent&&spfIpAuthorized;
@@ -36,10 +44,14 @@ async function run(){
     const actual=normalizeDkim(dkim);
     const dkimOk=Boolean(expected&&/v=dkim1/i.test(dkim)&&actual.includes(expected));
     const dmarcOk=/v=dmarc1/i.test(dmarc);
+    const bounceSpfOk=Boolean(bounceDomain&&/v=spf1/i.test(bounceSpf)&&outboundIps.length>0&&outboundIps.some(ip=>spfAuthorizesIp(bounceSpf,ip)));
+    const normalizedMta=mtaHostname.replace(/\.$/,"");
+    const bounceMxOk=Boolean(bounceDomain&&normalizedMta&&bounceMx.some(record=>record.exchange.toLowerCase().replace(/\.$/,"")===normalizedMta));
+    const bounceStatus=!bounceDomain?"legacy":bounceSpfOk&&bounceMxOk?"ready":"warning";
     const nextStatus=row.status==="disabled"?"disabled":spfOk&&dkimOk&&dmarcOk?"ready":"warning";
-    await db.update(sendingDomains).set({spfOk,dkimOk,dmarcOk,status:nextStatus,lastCheckedAt:new Date(),updatedAt:new Date()}).where(eq(sendingDomains.id,row.id));
+    await db.update(sendingDomains).set({spfOk,dkimOk,dmarcOk,status:nextStatus,bounceSpfOk,bounceMxOk,bounceStatus,lastCheckedAt:new Date(),updatedAt:new Date()}).where(eq(sendingDomains.id,row.id));
   }
-  await heartbeat({state:"online",checked:domains.length,spfIdentityReady:outboundIps.length>0});
+  await heartbeat({state:"online",checked:domains.length,spfIdentityReady:outboundIps.length>0,bounceDomains:domains.filter(row=>Boolean(row.bounceDomain)).length});
 }
 async function main(){ while(true){ try{await run();}catch(e){console.error("[domain-health-worker]",e);await heartbeat({state:"error"}).catch(()=>{});} await new Promise(r=>setTimeout(r,intervalMs)); } }
 main().catch(console.error); process.on("SIGTERM",async()=>{await pool.end();process.exit(0)});
