@@ -47,6 +47,17 @@ async function paceProvider(provider: string, globalRate: number) {
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
 function headerValue(value: string) { return value.replace(/[\r\n]+/g, " ").trim(); }
+function encodeHeaderText(value: string) {
+  const clean = headerValue(value);
+  if (!clean) return "";
+  return /^[\x20-\x7e]*$/.test(clean) ? clean : `=?UTF-8?B?${Buffer.from(clean, "utf8").toString("base64")}?=`;
+}
+function formatDisplayName(value: string) {
+  const clean = headerValue(value);
+  if (!clean) return "";
+  if (!/^[\x20-\x7e]*$/.test(clean)) return encodeHeaderText(clean);
+  return `"${clean.replace(/([\\"])/g, "\\$1")}"`;
+}
 function retryDelaySeconds(attempt: number, settings: DeliverySettings) { return Math.min(settings.retryMaxSeconds, Math.max(settings.retryInitialSeconds, Math.round(settings.retryInitialSeconds * settings.retryBackoffMultiplier ** Math.max(0, attempt - 1)))); }
 function ensureUnsubscribe(html: string, text: string, unsubscribeUrl: string) {
   let nextHtml = html;
@@ -269,6 +280,7 @@ async function runOnce() {
     let html = personalizeContactHtml(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
     let text = personalize(template.textBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
     const subject = headerValue(personalize(campaign.subject || template.subject || "", contact));
+    const encodedSubject = encodeHeaderText(subject);
     const contentBlock = emailContentBlockReason({ subject, html, text });
     if (contentBlock) {
       await pauseCampaignForDeliverability(campaign.id, message.id, contentBlock);
@@ -284,7 +296,7 @@ async function runOnce() {
       const token = await signPublicToken({ messageId: message.id }, "30d");
       html += `<img src="${appUrl}/tracking/open/${token}" width="1" height="1" alt="" style="display:none!important" />`;
     }
-    const fromName = headerValue(account.fromName);
+    const fromName = formatDisplayName(account.fromName);
     const fromEmail = headerValue(account.fromEmail).toLowerCase();
     const replyTo = headerValue(account.replyTo || account.fromEmail);
     const recipient = headerValue(contact.email);
@@ -301,7 +313,7 @@ async function runOnce() {
     const envelopeFrom = bounceSigningEnabled && bounceDomain ? makeBounceAddress(message.id, bounceDomain) : fromEmail;
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
     const raw = [
-      `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
+      `From: ${fromName ? `${fromName} ` : ""}<${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${encodedSubject}`, `Date: ${new Date().toUTCString()}`,
       `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, `Feedback-ID: ${campaign.id}:${account.id}:bulk:neximail`, `List-ID: <${campaign.listId || campaign.id}.${senderDomain}>`, "MIME-Version: 1.0",
       `List-Unsubscribe: <${unsubscribeUrl}>`, "List-Unsubscribe-Post: List-Unsubscribe=One-Click", mime.contentTypeHeader, "", ...mime.bodyLines,
     ].join("\r\n");
