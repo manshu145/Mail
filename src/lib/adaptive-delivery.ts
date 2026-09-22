@@ -30,11 +30,20 @@ export function decideAdaptiveDelivery(input: {
   let phase = Math.max(0, input.phase);
   let releaseLimit = Math.min(total, Math.max(initial, input.releaseLimit));
   const bounceRate = input.sample > 0 ? input.bounced / input.sample : 0;
-  if (total <= initial) return { phase: 3, releaseLimit: total, state: "open", bounceRate, paused: false, reason: null };
 
-  const earlySample = Math.min(input.config.reputationMinSample, Math.max(20, Math.ceil(Math.max(1, releaseLimit) * 0.2)));
+  // Safety thresholds apply to every campaign, including campaigns smaller than
+  // the configured initial canary. A small campaign can still produce enough
+  // terminal outcomes to prove the list is unsafe while unsent messages remain.
+  const earlySample = Math.min(
+    input.config.reputationMinSample,
+    Math.max(20, Math.ceil(Math.max(1, releaseLimit) * 0.2)),
+  );
   if (input.sample >= earlySample && bounceRate >= input.config.bounceStopRate) {
     return { phase, releaseLimit, state: "paused", bounceRate, paused: true, reason: "hard_bounce_rate_stop" };
+  }
+
+  if (total <= initial) {
+    return { phase: 3, releaseLimit: total, state: "open", bounceRate, paused: false, reason: null };
   }
 
   const phaseEvaluated = input.released >= releaseLimit
