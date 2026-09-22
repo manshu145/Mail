@@ -2,7 +2,7 @@ import { inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { workerHeartbeats } from "@/db/operations-schema";
 
-const CRITICAL_WORKERS = ["campaign", "policy", "transport", "domain-health", "reputation", "postfix-events", "bounce-receiver"] as const;
+const CRITICAL_WORKERS = ["campaign", "policy", "transport", "domain-health", "dkim", "reputation", "postfix-events", "bounce-receiver"] as const;
 
 export type CampaignPreflight = {
   ok: boolean;
