@@ -42,10 +42,32 @@ async function campaignSafety(campaignId:string,settings:Awaited<ReturnType<type
 
 async function runOnce(){
  const settings=await readDeliverySettings();
+
+ // Re-evaluate safety for every actively-sending campaign on every policy cycle,
+ // even when it has no queued rows left. Otherwise a campaign smaller than the
+ // initial canary can release its whole audience and never observe later bounces.
+ const activeCampaigns=await pool.query<{id:string}>(`
+  select c.id::text
+  from campaigns c
+  where c.status='sending'
+    and exists(select 1 from messages m where m.campaign_id=c.id)
+  order by c.started_at nulls first,c.created_at
+ `);
+ const safetyCache=new Map<string,SafetyState>();
+ let safetyPaused=0;
+ for(const row of activeCampaigns.rows){
+  const safety=await campaignSafety(row.id,settings);
+  safetyCache.set(row.id,safety);
+  if(safety.paused)safetyPaused++;
+ }
+
  const activeResult=await db.execute(sql`select count(*)::int as count from messages where status in ('ready_for_transport','sending','mta_accepted','deferred')`);
  const active=Number((activeResult.rows[0] as Record<string,unknown>|undefined)?.count||0);
  const available=Math.max(0,settings.maxActiveQueued-active);
- if(!available){await heartbeat({state:"backpressure",active,maxActiveQueued:settings.maxActiveQueued});return}
+ if(!available){
+  await heartbeat({state:"backpressure",active,maxActiveQueued:settings.maxActiveQueued,safetyCampaigns:activeCampaigns.rowCount||0,safetyPaused});
+  return
+ }
  const queuedResult=await pool.query<{id:string;campaign_id:string;contact_id:string}>(`
   select m.id::text,m.campaign_id::text,m.contact_id::text
   from messages m join campaigns c on c.id=m.campaign_id
@@ -54,12 +76,11 @@ async function runOnce(){
   limit $1
  `,[Math.min(500,available)]);
  const queued=queuedResult.rows;
- let ready=0,cancelled=0,canaryHeld=0,safetyPaused=0;
- const safetyCache=new Map<string,SafetyState>();
+ let ready=0,cancelled=0,canaryHeld=0;
  for(const message of queued){
   let safety=safetyCache.get(message.campaign_id);
   if(!safety){safety=await campaignSafety(message.campaign_id,settings);safetyCache.set(message.campaign_id,safety)}
-  if(safety.paused){safetyPaused++;continue}
+  if(safety.paused){continue}
   if(!safety.canRelease){canaryHeld++;continue}
   const [contact]=await db.select().from(contacts).where(eq(contacts.id,message.contact_id)).limit(1);
   if(!contact||contact.status!=="active"){await db.update(messages).set({status:"cancelled",lastError:"contact_not_active"}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
@@ -72,7 +93,7 @@ async function runOnce(){
   }
   await db.update(messages).set({status:"ready_for_transport",lastError:null}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));ready++;safety.released++;safety.canRelease=safety.released<safety.releaseLimit
  }
- await heartbeat({state:"online",evaluated:queued.length,ready,cancelled,canaryHeld,safetyPaused,activeBefore:active,maxActiveQueued:settings.maxActiveQueued,canaryInitialBatch:settings.canaryInitialBatch,canarySecondBatch:settings.canarySecondBatch,canaryThirdBatch:settings.canaryThirdBatch,canaryBounceWarnRate:settings.canaryBounceWarnRate,bounceStopRate:settings.reputationBounceStopRate,source:"database_control_plane"})
+ await heartbeat({state:"online",evaluated:queued.length,ready,cancelled,canaryHeld,safetyCampaigns:activeCampaigns.rowCount||0,safetyPaused,activeBefore:active,maxActiveQueued:settings.maxActiveQueued,canaryInitialBatch:settings.canaryInitialBatch,canarySecondBatch:settings.canarySecondBatch,canaryThirdBatch:settings.canaryThirdBatch,canaryBounceWarnRate:settings.canaryBounceWarnRate,bounceStopRate:settings.reputationBounceStopRate,source:"database_control_plane"})
 }
 async function main(){console.log("[policy-worker] started with database backpressure and adaptive delivery safety");while(true){
  const lock=await pool.connect();
