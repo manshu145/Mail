@@ -27,3 +27,11 @@ test("unsafe early bounce rate pauses before the full list is released", () => {
   assert.equal(result.paused, true);
   assert.equal(result.releaseLimit, 100);
 });
+
+test("small campaign is still paused when enough terminal outcomes prove a dangerous bounce rate", () => {
+  const result = decideAdaptiveDelivery({ total: 94, released: 94, sample: 47, bounced: 25, phase: 3, releaseLimit: 94, config });
+  assert.equal(result.paused, true);
+  assert.equal(result.state, "paused");
+  assert.equal(result.reason, "hard_bounce_rate_stop");
+  assert.equal(result.releaseLimit, 94);
+});
