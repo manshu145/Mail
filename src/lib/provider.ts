@@ -79,6 +79,16 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
     return { scope: "none", reason: "recipient_or_mailbox_condition" };
   }
 
+  // JFE050004 is emitted by the upstream outbound Mail Bridge before the
+  // destination SMTP conversation. It therefore applies to the sending path,
+  // not to one recipient provider. Stop the sender immediately instead of
+  // continuing to feed thousands of messages into the restricted bridge.
+  const outboundBridgeRestriction =
+    /jfe050004|unusual number of invalid recipients originating from your account/i.test(text);
+  if (outboundBridgeRestriction) {
+    return { scope: "sender", reason: "sender_or_outbound_path_restriction" };
+  }
+
   // Provider-local policy systems sometimes use sender/account wording even
   // though the restriction applies only at that receiving network. Keep
   // these responses provider-scoped; they must never freeze unrelated
