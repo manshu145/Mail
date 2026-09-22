@@ -31,6 +31,13 @@ test("sender/IP authorization restriction creates provider cooldown", () => {
   );
 });
 
+test("JFE050004 stops the whole outbound sender path", () => {
+  const result=classifyDeliveryRestriction("550 5.7.1 We have identified an unusual number of invalid recipients originating from your account (JFE050004)", "5.7.1");
+  assert.equal(result.scope, "sender");
+  assert.equal(result.reason, "sender_or_outbound_path_restriction");
+  assert.equal(SENDER_COOLDOWN_KEY, "__sender__");
+});
+
 test("JFE050005 starts provider cooldown instead of freezing every provider", () => {
   const result=classifyDeliveryRestriction("550 5.7.1 An unusual amount of content policy violations originating from your account has been detected (JFE050005)", "4.7.1");
   assert.equal(result.scope, "provider");
