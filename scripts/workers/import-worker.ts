@@ -125,7 +125,6 @@ async function queueScopedValidation(jobId: string) {
     where s.job_id=$1
       and c.status='active'
       and c.validation_status in ('pending','unknown','error')
-      and lower(c.normalized_email) ~ '@(gmail|googlemail)\\.com$'
   `, [jobId]);
   const total = Number(count.rows[0]?.total || 0);
   const [validationJob] = await db.insert(validationJobs).values({ scope: `import:${jobId}`, totalRows: total }).returning({ id: validationJobs.id });
