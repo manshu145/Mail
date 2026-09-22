@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyDeliveryRestriction, providerForEmail, SENDER_COOLDOWN_KEY } from "../src/lib/provider";
+import { classifyDeliveryRestriction, providerForEmail, UPSTREAM_COOLDOWN_KEY } from "../src/lib/provider";
 
 test("generic SMTP 4.x does not create provider cooldown", () => {
   assert.deepEqual(
@@ -31,28 +31,28 @@ test("sender/IP authorization restriction creates provider cooldown", () => {
   );
 });
 
-test("JFE050004 stops the whole outbound sender path", () => {
+test("JFE050004 stops the shared outbound infrastructure path", () => {
   const result=classifyDeliveryRestriction("550 5.7.1 We have identified an unusual number of invalid recipients originating from your account (JFE050004)", "5.7.1");
-  assert.equal(result.scope, "sender");
+  assert.equal(result.scope, "upstream");
   assert.equal(result.reason, "sender_or_outbound_path_restriction");
-  assert.equal(SENDER_COOLDOWN_KEY, "__sender__");
+  assert.equal(UPSTREAM_COOLDOWN_KEY, "__upstream__");
 });
 
-test("JFE050005 starts provider cooldown instead of freezing every provider", () => {
+test("JFE050005 creates one outbound-infrastructure restriction", () => {
   const result=classifyDeliveryRestriction("550 5.7.1 An unusual amount of content policy violations originating from your account has been detected (JFE050005)", "4.7.1");
-  assert.equal(result.scope, "provider");
+  assert.equal(result.scope, "upstream");
   assert.equal(result.reason, "sender_or_outbound_path_restriction");
-  assert.equal(SENDER_COOLDOWN_KEY, "__sender__");
+  assert.equal(UPSTREAM_COOLDOWN_KEY, "__upstream__");
 });
 
-test("explicit local sending-account suspension still creates sender cooldown", () => {
+test("explicit local sending-account suspension creates upstream cooldown", () => {
   const result=classifyDeliveryRestriction("550 outbound SMTP sending account is suspended", "5.7.1");
-  assert.equal(result.scope, "sender");
+  assert.equal(result.scope, "upstream");
   assert.equal(result.reason, "sender_or_outbound_path_restriction");
 });
 
-test("provider-local policy signals never become a global sender cooldown", () => {
-  const result=classifyDeliveryRestriction("550 5.7.1 An unusual amount of content policy violations originating from your account has been detected (JFE050005)", "4.7.1");
+test("ordinary provider-local policy signals remain provider scoped", () => {
+  const result=classifyDeliveryRestriction("421 4.7.0 Gmail rate limit exceeded for this sender IP", "4.7.0");
   assert.equal(result.scope, "provider");
 });
 

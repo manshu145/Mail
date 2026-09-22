@@ -11,8 +11,9 @@ type Campaign = { id: string; name: string; subject: string; preheader: string |
 type RuntimePolicyView = { mode: "staging" | "production"; sendingEnabled: boolean; maxRecipientsPerCampaign: number | null };
 type CampaignAction = "save" | "send_now" | "schedule";
 type PreviewData = {
-  audience: { rawCount:number; eligibleCount:number; suppressedCount:number; invalidCount:number; validCount:number; pendingCount:number; unknownCount:number; awaitingValidationCount:number };
+  audience: { rawCount:number; eligibleCount:number; suppressedCount:number; invalidCount:number; validCount:number; pendingCount:number; unknownCount:number; awaitingValidationCount:number; domainInvalidCount:number; domainHealthPendingCount:number; checkedDomainCount:number };
   template: { name:string; subject:string|null; html:string; text:string };
+  sendGuard: null | { status:"ready"|"warning"|"blocked"; checkedAt:string; blockingIssues:string[]; checks:Array<{key:string;label:string;status:"ready"|"warning"|"blocked";detail:string}> };
 };
 
 function toKolkataDateTimeInput(iso: string | null) {
@@ -58,6 +59,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const [listId, setListId] = useState(campaign.listId || "");
   const [templateId, setTemplateId] = useState(campaign.templateId || "");
   const [accountId, setAccountId] = useState(campaign.sendingAccountId || "");
+  const [subject, setSubject] = useState(campaign.subject);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop"|"mobile">("desktop");
   const [fullPreview, setFullPreview] = useState(false);
@@ -67,7 +69,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const [fromEmail, setFromEmail] = useState(initialAccount?.fromEmail || "");
   const [schedule, setSchedule] = useState(toKolkataDateTimeInput(campaign.scheduledAt));
   const deliveryReady = Boolean(listId && templateId && accountId && runtimePolicy.sendingEnabled);
-  const reviewReady = Boolean(preview && preview.audience.eligibleCount > 0 && (runtimePolicy.maxRecipientsPerCampaign === null || preview.audience.eligibleCount <= runtimePolicy.maxRecipientsPerCampaign));
+  const reviewReady = Boolean(preview && preview.sendGuard && preview.sendGuard.status !== "blocked" && preview.audience.eligibleCount > 0 && (runtimePolicy.maxRecipientsPerCampaign === null || preview.audience.eligibleCount <= runtimePolicy.maxRecipientsPerCampaign));
   const testReady = Boolean(templateId && accountId && runtimePolicy.sendingEnabled);
   const readinessSteps=[
     {label:"Audience",ready:Boolean(listId)},
@@ -93,14 +95,14 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   }
 
   async function loadPreview(silent = false) {
-    if (!listId || !templateId) { setPreview(null); return; }
+    if (!listId || !templateId || !accountId) { setPreview(null); return; }
     setPreviewBusy(true);
     if (!silent) { setError(""); setNotice(""); }
     try {
       const response = await fetch(`/api/campaigns/${campaign.id}/preview`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ listId, templateId }),
+        body: JSON.stringify({ listId, templateId, sendingAccountId: accountId || null, subject }),
       });
       const data = await response.json().catch(() => ({})) as PreviewData & { error?: string };
       if (!response.ok) {
@@ -125,11 +127,11 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   }, []);
 
   useEffect(() => {
-    if (!listId || !templateId) { setPreview(null); return; }
+    if (!listId || !templateId || !accountId) { setPreview(null); return; }
     const timer = window.setTimeout(() => void loadPreview(true), 350);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listId, templateId]);
+  }, [listId, templateId, accountId, subject]);
 
   async function submit(formData: FormData, action: CampaignAction) {
     setError(""); setNotice("");
@@ -208,7 +210,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
       <div className="mb-4 flex items-start gap-3"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-violet-500/10 text-[var(--accent)]"><ListChecks className="h-4 w-4"/></div><div><p className="text-sm font-black">Campaign setup</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Define the message, audience, template and approved sending identity.</p></div></div>
     <div className="grid gap-4 lg:grid-cols-2">
       <label><span className="mb-1.5 block text-sm font-bold">Internal name</span><input name="name" defaultValue={campaign.name} required className="form-control" /></label>
-      <label><span className="mb-1.5 block text-sm font-bold">Subject</span><input name="subject" defaultValue={campaign.subject} required className="form-control" /></label>
+      <label><span className="mb-1.5 block text-sm font-bold">Subject</span><input name="subject" value={subject} onChange={(event)=>setSubject(event.target.value)} required className="form-control" /></label>
     </div>
     <label><span className="mb-1.5 block text-sm font-bold">Preheader</span><input name="preheader" defaultValue={campaign.preheader || ""} className="form-control" /></label>
 
@@ -222,7 +224,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     <section className="section-card overflow-hidden">
       <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-center sm:justify-between">
         <div><div className="flex items-center gap-2"><Eye className="h-4 w-4 text-violet-600"/><p className="text-sm font-black">Review & preview</p></div><p className="mt-1 text-xs text-[var(--muted)]">Audience count updates from the same resolver used at send time. Final send runs one more preflight.</p></div>
-        <button type="button" disabled={previewBusy || !listId || !templateId} onClick={()=>void loadPreview()} className="btn-secondary !min-h-9 w-full sm:w-auto"><RefreshCw className={`h-3.5 w-3.5 ${previewBusy?"animate-spin":""}`}/> Refresh review</button>
+        <button type="button" disabled={previewBusy || !listId || !templateId || !accountId} onClick={()=>void loadPreview()} className="btn-secondary !min-h-9 w-full sm:w-auto"><RefreshCw className={`h-3.5 w-3.5 ${previewBusy?"animate-spin":""}`}/> Refresh review</button>
       </div>
 
       {preview ? <div className="grid min-w-0 gap-px bg-[var(--border)] xl:grid-cols-[.72fr_1.28fr]">
@@ -238,10 +240,16 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
               ["Gmail pending (optional)",preview.audience.awaitingValidationCount,"amber"],
               ["Unknown",preview.audience.unknownCount,"orange"],
               ["Suppressed",preview.audience.suppressedCount,"rose"],
-              ["Invalid",preview.audience.invalidCount,"rose"],
+              ["Address invalid",preview.audience.invalidCount,"rose"],
+              ["Domain invalid",preview.audience.domainInvalidCount,"rose"],
+              ["Domain DNS pending",preview.audience.domainHealthPendingCount,"amber"],
             ].map(([label,count,tone])=><div key={String(label)} className={`min-w-0 overflow-hidden rounded-xl border p-3 ${tone==="emerald"?"border-emerald-500/15 bg-emerald-500/[0.05]":tone==="amber"?"border-amber-500/15 bg-amber-500/[0.05]":tone==="orange"?"border-orange-500/15 bg-orange-500/[0.05]":tone==="rose"?"border-rose-500/15 bg-rose-500/[0.05]":"border-violet-500/15 bg-violet-500/[0.05]"}`}><div className="font-black">{Number(count).toLocaleString()}</div><div className="mt-0.5 break-words text-[11px] font-bold leading-4 text-[var(--muted)]">{label}</div></div>)}
           </div>
           {runtimePolicy.maxRecipientsPerCampaign!==null && preview.audience.eligibleCount>runtimePolicy.maxRecipientsPerCampaign ? <p className="mt-4 rounded-xl bg-rose-500/10 p-3 text-xs font-bold text-rose-700 dark:text-rose-300">Audience exceeds the runtime limit of {runtimePolicy.maxRecipientsPerCampaign.toLocaleString()} recipients.</p> : null}
+          {preview.sendGuard ? <div className="mt-5 border-t border-[var(--border)] pt-4">
+            <div className="flex items-center justify-between gap-3"><p className="page-eyebrow">Campaign preflight</p><span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${preview.sendGuard.status==="ready"?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":preview.sendGuard.status==="warning"?"bg-amber-500/10 text-amber-700 dark:text-amber-300":"bg-rose-500/10 text-rose-700 dark:text-rose-300"}`}>{preview.sendGuard.status}</span></div>
+            <div className="mt-3 space-y-2">{preview.sendGuard.checks.map((check)=><div key={check.key} className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${check.status==="ready"?"bg-emerald-500":check.status==="warning"?"bg-amber-500":"bg-rose-500"}`}/><p className="text-xs font-black">{check.label}</p></div><p className="mt-1.5 text-[11px] leading-4 text-[var(--muted)]">{check.detail}</p></div>)}</div>
+          </div> : null}
         </div>
         <div className="min-w-0 overflow-hidden bg-[#e9edf5] p-3 sm:p-4">
           <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -255,11 +263,11 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
             {preview.template.html ? <iframe title="Campaign email preview" sandbox="" srcDoc={previewDocument(preview.template.html)} className="h-[58dvh] min-h-[420px] w-full bg-white sm:h-[580px]"/> : <pre className="h-[58dvh] min-h-[420px] overflow-auto whitespace-pre-wrap p-4 text-sm text-zinc-800 sm:h-[580px] sm:p-5">{preview.template.text || "Template has no content."}</pre>}
           </div>
         </div>
-      </div> : <div className="p-6 text-center text-sm text-[var(--muted)]">{listId&&templateId ? (previewBusy ? "Calculating audience and rendering template…" : "Preview unavailable. Refresh review.") : "Choose an audience list and template to see the final recipient estimate and email preview."}</div>}
+      </div> : <div className="p-6 text-center text-sm text-[var(--muted)]">{listId&&templateId&&accountId ? (previewBusy ? "Running campaign preflight and rendering template…" : "Preview unavailable. Refresh review.") : "Choose an audience, template and sending identity to run campaign preflight."}</div>}
     </section>
 
     <div className={`rounded-2xl border px-4 py-3 text-xs font-semibold ${deliveryReady ? "border-emerald-500/15 bg-emerald-500/[0.05] text-emerald-700 dark:text-emerald-300" : "border-amber-500/15 bg-amber-500/[0.06] text-amber-800 dark:text-amber-200"}`}>
-      {deliveryReady ? (reviewReady ? "Review complete. Audience, domain health and policy are rechecked again when you send." : "Delivery setup is complete. Wait for the latest Review & preview before sending.") : "Delivery setup incomplete: choose an audience list, template and active sending account."}
+      {deliveryReady ? (reviewReady ? `Preflight ${preview?.sendGuard?.status === "warning" ? "passed with warnings" : "passed"}. All critical checks run again when delivery starts.` : preview?.sendGuard?.status === "blocked" ? `Launch blocked: ${preview.sendGuard.blockingIssues.join(" ")}` : "Delivery setup is complete. Wait for the latest Review & preview before sending.") : "Delivery setup incomplete: choose an audience list, template and active sending account."}
     </div>
 
     <CampaignAttachments campaignId={campaign.id} />

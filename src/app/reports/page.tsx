@@ -52,10 +52,10 @@ export default async function ReportsPage({searchParams}:{searchParams:Promise<{
         count(*) filter(where m.status in ('queued','ready_for_transport','sending','mta_accepted','deferred'))::int in_flight
         from messages m where ${timeWhere}`),
       db.execute(sql`select
-        count(distinct e.message_id) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false)::int opens,
-        count(distinct e.message_id) filter(where e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false)::int clicks,
-        count(*) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=true)::int automated_opens,
-        count(*) filter(where e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=true)::int automated_clicks,
+        count(distinct e.message_id) filter(where e.type='open' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int opens,
+        count(distinct e.message_id) filter(where e.type='click' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int clicks,
+        count(*) filter(where e.type='open' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=false)::int automated_opens,
+        count(*) filter(where e.type='click' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=false)::int automated_clicks,
         count(distinct e.message_id) filter(where e.type='complaint')::int complaints,
         count(distinct e.message_id) filter(where e.type='unsubscribe')::int unsubs
         from message_events e join messages m on m.id=e.message_id where ${timeWhere}`),
@@ -67,8 +67,8 @@ export default async function ReportsPage({searchParams}:{searchParams:Promise<{
           count(m.id) filter(where m.status='delivered')::int delivered,
           count(m.id) filter(where m.status='bounced')::int bounced,
           count(m.id) filter(where m.status='failed')::int failed,
-          count(distinct e.message_id) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false)::int unique_opens,
-          count(distinct e.message_id) filter(where e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false)::int unique_clicks
+          count(distinct e.message_id) filter(where e.type='open' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int unique_opens,
+          count(distinct e.message_id) filter(where e.type='click' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int unique_clicks
         from campaigns c join messages m on m.campaign_id=c.id left join message_events e on e.message_id=m.id
         where ${timeWhere} group by c.id,c.name,c.status,c.created_at order by max(m.queued_at) desc limit 50
       `),
@@ -88,7 +88,7 @@ export default async function ReportsPage({searchParams}:{searchParams:Promise<{
         from messages m where ${timeWhere} group by 1 order by 1 desc limit 90`),
       db.execute(sql`select e.payload->>'url' url,count(*)::int clicks,count(distinct e.message_id)::int unique_clickers
         from message_events e join messages m on m.id=e.message_id
-        where ${timeWhere} and e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false and nullif(e.payload->>'url','') is not null
+        where ${timeWhere} and e.type='click' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true and nullif(e.payload->>'url','') is not null
         group by 1 order by clicks desc limit 20`)
     ]);
 

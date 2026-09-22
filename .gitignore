@@ -5,6 +5,7 @@ node_modules/
 !.env.example
 coverage/
 dist/
+*.tsbuildinfo
 *.log
 .DS_Store
 .vercel/

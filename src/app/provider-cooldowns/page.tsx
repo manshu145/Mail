@@ -69,8 +69,8 @@ export default async function ProviderCooldownsPage() {
     <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p className="page-eyebrow mb-2">Deliverability</p>
-        <h1 className="page-title">Provider cooldowns</h1>
-        <p className="page-description">Temporary provider-level holds detected from live SMTP responses. NexiMail pauses only the affected mailbox provider for that sender and probes again automatically.</p>
+        <h1 className="page-title">Delivery restrictions</h1>
+        <p className="page-description">Provider-specific pressure stays isolated to that lane. A shared outbound-path block appears once as Outbound infrastructure and is recovered with controlled probes.</p>
       </div>
     </div>
 
@@ -79,7 +79,7 @@ export default async function ProviderCooldownsPage() {
     <section className="mb-4 grid gap-3 sm:grid-cols-3">
       <article className="compact-stat"><p className="compact-stat-label">Active cooldowns</p><p className="compact-stat-value">{active}</p></article>
       <article className="compact-stat"><p className="compact-stat-label">Cleared cooldowns</p><p className="compact-stat-value">{cleared}</p></article>
-      <article className="compact-stat"><p className="compact-stat-label">Providers seen</p><p className="compact-stat-value">{providers}</p></article>
+      <article className="compact-stat"><p className="compact-stat-label">Restriction scopes</p><p className="compact-stat-value">{providers}</p></article>
     </section>
 
     <section className="space-y-3">
@@ -92,7 +92,7 @@ export default async function ProviderCooldownsPage() {
               <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[.1em] ${row.active?"bg-amber-500/10 text-amber-700 dark:text-amber-300":"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}>{row.active?"Cooldown active":"Cleared"}</span>
             </div>
             <p className="mt-1 text-xs font-bold">{row.accountName||"Sender identity"}{row.fromEmail?` · ${row.fromEmail}`:""}</p>
-            <p className="mt-2 max-w-3xl text-xs leading-5 text-[var(--muted)]">{row.reason||"Temporary provider pressure detected."}</p>{row.active?<p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/[.08] px-2.5 py-1 text-[10px] font-bold text-amber-700 dark:text-amber-300"><Clock3 className="h-3 w-3"/>Automatic probe scheduled for {formatDate(row.nextProbeAt)}</p>:null}
+            <p className="mt-2 max-w-3xl text-xs leading-5 text-[var(--muted)]">{row.reason||"Temporary delivery pressure detected."}</p>{row.active?<p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/[.08] px-2.5 py-1 text-[10px] font-bold text-amber-700 dark:text-amber-300"><Clock3 className="h-3 w-3"/>Automatic probe scheduled for {formatDate(row.nextProbeAt)}</p>:null}
           </div>
           <ProviderCooldownActions id={row.id} active={row.active} canEdit={usable && session.role === "owner"} />
         </div>
@@ -104,8 +104,8 @@ export default async function ProviderCooldownsPage() {
           <div className="panel-soft p-3"><div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]"><CheckCircle2 className="h-3.5 w-3.5"/>Cleared</div><p className="mt-1 text-xs font-bold">{formatDate(row.clearedAt)}</p></div>
         </div>
 
-        {row.lastResponse?<details className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3"><summary className="cursor-pointer text-xs font-black">Last provider response</summary><pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5 text-[var(--muted)]">{row.lastResponse}</pre></details>:null}
-      </article>):<div className="premium-panel grid min-h-64 place-items-center p-8 text-center"><div><CheckCircle2 className="mx-auto h-9 w-9 text-emerald-500"/><h3 className="mt-4 font-black">No provider cooldowns</h3><p className="mt-1 max-w-md text-sm leading-6 text-[var(--muted)]">No temporary provider-level pressure has been recorded yet. If a provider throttles delivery, it will appear here automatically.</p></div></div>}
+        {row.lastResponse?<details className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3"><summary className="cursor-pointer text-xs font-black">Last SMTP response</summary><pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5 text-[var(--muted)]">{row.lastResponse}</pre></details>:null}
+      </article>):<div className="premium-panel grid min-h-64 place-items-center p-8 text-center"><div><CheckCircle2 className="mx-auto h-9 w-9 text-emerald-500"/><h3 className="mt-4 font-black">No delivery restrictions</h3><p className="mt-1 max-w-md text-sm leading-6 text-[var(--muted)]">No provider or outbound-infrastructure restriction has been recorded.</p></div></div>}
     </section>
   </AppShell>;
 }

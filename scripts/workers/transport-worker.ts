@@ -11,7 +11,7 @@ import { makeBounceAddress } from "../../src/lib/bounce-address";
 import { injectPreheader } from "../../src/lib/email-preheader";
 import { hasConfirmedConsent } from "../../src/lib/consent-policy";
 import { getRuntimePolicy } from "../../src/lib/runtime-policy";
-import { providerForEmail, SENDER_COOLDOWN_KEY } from "../../src/lib/provider";
+import { providerForEmail, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
@@ -77,7 +77,8 @@ async function providerGate(accountId: string, recipientEmail: string, cooldownM
     eq(providerCooldowns.sendingAccountId, accountId),
     eq(providerCooldowns.active, true),
   ));
-  const cooldown = active.find((row) => row.provider === SENDER_COOLDOWN_KEY)
+  const cooldown = active.find((row) => row.provider === UPSTREAM_COOLDOWN_KEY)
+    || active.find((row) => row.provider === SENDER_COOLDOWN_KEY)
     || active.find((row) => row.provider === provider);
   if (!cooldown) {
     return {
@@ -86,11 +87,15 @@ async function providerGate(accountId: string, recipientEmail: string, cooldownM
       probe: false,
       retryAt: null as Date | null,
       cooldownKey: null as string | null,
-      cooldownScope: null as "provider" | "sender" | null,
+      cooldownScope: null as "provider" | "sender" | "upstream" | null,
     };
   }
 
-  const cooldownScope = cooldown.provider === SENDER_COOLDOWN_KEY ? "sender" as const : "provider" as const;
+  const cooldownScope = cooldown.provider === UPSTREAM_COOLDOWN_KEY
+    ? "upstream" as const
+    : cooldown.provider === SENDER_COOLDOWN_KEY
+      ? "sender" as const
+      : "provider" as const;
   const cooldownKey = cooldown.provider;
   const now = new Date();
   if (cooldown.nextProbeAt && cooldown.nextProbeAt > now) {
@@ -98,7 +103,16 @@ async function providerGate(accountId: string, recipientEmail: string, cooldownM
   }
 
   const retryAt = new Date(Date.now() + cooldownMinutes * 60_000);
-  await db.update(providerCooldowns).set({ lastProbeAt: now, nextProbeAt: retryAt, updatedAt: now }).where(eq(providerCooldowns.id, cooldown.id));
+  const reserved = await pool.query<{ id: string }>(`
+    update provider_cooldowns
+    set last_probe_at=$2,next_probe_at=$3,updated_at=$2
+    where id=$1 and active=true and (next_probe_at is null or next_probe_at <= $2)
+    returning id
+  `, [cooldown.id, now, retryAt]);
+  if (!reserved.rowCount) {
+    const [current] = await db.select().from(providerCooldowns).where(eq(providerCooldowns.id, cooldown.id)).limit(1);
+    return { allowed: false, provider, probe: false, retryAt: current?.nextProbeAt || retryAt, cooldownKey, cooldownScope };
+  }
   await pool.query(
     `insert into provider_cooldown_events(cooldown_id,sending_account_id,provider,event_type,reason,response,metadata) values($1,$2,$3,'probe_started',$4,$5,$6::jsonb)`,
     [cooldown.id, accountId, cooldownKey, cooldown.reason, cooldown.lastResponse, JSON.stringify({ nextProbeAt: retryAt.toISOString(), recipientEmail, scope: cooldownScope })],
@@ -147,6 +161,32 @@ async function markDeferred(id: string, attempt: number, error: unknown, setting
   return "deferred" as const;
 }
 async function releaseThrottled(id: string) { await pool.query(`update messages set status='ready_for_transport',next_attempt_at=now()+interval '60 seconds',last_error='sending_account_rate_limited',attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'`, [id]); await event(id,"transport_throttled",{retryInSeconds:60}); }
+async function wakeOverdueCooldownMessages() {
+  const overdue = await pool.query<{ sending_account_id: string; provider: string }>(`
+    select sending_account_id,provider from provider_cooldowns
+    where active=true and (next_probe_at is null or next_probe_at <= now())
+    order by coalesce(next_probe_at,detected_at) asc limit 50
+  `);
+  let awakened = 0;
+  for (const cooldown of overdue.rows) {
+    const candidates = await pool.query<{ id: string; recipient_email: string; last_error: string | null }>(`
+      select m.id::text,m.recipient_email,m.last_error
+      from messages m join campaigns c on c.id=m.campaign_id
+      where c.sending_account_id=$1 and c.status='sending' and m.status='ready_for_transport'
+      order by m.queued_at asc limit 500
+    `, [cooldown.sending_account_id]);
+    const candidate = candidates.rows.find((row) =>
+      cooldown.provider === UPSTREAM_COOLDOWN_KEY
+      || cooldown.provider === SENDER_COOLDOWN_KEY
+      || row.last_error === `provider_cooldown:${cooldown.provider}`
+      || providerForEmail(row.recipient_email) === cooldown.provider
+    );
+    if (!candidate) continue;
+    const updated = await pool.query(`update messages set next_attempt_at=now() where id=$1 and status='ready_for_transport'`, [candidate.id]);
+    awakened += updated.rowCount || 0;
+  }
+  return awakened;
+}
 async function recoverStaleClaims() {
   const result=await pool.query<{id:string}>(`update messages set status='failed',next_attempt_at=null,last_error='transport_state_uncertain_after_worker_restart' where status='sending' and accepted_at is null and last_attempt_at is not null and last_attempt_at < now()-interval '10 minutes' returning id`);
   for(const row of result.rows) await event(row.id,"transport_recovery_failed",{reason:"stale_sending_claim"});
@@ -161,8 +201,9 @@ async function runOnce() {
   // MTA may already have accepted them before the worker lost state; retrying
   // could create duplicate mail.
   const recoveredStale = await recoverStaleClaims();
+  const overdueCooldownMessagesAwakened = await wakeOverdueCooldownMessages();
   if (!getRuntimePolicy().sendingEnabled) {
-    await heartbeat({ state: "online", sendingEnabled: false, recoveredStale });
+    await heartbeat({ state: "online", sendingEnabled: false, recoveredStale, overdueCooldownMessagesAwakened });
     return;
   }
   const settings = await readDeliverySettings();
@@ -301,7 +342,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, pollIntervalMs: intervalMs, claimBatch, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
 }
 
 async function main() {

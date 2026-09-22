@@ -32,14 +32,14 @@ export default async function MessageDetailPage({params}:{params:Promise<{id:str
   const [events,stats]=await Promise.all([
     db.select().from(messageEvents).where(eq(messageEvents.messageId,id)).orderBy(desc(messageEvents.createdAt)).limit(500),
     db.execute(sql`select
-      count(*) filter(where type='open' and coalesce((payload->>'automated')::boolean,false)=false)::int human_opens,
-      count(*) filter(where type='click' and coalesce((payload->>'automated')::boolean,false)=false)::int human_clicks,
-      count(*) filter(where type='open' and coalesce((payload->>'automated')::boolean,false)=true)::int automated_opens,
-      count(*) filter(where type='click' and coalesce((payload->>'automated')::boolean,false)=true)::int automated_clicks,
-      min(created_at) filter(where type='open' and coalesce((payload->>'automated')::boolean,false)=false) first_open,
-      max(created_at) filter(where type='open' and coalesce((payload->>'automated')::boolean,false)=false) last_open,
-      min(created_at) filter(where type='click' and coalesce((payload->>'automated')::boolean,false)=false) first_click,
-      max(created_at) filter(where type='click' and coalesce((payload->>'automated')::boolean,false)=false) last_click
+      count(*) filter(where type='open' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true)::int human_opens,
+      count(*) filter(where type='click' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true)::int human_clicks,
+      count(*) filter(where type='open' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=false)::int automated_opens,
+      count(*) filter(where type='click' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=false)::int automated_clicks,
+      min(created_at) filter(where type='open' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true) first_open,
+      max(created_at) filter(where type='open' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true) last_open,
+      min(created_at) filter(where type='click' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true) first_click,
+      max(created_at) filter(where type='click' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true) last_click
       from message_events where message_id=${id}`)
   ]);
   const s=(stats.rows[0]||{}) as Record<string,unknown>,m=row.message;

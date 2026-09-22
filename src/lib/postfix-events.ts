@@ -6,7 +6,7 @@ import { providerCooldownEvents } from "@/db/provider-cooldown-event-schema";
 import { normalizeEmail } from "@/lib/contact-utils";
 import { emitWebhookEvent } from "@/lib/webhooks";
 import { classifyBounce } from "@/lib/bounce-classification";
-import { classifyDeliveryRestriction, providerForDelivery, SENDER_COOLDOWN_KEY, type DeliveryRestrictionScope } from "@/lib/provider";
+import { classifyDeliveryRestriction, providerForDelivery, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY, type DeliveryRestrictionScope } from "@/lib/provider";
 import { DELIVERY_SETTING_KEYS, MAX_PROVIDER_COOLDOWN_MINUTES, defaultDeliverySettings } from "@/lib/delivery-settings";
 
 const terminalStatuses = new Set(["delivered", "bounced", "failed", "cancelled"]);
@@ -34,7 +34,11 @@ async function activateProviderCooldown(db: EventDb, params: {
 }) {
   const sendingAccountId = await sendingAccountForMessage(db, params.campaignId);
   if (!sendingAccountId) return null;
-  const provider = params.scope === "sender" ? SENDER_COOLDOWN_KEY : providerForDelivery(params.recipientEmail, params.response);
+  const provider = params.scope === "upstream"
+    ? UPSTREAM_COOLDOWN_KEY
+    : params.scope === "sender"
+      ? SENDER_COOLDOWN_KEY
+      : providerForDelivery(params.recipientEmail, params.response);
   const minutes = await cooldownMinutes(db);
   const nextProbeAt = new Date(Date.now() + minutes * 60_000);
   const reason = params.restrictionReason;
@@ -96,11 +100,13 @@ async function cooldownProbeContext(db: EventDb, messageId: string, recipientEma
   const payload = accepted?.payload || {};
   if (payload.providerProbe !== true) return null;
 
-  const scope = payload.cooldownScope === "sender" ? "sender" : "provider";
+  const scope = payload.cooldownScope === "upstream" ? "upstream" : payload.cooldownScope === "sender" ? "sender" : "provider";
   const key = typeof payload.cooldownKey === "string" && payload.cooldownKey
     ? payload.cooldownKey
-    : scope === "sender"
-      ? SENDER_COOLDOWN_KEY
+    : scope === "upstream"
+      ? UPSTREAM_COOLDOWN_KEY
+      : scope === "sender"
+        ? SENDER_COOLDOWN_KEY
       : typeof payload.provider === "string" && payload.provider
         ? payload.provider
         : providerForDelivery(recipientEmail);
@@ -129,19 +135,26 @@ async function clearCooldownByKey(db: EventDb, campaignId: string, cooldownKey: 
   }).where(eq(providerCooldowns.id, cooldown.id));
 
   const heldError = `provider_cooldown:${cooldownKey}`;
-  if (cooldownKey === SENDER_COOLDOWN_KEY) {
+  if (cooldownKey === SENDER_COOLDOWN_KEY || cooldownKey === UPSTREAM_COOLDOWN_KEY) {
     await db.execute(sql`
       update messages
       set next_attempt_at=${now}, last_error=null
-      where campaign_id=${campaignId}
+      where campaign_id in (
+        select id from campaigns where sending_account_id=${sendingAccountId}
+      )
         and status='ready_for_transport'
-        and last_error in ('sender_cooldown','provider_cooldown:__sender__')
+        and (
+          last_error in ('sender_cooldown','upstream_cooldown','provider_cooldown:__sender__','provider_cooldown:__upstream__')
+          or last_error like 'provider_cooldown:%'
+        )
     `);
   } else {
     await db.execute(sql`
       update messages
       set next_attempt_at=${now}, last_error=null
-      where campaign_id=${campaignId}
+      where campaign_id in (
+        select id from campaigns where sending_account_id=${sendingAccountId}
+      )
         and status='ready_for_transport'
         and last_error=${heldError}
     `);

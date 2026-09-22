@@ -20,7 +20,7 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
     for (const file of ["src/app/reports/page.tsx", "src/lib/campaign-reporting.ts"]) {
       const source = await readFile(file, "utf8");
       for (const match of source.matchAll(/db.execute\(sql`([\s\S]*?)`\)/g)) {
-        const query = match[1].replaceAll('${humanEvent}', "coalesce((payload->>'automated')::boolean,false)=false")
+        const query = match[1].replaceAll('${humanEvent}', "coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true")
           .replaceAll('${campaignId}', "'00000000-0000-0000-0000-000000000000'").replaceAll('${limit}', "30")
           .replaceAll('${timeWhere}', "true");
         await pg.query(query);
@@ -39,11 +39,14 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
     await pg.query("insert into contact_lists(contact_id,list_id) select id,$1::uuid from contacts", [list.id]);
     const selection = await audienceSelection(list, orm as unknown as Parameters<typeof audienceSelection>[1]);
     const result = await orm.execute(sql`select * from (${selection}) a where not suppressed and send_eligible`);
-    assert.equal(result.rows.length, 3);
-    assert.deepEqual(result.rows.map((row) => row.email).sort(), ["good@example.com", "pending@example.com", "waiting@gmail.com"]);
+    assert.equal(result.rows.length, 1);
+    assert.deepEqual(result.rows.map((row) => row.email).sort(), ["good@example.com"]);
     const waiting = await orm.execute(sql`select * from (${selection}) a where email='waiting@gmail.com'`);
-    assert.equal(waiting.rows[0].send_eligible, true);
+    assert.equal(waiting.rows[0].send_eligible, false);
     assert.equal(waiting.rows[0].awaiting_validation, true);
+    const pendingCustom = await orm.execute(sql`select * from (${selection}) a where email='pending@example.com'`);
+    assert.equal(pendingCustom.rows[0].send_eligible, false);
+    assert.equal(pendingCustom.rows[0].awaiting_validation, true);
     await pg.exec("insert into campaigns(name,subject,status) values('test','test','sending')");
     await orm.execute(sql`insert into messages(campaign_id,contact_id,recipient_email,status)
       select (select id from campaigns limit 1),contact_id,email,'queued'::message_status from (${selection}) a

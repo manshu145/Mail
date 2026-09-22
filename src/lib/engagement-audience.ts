@@ -5,7 +5,7 @@ export type EngagementRule = typeof ENGAGEMENT_RULES[number];
 export function engagementAudienceSql(campaignId: string, rule: EngagementRule, windowDays: number | null) {
   if (!ENGAGEMENT_RULES.includes(rule)) throw new Error("Unsupported engagement rule");
   const event = (type: string) => sql`exists(select 1 from message_events e where e.message_id=m.id and e.type=${type}
-    and coalesce((e.payload->>'automated')::boolean,false)=false
+    and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true
     ${windowDays ? sql`and e.created_at >= now()-(${windowDays}::int * interval '1 day')` : sql``})`;
   const condition = rule === "opened" ? event("open") : rule === "clicked" ? event("click")
     : rule === "not_clicked" ? sql`not ${event("click")}`

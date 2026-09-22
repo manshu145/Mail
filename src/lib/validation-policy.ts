@@ -20,5 +20,5 @@ export function isDirectGmailAddress(email: string) {
 }
 
 export function validationAllowsSend(_email: string, status: string) {
-  return status !== "invalid";
+  return status === "accepted" || status === "valid";
 }

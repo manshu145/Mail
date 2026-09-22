@@ -6,7 +6,7 @@ import { handlePostfixEvent } from "../../src/lib/postfix-events";
 import { db, pool } from "../../src/db";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { deleteMtaQueueMessage } from "../../src/lib/mta-control";
-import { providerForDelivery, SENDER_COOLDOWN_KEY } from "../../src/lib/provider";
+import { providerForDelivery, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY } from "../../src/lib/provider";
 async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "postfix-events", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
 }
@@ -97,7 +97,7 @@ async function evacuateActiveCooldownQueues() {
     const provider = providerForDelivery(message.recipient_email, message.last_error);
     const cooldown = cooldowns.rows.find((row) =>
       row.sending_account_id === message.sending_account_id
-      && (row.provider === SENDER_COOLDOWN_KEY || row.provider === provider)
+      && (row.provider === UPSTREAM_COOLDOWN_KEY || row.provider === SENDER_COOLDOWN_KEY || row.provider === provider)
     );
     if (!cooldown) continue;
 
@@ -110,8 +110,10 @@ async function evacuateActiveCooldownQueues() {
       const deleted = await deleteMtaQueueMessage(message.provider_message_id);
       if (!deleted.deleted) continue;
       const retryAt = cooldown.next_probe_at || new Date(Date.now() + 15 * 60_000);
-      const marker = cooldown.provider === SENDER_COOLDOWN_KEY
-        ? "sender_cooldown"
+      const marker = cooldown.provider === UPSTREAM_COOLDOWN_KEY
+        ? "upstream_cooldown"
+        : cooldown.provider === SENDER_COOLDOWN_KEY
+          ? "sender_cooldown"
         : `provider_cooldown:${cooldown.provider}`;
       const updated = await pool.query<{ id: string }>(`
         update messages

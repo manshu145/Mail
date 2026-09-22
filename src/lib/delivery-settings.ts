@@ -17,6 +17,10 @@ export type DeliverySettings = {
   reputationBounceStopRate: number;
   reputationComplaintStopRate: number;
   reputationMinSample: number;
+  canaryInitialBatch: number;
+  canarySecondBatch: number;
+  canaryThirdBatch: number;
+  canaryBounceWarnRate: number;
 };
 
 export const DELIVERY_SETTING_KEYS = {
@@ -33,6 +37,10 @@ export const DELIVERY_SETTING_KEYS = {
   reputationBounceStopRate: "reputation.bounce_stop_rate",
   reputationComplaintStopRate: "reputation.complaint_stop_rate",
   reputationMinSample: "reputation.min_sample",
+  canaryInitialBatch: "delivery.canary_initial_batch",
+  canarySecondBatch: "delivery.canary_second_batch",
+  canaryThirdBatch: "delivery.canary_third_batch",
+  canaryBounceWarnRate: "delivery.canary_bounce_warn_rate",
 } as const;
 
 function finite(value: unknown, fallback: number) {
@@ -57,6 +65,10 @@ export function defaultDeliverySettings(env: Readonly<Record<string,string|undef
     reputationBounceStopRate: num(env.REPUTATION_BOUNCE_STOP_RATE, 0.05, 0, 1),
     reputationComplaintStopRate: num(env.REPUTATION_COMPLAINT_STOP_RATE, 0.003, 0, 1),
     reputationMinSample: int(env.REPUTATION_MIN_SAMPLE, 100, 1, 10_000_000),
+    canaryInitialBatch: int(env.CANARY_INITIAL_BATCH, 100, 10, 100_000),
+    canarySecondBatch: int(env.CANARY_SECOND_BATCH, 300, 10, 1_000_000),
+    canaryThirdBatch: int(env.CANARY_THIRD_BATCH, 600, 10, 5_000_000),
+    canaryBounceWarnRate: num(env.CANARY_BOUNCE_WARN_RATE, 0.03, 0, 1),
   };
 }
 
@@ -78,5 +90,9 @@ export async function readDeliverySettings(): Promise<DeliverySettings> {
     reputationBounceStopRate: num(values.get(DELIVERY_SETTING_KEYS.reputationBounceStopRate), defaults.reputationBounceStopRate, 0, 1),
     reputationComplaintStopRate: num(values.get(DELIVERY_SETTING_KEYS.reputationComplaintStopRate), defaults.reputationComplaintStopRate, 0, 1),
     reputationMinSample: int(values.get(DELIVERY_SETTING_KEYS.reputationMinSample), defaults.reputationMinSample, 1, 10_000_000),
+    canaryInitialBatch: int(values.get(DELIVERY_SETTING_KEYS.canaryInitialBatch), defaults.canaryInitialBatch, 10, 100_000),
+    canarySecondBatch: int(values.get(DELIVERY_SETTING_KEYS.canarySecondBatch), defaults.canarySecondBatch, 10, 1_000_000),
+    canaryThirdBatch: int(values.get(DELIVERY_SETTING_KEYS.canaryThirdBatch), defaults.canaryThirdBatch, 10, 5_000_000),
+    canaryBounceWarnRate: num(values.get(DELIVERY_SETTING_KEYS.canaryBounceWarnRate), defaults.canaryBounceWarnRate, 0, 1),
   };
 }

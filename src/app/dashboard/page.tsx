@@ -33,8 +33,8 @@ export default async function DashboardPage() {
               count(*) filter(where status='bounced')::int bounced
             from messages
           ), engagement as (
-            select count(distinct message_id) filter(where type='open' and coalesce((payload->>'automated')::boolean,false)=false)::int opens,
-              count(distinct message_id) filter(where type='click' and coalesce((payload->>'automated')::boolean,false)=false)::int clicks
+            select count(distinct message_id) filter(where type='open' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true)::int opens,
+              count(distinct message_id) filter(where type='click' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true)::int clicks
             from message_events
           )
           select message_totals.*,engagement.opens,engagement.clicks from message_totals cross join engagement
@@ -49,14 +49,14 @@ export default async function DashboardPage() {
         db.execute(sql`
           select ct.id::text,ct.email,
             coalesce(nullif(trim(concat_ws(' ',ct.first_name,ct.last_name)),''),ct.email) name,
-            count(*) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false)::int opens,
-            count(*) filter(where e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false)::int clicks,
-            max(e.created_at) filter(where e.type in ('open','click') and coalesce((e.payload->>'automated')::boolean,false)=false) last_activity
+            count(*) filter(where e.type='open' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int opens,
+            count(*) filter(where e.type='click' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int clicks,
+            max(e.created_at) filter(where e.type in ('open','click') and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true) last_activity
           from contacts ct join messages m on m.contact_id=ct.id join message_events e on e.message_id=m.id
-          where e.type in ('open','click') and coalesce((e.payload->>'automated')::boolean,false)=false
+          where e.type in ('open','click') and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true
           group by ct.id,ct.email,ct.first_name,ct.last_name
-          order by (count(*) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false)
-                  + count(*) filter(where e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false) * 2) desc,
+          order by (count(*) filter(where e.type='open' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)
+                  + count(*) filter(where e.type='click' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true) * 2) desc,
                    last_activity desc nulls last limit 6
         `)
       ]);
