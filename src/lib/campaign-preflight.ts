@@ -184,14 +184,16 @@ export async function getCampaignSendGuard(input: {
     {
       key: "audience",
       label: "Audience health",
-      status: input.audience.eligibleCount === 0 || input.audience.domainHealthPendingCount > 0
+      status: input.audience.eligibleCount === 0 || input.audience.domainHealthPendingCount > 0 || input.audience.awaitingValidationCount > 0
         ? "blocked"
-        : input.audience.awaitingValidationCount > 0 || input.audience.invalidCount > 0 || input.audience.domainInvalidCount > 0
+        : input.audience.invalidCount > 0 || input.audience.domainInvalidCount > 0
           ? "warning"
           : "ready",
       detail: input.audience.domainHealthPendingCount > 0
         ? `Recipient-domain DNS checks are incomplete for ${input.audience.domainHealthPendingCount.toLocaleString()} domain${input.audience.domainHealthPendingCount === 1 ? "" : "s"}; launch is blocked until they complete.`
-        : `${input.audience.eligibleCount.toLocaleString()} eligible · ${input.audience.suppressedCount.toLocaleString()} suppressed · ${input.audience.invalidCount.toLocaleString()} address-invalid · ${input.audience.domainInvalidCount.toLocaleString()} domain-invalid`,
+        : input.audience.awaitingValidationCount > 0
+          ? `${input.audience.awaitingValidationCount.toLocaleString()} recipient${input.audience.awaitingValidationCount === 1 ? "" : "s"} are unverified (pending, unknown or validation error). Validate or exclude them before launch.`
+          : `${input.audience.eligibleCount.toLocaleString()} eligible · ${input.audience.suppressedCount.toLocaleString()} suppressed · ${input.audience.invalidCount.toLocaleString()} address-invalid · ${input.audience.domainInvalidCount.toLocaleString()} domain-invalid`,
       metadata: input.audience,
     },
     {
