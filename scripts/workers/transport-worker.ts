@@ -16,6 +16,7 @@ import { readDeliverySettings, type DeliverySettings } from "../../src/lib/deliv
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
 import { sendingDomainBlockReason } from "../../src/lib/sending-domain-policy";
+import { emailContentBlockReason } from "../../src/lib/email-content-policy";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -258,6 +259,12 @@ async function runOnce() {
     }
 
     const subject = headerValue(personalize(campaign.subject || template.subject || "", contact));
+    const contentBlock = emailContentBlockReason({ subject, html, text });
+    if (contentBlock) {
+      await pauseCampaignForDeliverability(campaign.id, message.id, contentBlock);
+      deliverabilityBlocked++;
+      continue;
+    }
     const fromName = headerValue(account.fromName);
     const fromEmail = headerValue(account.fromEmail).toLowerCase();
     const replyTo = headerValue(account.replyTo || account.fromEmail);
