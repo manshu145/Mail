@@ -114,7 +114,14 @@ async function contactsForJob(scope: string) {
     return db.select().from(contacts).where(inArray(contacts.id, ids));
   }
 
-  if (scope === "gmail:pending" || scope === "pending") {
+  if (scope === "pending") {
+    return db.select().from(contacts).where(and(
+      eq(contacts.status, "active"),
+      inArray(contacts.validationStatus, ["pending", "unknown", "error"]),
+    ));
+  }
+
+  if (scope === "gmail:pending") {
     return db.select().from(contacts).where(and(
       eq(contacts.status, "active"),
       eq(contacts.validationStatus, "pending"),
