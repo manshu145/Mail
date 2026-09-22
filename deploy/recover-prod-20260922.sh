@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 umask 077
 
+echo "=== NEXIMAIL RECOVERY STARTING ==="
+
 APP_DIR=/opt/neximail-next
 PROJECT=neximail-next
 BASELINE=1cda3885fe3fc7cc6786145fd961b35a4d34209e
@@ -20,9 +22,9 @@ cp -a "$APP_DIR/.env" "$BACKUP/.env.before"
 [ -f /usr/local/bin/neximail-worker-guard.sh ] && cp -a /usr/local/bin/neximail-worker-guard.sh "$BACKUP/" || true
 [ -f "$APP_DIR/src/lib/provider.ts" ] && cp -a "$APP_DIR/src/lib/provider.ts" "$BACKUP/provider.ts.before" || true
 $DC ps > "$BACKUP/services.before.txt" || true
-$DC exec -T postgres sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$BACKUP/database.dump"
+$DC exec -T postgres sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' </dev/null > "$BACKUP/database.dump"
 [ -s "$BACKUP/database.dump" ] || { echo "Database backup failed"; exit 1; }
-$DC exec -T mta postqueue -p > "$BACKUP/postfix-queue.before.txt" 2>&1 || true
+$DC exec -T mta postqueue -p </dev/null > "$BACKUP/postfix-queue.before.txt" 2>&1 || true
 
 echo "== Remove temporary guard =="
 systemctl disable --now neximail-worker-guard.timer 2>/dev/null || true
@@ -55,7 +57,7 @@ SET active=false, cleared_at=COALESCE(cleared_at,NOW()), next_probe_at=NULL, upd
 WHERE provider='__sender__'
   AND reason='sender_or_outbound_path_restriction'
   AND last_response ILIKE 'JFE050004:%';
-"
+" </dev/null
 
 echo "== Rebuild only workers modified during incident =="
 if [ ! -f "$RELEASE/package.json" ]; then
@@ -73,7 +75,7 @@ grep -E '^TRANSPORT_(RATE_PER_SECOND|BATCH_SIZE|WORKER_INTERVAL_MS)=' "$APP_DIR/
 $DC exec -T postgres psql -U neximail -d neximail -P pager=off -c "
 SELECT id,name,status FROM campaigns WHERE id='70c50199-cc6b-4e47-9ef9-e7a1582f0a4e';
 SELECT provider,active,reason,next_probe_at FROM provider_cooldowns ORDER BY updated_at DESC LIMIT 10;
-"
+" </dev/null
 
 banner=$(timeout 8 bash -c 'exec 3<>/dev/tcp/gmail-smtp-in.l.google.com/25; IFS= read -r line <&3; printf "%s" "$line"' 2>/dev/null || true)
 echo "External SMTP banner: $banner"
