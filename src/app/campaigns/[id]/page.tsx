@@ -28,6 +28,18 @@ type ProviderImpactRow={
 };
 
 function one(value:string|string[]|undefined){return Array.isArray(value)?value[0]:value}
+function campaignErrorMessage(value:string|null|undefined){
+  if(!value)return "";
+  if(value==="campaign.delivery_safety_bounce_stop")return "Delivery paused automatically because the observed hard-bounce rate crossed the safety stop threshold. Clean or revalidate the audience before resuming.";
+  if(value==="campaign.preflight_blocked")return "Launch paused because Campaign Preflight found a blocking safety issue. Review the checks below before resuming.";
+  if(value==="campaign.worker_missing_list"||value==="campaign.worker_list_not_found")return "Campaign paused because its audience list is missing or unavailable.";
+  if(value==="campaign.worker_delivery_configuration_missing"||value==="campaign.worker_delivery_configuration_unavailable")return "Campaign paused because the sending account or template is unavailable.";
+  if(value==="campaign.worker_no_eligible_recipients")return "Campaign paused because no eligible recipients remain after validation and suppression checks.";
+  if(value==="campaign.recipient_limit_blocked")return "Campaign paused because the eligible audience exceeds the configured safety limit.";
+  if(value==="campaign.worker_snapshot_failed")return "Campaign paused because the final audience snapshot could not be completed safely.";
+  return value.replaceAll("_"," ").replaceAll("."," · ");
+}
+
 function viewLabel(view:DrillView){
   return view==="targeted"?"Targeted recipients":view==="delivered"?"Delivered recipients":view==="opens"?"Unique openers":view==="clicks"?"Unique clickers":"Bounced / failed recipients";
 }
@@ -236,7 +248,7 @@ export default async function CampaignDetailPage({
       {[["Created",fmt(campaign.createdAt)],["Started",fmt(campaign.startedAt)],["Completed",fmt(campaign.completedAt)],["Scheduled",fmt(campaign.scheduledAt)]].map(([label,value])=><article key={label} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4"><p className="text-xs font-bold text-[var(--muted)]">{label}</p><p className="mt-1.5 text-sm font-black">{value}</p></article>)}
     </section>
 
-    {campaign.lastError?<div className="mb-5 rounded-2xl border border-rose-500/20 bg-rose-500/[0.06] px-4 py-3 text-sm font-semibold text-rose-600">{campaign.lastError}</div>:null}
+    {campaign.lastError?<div className="mb-5 rounded-2xl border border-rose-500/20 bg-rose-500/[0.06] px-4 py-3 text-sm font-semibold text-rose-600">{campaignErrorMessage(campaign.lastError)}</div>:null}
 
     {preflight?<section className="premium-panel mb-5 overflow-hidden"><div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"><div><p className="page-eyebrow">Launch safety</p><h2 className="mt-1 text-lg font-black">Campaign preflight</h2></div><span className={`rounded-full px-3 py-1.5 text-[10px] font-black uppercase ${preflight.status==="ready"?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":preflight.status==="warning"?"bg-amber-500/10 text-amber-700 dark:text-amber-300":"bg-rose-500/10 text-rose-700 dark:text-rose-300"}`}>{preflight.status}</span></div><div className="grid gap-2 p-4 md:grid-cols-2 xl:grid-cols-3 sm:p-5">{preflightChecks.map((check,index)=>{const status=String(check.status||"warning");return <div key={`${String(check.key||"check")}-${index}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${status==="ready"?"bg-emerald-500":status==="blocked"?"bg-rose-500":"bg-amber-500"}`}/><p className="text-xs font-black">{String(check.label||check.key||"Check")}</p></div><p className="mt-1.5 text-[11px] leading-4 text-[var(--muted)]">{String(check.detail||"")}</p></div>})}</div></section>:null}
 
