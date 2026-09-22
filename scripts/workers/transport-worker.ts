@@ -249,6 +249,14 @@ async function runOnce() {
     const unsubscribeUrl = `${appUrl}/unsubscribe/${unsubscribeToken}`;
     let html = personalizeContactHtml(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
     let text = personalize(template.textBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
+    const subject = headerValue(personalize(campaign.subject || template.subject || "", contact));
+    const contentBlock = emailContentBlockReason({ subject, html, text });
+    if (contentBlock) {
+      await pauseCampaignForDeliverability(campaign.id, message.id, contentBlock);
+      deliverabilityBlocked++;
+      continue;
+    }
+
     const preheader = personalize(campaign.preheader || "", contact);
     html = injectPreheader(html, preheader);
     ({ html, text } = ensureUnsubscribe(html, text, unsubscribeUrl));
@@ -256,14 +264,6 @@ async function runOnce() {
     if (campaign.trackOpens) {
       const token = await signPublicToken({ messageId: message.id }, "30d");
       html += `<img src="${appUrl}/tracking/open/${token}" width="1" height="1" alt="" style="display:none!important" />`;
-    }
-
-    const subject = headerValue(personalize(campaign.subject || template.subject || "", contact));
-    const contentBlock = emailContentBlockReason({ subject, html, text });
-    if (contentBlock) {
-      await pauseCampaignForDeliverability(campaign.id, message.id, contentBlock);
-      deliverabilityBlocked++;
-      continue;
     }
     const fromName = headerValue(account.fromName);
     const fromEmail = headerValue(account.fromEmail).toLowerCase();
