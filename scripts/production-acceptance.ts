@@ -6,6 +6,8 @@ import { db, pool } from "../src/db";
 import { campaigns, contacts, importJobs, messages, sendingAccounts, suppressions, users } from "../src/db/schema";
 import { importUploads } from "../src/db/import-schema";
 import { sendingDomains, workerHeartbeats } from "../src/db/operations-schema";
+import { getRuntimePolicy } from "../src/lib/runtime-policy";
+import { readDeliverySettings } from "../src/lib/delivery-settings";
 
 const baseUrl = "http://127.0.0.1:3000";
 const stamp = Date.now();
@@ -61,6 +63,20 @@ async function main(){
   }
   if(!missing.length && !stale.length) record("Worker heartbeats","PASS",`${expected.length}/${expected.length} fresh`);
   else record("Worker heartbeats","FAIL",`missing=[${missing.join(",")}] stale=[${stale.join(",")}]`);
+
+  const runtime=getRuntimePolicy();
+  const delivery=await readDeliverySettings();
+  const transportMeta=hbMap.get("transport")?.metadata||{};
+  const effectiveRuntimeOk=runtime.mode==="production"&&runtime.sendingEnabled&&transportMeta.sendingEnabled===true;
+  record("Effective runtime sending state",effectiveRuntimeOk?"PASS":"FAIL",`mode=${runtime.mode}, configured=${runtime.sendingEnabled}, transport=${String(transportMeta.sendingEnabled)}`);
+  const pollInterval=Number(transportMeta.pollIntervalMs||0),claimBatch=Number(transportMeta.claimBatch||0),perSecond=Number(transportMeta.perSecond||delivery.maxPerSecond);
+  const transportConfigOk=pollInterval>=1000&&pollInterval<=10000&&claimBatch>=1&&perSecond>=1;
+  record("Effective transport configuration",transportConfigOk?"PASS":"FAIL",`poll=${pollInterval}ms, batch=${claimBatch}, perSecond=${perSecond}, cooldown=${delivery.providerCooldownMinutes}m`);
+
+  const overdueCooldowns=await pool.query(`select count(*)::int count from provider_cooldowns where active=true and next_probe_at < now()-interval '5 minutes'`);
+  record("Overdue restriction probes",Number(overdueCooldowns.rows[0]?.count||0)===0?"PASS":"FAIL",`${Number(overdueCooldowns.rows[0]?.count||0)} active restriction(s) overdue`);
+  const upstreamRestrictions=await pool.query(`select count(*)::int count from provider_cooldowns where active=true and provider in ('__upstream__','__sender__')`);
+  record("Outbound infrastructure restriction",Number(upstreamRestrictions.rows[0]?.count||0)===0?"PASS":"FAIL",`${Number(upstreamRestrictions.rows[0]?.count||0)} active outbound-path restriction(s)`);
 
   const integrity=await pool.query(`
     select

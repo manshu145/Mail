@@ -33,7 +33,7 @@ export type CampaignMetrics = {
 
 const n = (value: unknown) => Number(value || 0);
 const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 10000) / 100 : 0;
-const humanEvent = sql`coalesce((payload->>'automated')::boolean,false)=false`;
+const humanEvent = sql`coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true`;
 
 function outcomeRates(delivered: number, bounced: number, failed: number) {
   const finalized = delivered + bounced + failed;
@@ -68,8 +68,8 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
         )) filter(where type='open' and ${humanEvent})::int total_opens,
         count(distinct message_id) filter(where type='click' and ${humanEvent})::int unique_clicks,
         count(*) filter(where type='click' and ${humanEvent})::int total_clicks,
-        count(*) filter(where type='open' and coalesce((payload->>'automated')::boolean,false)=true)::int automated_opens,
-        count(*) filter(where type='click' and coalesce((payload->>'automated')::boolean,false)=true)::int automated_clicks,
+        count(*) filter(where type='open' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=false)::int automated_opens,
+        count(*) filter(where type='click' and coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=false)::int automated_clicks,
         count(distinct message_id) filter(where type='unsubscribe')::int unsubscribes,
         count(distinct message_id) filter(where type='complaint')::int complaints
       from message_events
@@ -104,16 +104,16 @@ export async function getCampaignMetricsList(limit = 50): Promise<CampaignMetric
       count(distinct m.id) filter(where m.status='bounced')::int bounced,
       count(distinct m.id) filter(where m.status='failed')::int failed,
       count(distinct m.id) filter(where m.status='cancelled')::int cancelled,
-      count(distinct case when e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false then e.message_id end)::int unique_opens,
+      count(distinct case when e.type='open' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true then e.message_id end)::int unique_opens,
       count(distinct (
         e.message_id::text || ':' ||
         coalesce(e.payload->>'userAgent','') || ':' ||
         floor(extract(epoch from e.created_at) / 300)::text
-      )) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=false)::int total_opens,
-      count(distinct case when e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false then e.message_id end)::int unique_clicks,
-      count(e.id) filter(where e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=false)::int total_clicks,
-      count(e.id) filter(where e.type='open' and coalesce((e.payload->>'automated')::boolean,false)=true)::int automated_opens,
-      count(e.id) filter(where e.type='click' and coalesce((e.payload->>'automated')::boolean,false)=true)::int automated_clicks,
+      )) filter(where e.type='open' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int total_opens,
+      count(distinct case when e.type='click' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true then e.message_id end)::int unique_clicks,
+      count(e.id) filter(where e.type='click' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int total_clicks,
+      count(e.id) filter(where e.type='open' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=false)::int automated_opens,
+      count(e.id) filter(where e.type='click' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=false)::int automated_clicks,
       count(distinct case when e.type='unsubscribe' then e.message_id end)::int unsubscribes,
       count(distinct case when e.type='complaint' then e.message_id end)::int complaints
     from campaigns c

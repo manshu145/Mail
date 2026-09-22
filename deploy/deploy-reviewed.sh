@@ -192,6 +192,13 @@ for attempt in $(seq 1 40); do
       expected=$(sha256sum "$RELEASE_DIR/scripts/workers/transport-worker.ts" | cut -d ' ' -f1)
       actual=$("${dc[@]}" exec -T app sha256sum scripts/workers/transport-worker.ts | cut -d ' ' -f1)
       [[ "$actual" == "$expected" ]] || { echo 'Running app revision mismatch.'; exit 1; }
+      runtime_image=$(docker inspect --format '{{.Image}}' "$("${dc[@]}" ps -q app)")
+      for service in "${services[@]}"; do
+        service_id=$("${dc[@]}" ps -aq "$service")
+        [[ -n "$service_id" ]] || { echo "Service container missing after deploy: $service"; exit 1; }
+        service_image=$(docker inspect --format '{{.Image}}' "$service_id")
+        [[ "$service_image" == "$runtime_image" ]] || { echo "Service $service is not pinned to the deployed runtime image."; exit 1; }
+      done
       printf '\nDEPLOYED %s\nURL: %s\nRelease: %s\nBackup: %s\n' "$REVISION" "$LOGIN_URL" "$RELEASE_DIR" "$BACKUP_DIR"
       "${dc[@]}" ps
       cat "$BACKUP_DIR/health.json"

@@ -8,7 +8,7 @@ import { CampaignEditor } from "@/components/campaign-editor";
 import { CampaignReuseAction } from "@/components/campaign-reuse-action";
 import { MessageStatusBadge } from "@/components/message-status-badge";
 import { db, databaseConfigured } from "@/db";
-import { campaignPreflights } from "@/db/campaign-ops-schema";
+import { campaignDeliverySafety, campaignPreflights } from "@/db/campaign-ops-schema";
 import { campaigns, lists, sendingAccounts, templates } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
@@ -56,13 +56,13 @@ export default async function CampaignDetailPage({
   const [campaign]=await db.select().from(campaigns).where(eq(campaigns.id,id)).limit(1);
   if(!campaign)notFound();
 
-  const human=sql`coalesce((e.payload->>'automated')::boolean,false)=false`;
+  const human=sql`coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true`;
   let drillCondition=sql`true`;
   if(view==="delivered")drillCondition=sql`m.status='delivered'`;
-  if(view==="opens")drillCondition=sql`exists(select 1 from message_events oe where oe.message_id=m.id and oe.type='open' and coalesce((oe.payload->>'automated')::boolean,false)=false)`;
+  if(view==="opens")drillCondition=sql`exists(select 1 from message_events oe where oe.message_id=m.id and oe.type='open' and coalesce((oe.payload->>'qualified')::boolean,coalesce((oe.payload->>'automated')::boolean,false)=false)=true)`;
   if(view==="clicks")drillCondition=clickUrl
-    ? sql`exists(select 1 from message_events ce where ce.message_id=m.id and ce.type='click' and coalesce((ce.payload->>'automated')::boolean,false)=false and ce.payload->>'url'=${clickUrl})`
-    : sql`exists(select 1 from message_events ce where ce.message_id=m.id and ce.type='click' and coalesce((ce.payload->>'automated')::boolean,false)=false)`;
+    ? sql`exists(select 1 from message_events ce where ce.message_id=m.id and ce.type='click' and coalesce((ce.payload->>'qualified')::boolean,coalesce((ce.payload->>'automated')::boolean,false)=false)=true and ce.payload->>'url'=${clickUrl})`
+    : sql`exists(select 1 from message_events ce where ce.message_id=m.id and ce.type='click' and coalesce((ce.payload->>'qualified')::boolean,coalesce((ce.payload->>'automated')::boolean,false)=false)=true)`;
   if(view==="bounce_failed")drillCondition=sql`m.status in ('bounced','failed')`;
 
   let drillOrder=sql`m.queued_at desc`;
@@ -71,7 +71,7 @@ export default async function CampaignDetailPage({
   if(view==="clicks")drillOrder=sql`max(e.created_at) filter(where e.type='click' and ${human}) desc nulls last, m.queued_at desc`;
   if(view==="bounce_failed")drillOrder=sql`coalesce(m.bounced_at,max(e.created_at),m.queued_at) desc nulls last, m.queued_at desc`;
 
-  const [listRows,templateRows,accountRows,metrics,recipientResult,recipientCountResult,linkResult,preflightRows,selectedResult,providerImpactResult,providerStateResult]=await Promise.all([
+  const [listRows,templateRows,accountRows,metrics,recipientResult,recipientCountResult,linkResult,preflightRows,safetyRows,selectedResult,providerImpactResult,providerStateResult]=await Promise.all([
     db.select({id:lists.id,name:lists.name}).from(lists),
     db.select({id:templates.id,name:templates.name}).from(templates),
     db.select({id:sendingAccounts.id,name:sendingAccounts.name,fromName:sendingAccounts.fromName,fromEmail:sendingAccounts.fromEmail,replyTo:sendingAccounts.replyTo}).from(sendingAccounts).where(eq(sendingAccounts.status,"active")),
@@ -111,17 +111,18 @@ export default async function CampaignDetailPage({
     db.execute(sql`select count(*)::int total from messages m where m.campaign_id=${id} and ${drillCondition}`),
     db.execute(sql`
       select e.payload->>'url' url,
-        count(*) filter(where coalesce((e.payload->>'automated')::boolean,false)=false)::int clicks,
-        count(distinct e.message_id) filter(where coalesce((e.payload->>'automated')::boolean,false)=false)::int unique_clickers
+        count(*) filter(where coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int clicks,
+        count(distinct e.message_id) filter(where coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)::int unique_clickers
       from message_events e
       join messages m on m.id=e.message_id
       where m.campaign_id=${id} and e.type='click' and e.payload->>'url' is not null
       group by e.payload->>'url'
-      having count(*) filter(where coalesce((e.payload->>'automated')::boolean,false)=false)>0
+      having count(*) filter(where coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true)>0
       order by clicks desc
       limit 50
     `),
     db.select().from(campaignPreflights).where(eq(campaignPreflights.campaignId,id)).limit(1),
+    db.select().from(campaignDeliverySafety).where(eq(campaignDeliverySafety.campaignId,id)).limit(1),
     selectedMessageId&&/^[0-9a-f-]{36}$/i.test(selectedMessageId)
       ? db.execute(sql`
           select m.id::text,m.recipient_email,m.status::text,
@@ -194,6 +195,8 @@ export default async function CampaignDetailPage({
     };
   });
   const preflight=preflightRows[0]||null;
+  const safety=safetyRows[0]||null;
+  const preflightChecks=(Array.isArray(preflight?.checks)?preflight.checks:[]) as Array<Record<string,unknown>>;
   const editable=["draft","paused","scheduled"].includes(campaign.status);
   const readOnlyState = campaign.status==="sending"
     ? {title:"Delivery processing",detail:"This campaign is actively sending. Editing is locked while the audience snapshot is in use."}
@@ -234,6 +237,10 @@ export default async function CampaignDetailPage({
     </section>
 
     {campaign.lastError?<div className="mb-5 rounded-2xl border border-rose-500/20 bg-rose-500/[0.06] px-4 py-3 text-sm font-semibold text-rose-600">{campaign.lastError}</div>:null}
+
+    {preflight?<section className="premium-panel mb-5 overflow-hidden"><div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"><div><p className="page-eyebrow">Launch safety</p><h2 className="mt-1 text-lg font-black">Campaign preflight</h2></div><span className={`rounded-full px-3 py-1.5 text-[10px] font-black uppercase ${preflight.status==="ready"?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":preflight.status==="warning"?"bg-amber-500/10 text-amber-700 dark:text-amber-300":"bg-rose-500/10 text-rose-700 dark:text-rose-300"}`}>{preflight.status}</span></div><div className="grid gap-2 p-4 md:grid-cols-2 xl:grid-cols-3 sm:p-5">{preflightChecks.map((check,index)=>{const status=String(check.status||"warning");return <div key={`${String(check.key||"check")}-${index}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${status==="ready"?"bg-emerald-500":status==="blocked"?"bg-rose-500":"bg-amber-500"}`}/><p className="text-xs font-black">{String(check.label||check.key||"Check")}</p></div><p className="mt-1.5 text-[11px] leading-4 text-[var(--muted)]">{String(check.detail||"")}</p></div>})}</div></section>:null}
+
+    {safety?<section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><article className="compact-stat"><p className="compact-stat-label">Adaptive state</p><p className="mt-2 text-lg font-black capitalize">{safety.state}</p></article><article className="compact-stat"><p className="compact-stat-label">Released limit</p><p className="compact-stat-value">{safety.releaseLimit.toLocaleString()}</p></article><article className="compact-stat"><p className="compact-stat-label">Observed outcomes</p><p className="compact-stat-value">{safety.sampleCount.toLocaleString()}</p></article><article className="compact-stat"><p className="compact-stat-label">Observed bounce rate</p><p className="compact-stat-value">{(safety.bounceRate*100).toFixed(2)}%</p></article></section>:null}
 
     {metrics&&metrics.targeted>0?<>
       <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

@@ -1,12 +1,15 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { campaignPreflights } from "../../src/db/campaign-ops-schema";
-import { auditLogs, campaigns, lists, messages } from "../../src/db/schema";
-import { workerHeartbeats } from "../../src/db/operations-schema";
+import { auditLogs, campaigns, lists, messages, sendingAccounts, templates } from "../../src/db/schema";
+import { sendingDomains, workerHeartbeats } from "../../src/db/operations-schema";
 import { audienceSelection } from "../../src/lib/audience";
 import { preflightAudience } from "../../src/lib/audience-preflight";
 import { readDeliverySettings } from "../../src/lib/delivery-settings";
 import { getRuntimePolicy } from "../../src/lib/runtime-policy";
+import { getCampaignSendGuard } from "../../src/lib/campaign-preflight";
+import { listCampaignAttachments } from "../../src/lib/campaign-attachments";
+import { listTemplateAttachments } from "../../src/lib/template-attachments";
 
 const intervalMs = Math.max(1000, Number(process.env.CAMPAIGN_WORKER_INTERVAL_MS || "5000"));
 const claimBatch = Math.max(1, Math.min(25, Number(process.env.CAMPAIGN_CLAIM_BATCH || "5")));
@@ -59,6 +62,10 @@ async function runOnce() {
   const recovered = await recoverAbandonedClaims();
   const policy = getRuntimePolicy();
   const delivery = await readDeliverySettings();
+  // Publish this worker's current state before running the launch guard. On a
+  // fresh deploy the guard must not block itself merely because the previous
+  // campaign heartbeat predates the rollout.
+  await heartbeat({ state: "online", sendingEnabled: policy.sendingEnabled, mode: policy.mode, recovered, phase: "preflight" });
   if (!policy.sendingEnabled) {
     await heartbeat({ state: "online", sendingEnabled: false, mode: policy.mode, maxRecipientsPerCampaign: delivery.maxRecipientsPerCampaign, recovered });
     return;
@@ -84,6 +91,36 @@ async function runOnce() {
       if (!list) { await blockCampaign(campaign.id, "campaign.worker_list_not_found", { listId: campaign.listId }); blocked++; continue; }
 
       const preflight = await preflightAudience(list);
+      if (!campaign.sendingAccountId || !campaign.templateId) {
+        await blockCampaign(campaign.id, "campaign.worker_delivery_configuration_missing", {});
+        blocked++;
+        continue;
+      }
+      const [[account], [template]] = await Promise.all([
+        db.select().from(sendingAccounts).where(eq(sendingAccounts.id, campaign.sendingAccountId)).limit(1),
+        db.select().from(templates).where(eq(templates.id, campaign.templateId)).limit(1),
+      ]);
+      if (!account || account.status !== "active" || !template) {
+        await blockCampaign(campaign.id, "campaign.worker_delivery_configuration_unavailable", {});
+        blocked++;
+        continue;
+      }
+      const senderDomain = account.fromEmail.split("@")[1]?.toLowerCase() || "";
+      const [[domain], campaignAttachments, templateAttachments] = await Promise.all([
+        db.select().from(sendingDomains).where(eq(sendingDomains.domain, senderDomain)).limit(1),
+        listCampaignAttachments(campaign.id),
+        listTemplateAttachments(template.id),
+      ]);
+      const sendGuard = await getCampaignSendGuard({
+        sendingAccountId: account.id,
+        fromEmail: account.fromEmail,
+        domain: domain || null,
+        audience: preflight,
+        subject: campaign.subject || template.subject || "",
+        html: template.htmlBody || "",
+        text: template.textBody || "",
+        attachmentNames: [...campaignAttachments, ...templateAttachments].map((attachment) => attachment.filename),
+      });
       await db.insert(campaignPreflights).values({
         campaignId: campaign.id,
         listId: list.id,
@@ -94,6 +131,9 @@ async function runOnce() {
         validCount: preflight.validCount,
         pendingCount: preflight.pendingCount,
         unknownCount: preflight.unknownCount,
+        status: sendGuard.status,
+        checks: sendGuard.checks,
+        blockingIssues: sendGuard.blockingIssues,
         checkedAt: new Date(),
       }).onConflictDoUpdate({
         target: campaignPreflights.campaignId,
@@ -106,9 +146,18 @@ async function runOnce() {
           validCount: preflight.validCount,
           pendingCount: preflight.pendingCount,
           unknownCount: preflight.unknownCount,
+          status: sendGuard.status,
+          checks: sendGuard.checks,
+          blockingIssues: sendGuard.blockingIssues,
           checkedAt: new Date(),
         },
       });
+
+      if (sendGuard.status === "blocked") {
+        await blockCampaign(campaign.id, "campaign.preflight_blocked", { checks: sendGuard.checks, blockingIssues: sendGuard.blockingIssues });
+        blocked++;
+        continue;
+      }
 
       if (campaignLimit !== null && preflight.eligibleCount > campaignLimit) {
         await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { eligibleRecipients: preflight.eligibleCount, limit: campaignLimit, runtimeLimit, deliveryLimit: delivery.maxRecipientsPerCampaign });

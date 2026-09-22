@@ -20,7 +20,7 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
     for (const file of ["src/app/reports/page.tsx", "src/lib/campaign-reporting.ts"]) {
       const source = await readFile(file, "utf8");
       for (const match of source.matchAll(/db.execute\(sql`([\s\S]*?)`\)/g)) {
-        const query = match[1].replaceAll('${humanEvent}', "coalesce((payload->>'automated')::boolean,false)=false")
+        const query = match[1].replaceAll('${humanEvent}', "coalesce((payload->>'qualified')::boolean,coalesce((payload->>'automated')::boolean,false)=false)=true")
           .replaceAll('${campaignId}', "'00000000-0000-0000-0000-000000000000'").replaceAll('${limit}', "30")
           .replaceAll('${timeWhere}', "true");
         await pg.query(query);

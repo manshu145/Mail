@@ -9,7 +9,9 @@ import { audit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
 import { isValidEmail } from "@/lib/contact-utils";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
-import { getCampaignPreflight } from "@/lib/campaign-preflight";
+import { getCampaignSendGuard, type CampaignSendGuard } from "@/lib/campaign-preflight";
+import { listCampaignAttachments } from "@/lib/campaign-attachments";
+import { listTemplateAttachments } from "@/lib/template-attachments";
 import { isUuid } from "@/lib/id";
 
 function value(input: unknown) {
@@ -53,6 +55,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const policy = getRuntimePolicy();
   let audienceSize: number | null = null;
   let audiencePreflight: Awaited<ReturnType<typeof preflightAudience>> | null = null;
+  let sendGuard: CampaignSendGuard | null = null;
 
   const accountFromEmail = account?.fromEmail?.trim().toLowerCase() || null;
   const accountDomain = accountFromEmail?.split("@")[1] || null;
@@ -61,8 +64,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (wantsDelivery) {
     if (!list || !template || !account) return NextResponse.json({ error: "Select a list, template and sending account first." }, { status: 400 });
     if (!policy.sendingEnabled) return NextResponse.json({ error: "Sending is disabled by runtime configuration." }, { status: 423 });
-    const pipeline = await getCampaignPreflight();
-    if (!pipeline.ok) return NextResponse.json({ error: `Sending pipeline is not healthy: ${pipeline.issues.join("; ")}`, preflight: pipeline }, { status: 503 });
     if (account.status !== "active") return NextResponse.json({ error: "Selected sending account is not active." }, { status: 409 });
     if (!template.htmlBody && !template.textBody) return NextResponse.json({ error: "Template has no email body." }, { status: 409 });
 
@@ -73,6 +74,20 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     audiencePreflight = await preflightAudience(list);
     audienceSize = audiencePreflight.eligibleCount;
+    const [campaignAttachments, templateAttachments] = await Promise.all([
+      listCampaignAttachments(id),
+      listTemplateAttachments(template.id),
+    ]);
+    sendGuard = await getCampaignSendGuard({
+      sendingAccountId: account.id,
+      fromEmail: normalizedFromEmail,
+      domain: domainRow,
+      audience: audiencePreflight,
+      subject: value(body.subject) || campaign.subject || template.subject || "",
+      html: template.htmlBody || "",
+      text: template.textBody || "",
+      attachmentNames: [...campaignAttachments, ...templateAttachments].map((attachment) => attachment.filename),
+    });
     await db.insert(campaignPreflights).values({
       campaignId: id,
       listId: list.id,
@@ -83,6 +98,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       validCount: audiencePreflight.validCount,
       pendingCount: audiencePreflight.pendingCount,
       unknownCount: audiencePreflight.unknownCount,
+      status: sendGuard.status,
+      checks: sendGuard.checks,
+      blockingIssues: sendGuard.blockingIssues,
       checkedAt: new Date(),
     }).onConflictDoUpdate({ target: campaignPreflights.campaignId, set: {
       listId: list.id,
@@ -93,9 +111,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       validCount: audiencePreflight.validCount,
       pendingCount: audiencePreflight.pendingCount,
       unknownCount: audiencePreflight.unknownCount,
+      status: sendGuard.status,
+      checks: sendGuard.checks,
+      blockingIssues: sendGuard.blockingIssues,
       checkedAt: new Date(),
     }});
 
+    if (sendGuard.status === "blocked") return NextResponse.json({ error: `Campaign preflight blocked launch: ${sendGuard.blockingIssues.join(" ")}`, audiencePreflight, sendGuard }, { status: 409 });
     if (audienceSize === 0) return NextResponse.json({ error: "Selected audience has no eligible recipients after suppression and validation checks.", audiencePreflight }, { status: 409 });
     if (policy.maxRecipientsPerCampaign !== null && audienceSize > policy.maxRecipientsPerCampaign) return NextResponse.json({ error: `This runtime allows up to ${policy.maxRecipientsPerCampaign.toLocaleString()} eligible recipients per campaign. This audience currently has ${audienceSize.toLocaleString()}.`, audiencePreflight }, { status: 409 });
   }
@@ -119,5 +141,5 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const auditAction = action === "send_now" ? "campaign.send_now_queued" : action === "schedule" ? "campaign.scheduled" : action === "queue" ? "campaign.queued" : "campaign.updated";
   await audit(auditAction, session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount } : null, runtimeMode: policy.mode });
-  return NextResponse.json({ ok: true, status: nextStatus, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount, validCount: audiencePreflight.validCount, pendingCount: audiencePreflight.pendingCount, unknownCount: audiencePreflight.unknownCount, awaitingValidationCount: audiencePreflight.awaitingValidationCount } : null });
+  return NextResponse.json({ ok: true, status: nextStatus, audienceSize, sendGuard, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount, validCount: audiencePreflight.validCount, pendingCount: audiencePreflight.pendingCount, unknownCount: audiencePreflight.unknownCount, awaitingValidationCount: audiencePreflight.awaitingValidationCount, domainInvalidCount: audiencePreflight.domainInvalidCount, domainHealthPendingCount: audiencePreflight.domainHealthPendingCount, checkedDomainCount: audiencePreflight.checkedDomainCount } : null });
 }

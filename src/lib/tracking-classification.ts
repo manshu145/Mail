@@ -24,6 +24,8 @@ const BOT_PATTERNS = [
 export type TrackingClassification = {
   automated: boolean;
   automationReason: string | null;
+  qualified: boolean;
+  qualificationReason: string | null;
   userAgent: string | null;
   ipHash: string | null;
   proxyProvider: "google_image_proxy" | null;
@@ -47,5 +49,38 @@ export function classifyTrackingRequest(request: Request): TrackingClassificatio
   const ip = requestIp(request);
   const salt = process.env.TRACKING_HASH_SALT || process.env.AUTH_SECRET || "neximail";
   const ipHash = ip ? crypto.createHash("sha256").update(`${salt}:${ip}`).digest("hex").slice(0, 32) : null;
-  return { automated: Boolean(automationReason), automationReason, userAgent, ipHash, proxyProvider };
+  const automated = Boolean(automationReason);
+  return { automated, automationReason, qualified: !automated, qualificationReason: automated ? automationReason : null, userAgent, ipHash, proxyProvider };
+}
+
+export function qualifyOpenEvent(
+  classification: TrackingClassification,
+  context: { deliveredAt: Date | string | null; eventAt?: Date; sameIpDistinctRecipients: number },
+): TrackingClassification & { deliveryToOpenMs: number | null; sameIpDistinctRecipients: number } {
+  const eventAt = context.eventAt || new Date();
+  const deliveredAt = context.deliveredAt ? new Date(context.deliveredAt) : null;
+  const deliveryToOpenMs = deliveredAt && !Number.isNaN(deliveredAt.getTime()) ? eventAt.getTime() - deliveredAt.getTime() : null;
+  let automated = classification.automated;
+  let automationReason = classification.automationReason;
+  let qualified = classification.qualified;
+  let qualificationReason = classification.qualificationReason;
+
+  if (deliveryToOpenMs !== null && deliveryToOpenMs < 0) {
+    automated = true;
+    qualified = false;
+    automationReason = "impossible_timing:before_delivery";
+    qualificationReason = automationReason;
+  } else if (!classification.proxyProvider && context.sameIpDistinctRecipients >= 10) {
+    automated = true;
+    qualified = false;
+    automationReason = "shared_ip_recipient_burst";
+    qualificationReason = automationReason;
+  } else if (!classification.proxyProvider && deliveryToOpenMs !== null && deliveryToOpenMs < 2_000 && context.sameIpDistinctRecipients >= 3) {
+    automated = true;
+    qualified = false;
+    automationReason = "rapid_shared_ip_open";
+    qualificationReason = automationReason;
+  }
+
+  return { ...classification, automated, automationReason, qualified, qualificationReason, deliveryToOpenMs, sameIpDistinctRecipients: context.sameIpDistinctRecipients };
 }

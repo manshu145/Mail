@@ -36,9 +36,11 @@ export async function PATCH(request: NextRequest) {
     ["maxPerSecond",1,1000],["maxRecipientsPerCampaign",0,10_000_000],["maxRollingHour",0,10_000_000],["maxRolling24h",0,100_000_000],["maxActiveQueued",100,10_000_000],
     ["retryMaxAttempts",1,20],["retryInitialSeconds",10,86_400],["retryMaxSeconds",30,604_800],["retryBackoffMultiplier",1,10],["providerCooldownMinutes",1,MAX_PROVIDER_COOLDOWN_MINUTES],
     ["reputationBounceStopRate",0,1],["reputationComplaintStopRate",0,1],["reputationMinSample",1,10_000_000],
+    ["canaryInitialBatch",10,100_000],["canarySecondBatch",10,1_000_000],["canaryThirdBatch",10,5_000_000],["canaryBounceWarnRate",0,1],
   ];
   for (const [key,min,max] of constraints) if (next[key] < min || next[key] > max) return NextResponse.json({ error: `${key} must be between ${min} and ${max}.` }, { status: 400 });
   if (next.retryMaxSeconds < next.retryInitialSeconds) return NextResponse.json({ error: "Maximum retry wait must be at least the initial retry wait." }, { status: 400 });
+  if (next.canaryBounceWarnRate >= next.reputationBounceStopRate) return NextResponse.json({ error: "Canary warning rate must be lower than the bounce stop rate." }, { status: 400 });
 
   await db.transaction(async (tx) => {
     for (const key of numericKeys) {

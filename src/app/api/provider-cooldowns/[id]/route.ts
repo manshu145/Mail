@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
 import { providerCooldowns } from "@/db/operations-schema";
 import { providerCooldownEvents } from "@/db/provider-cooldown-event-schema";
@@ -24,6 +24,21 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const now = new Date();
   await db.update(providerCooldowns).set({ nextProbeAt: now, updatedAt: now }).where(eq(providerCooldowns.id, id));
+  const heldError = `provider_cooldown:${cooldown.provider}`;
+  await db.execute(cooldown.provider === "__upstream__" || cooldown.provider === "__sender__"
+    ? sql`update messages set next_attempt_at=${now} where id=(
+        select m.id from messages m join campaigns c on c.id=m.campaign_id
+        where c.sending_account_id=${cooldown.sendingAccountId} and c.status='sending'
+          and m.status='ready_for_transport'
+          and (m.last_error in ('sender_cooldown','upstream_cooldown','provider_cooldown:__sender__','provider_cooldown:__upstream__') or m.last_error like 'provider_cooldown:%')
+        order by m.queued_at asc limit 1
+      )`
+    : sql`update messages set next_attempt_at=${now} where id=(
+        select m.id from messages m join campaigns c on c.id=m.campaign_id
+        where c.sending_account_id=${cooldown.sendingAccountId} and c.status='sending'
+          and m.status='ready_for_transport' and m.last_error=${heldError}
+        order by m.queued_at asc limit 1
+      )`);
   await db.insert(providerCooldownEvents).values({
     cooldownId: id,
     sendingAccountId: cooldown.sendingAccountId,

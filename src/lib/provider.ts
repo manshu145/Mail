@@ -1,6 +1,6 @@
 export type MailboxProvider = "gmail" | "yahoo" | "microsoft" | "proton" | "rediff" | "mailcom" | "zoho" | "mailhostbox" | "titan" | "netcore" | "godaddy" | "mailcore" | `domain:${string}`;
 
-export type DeliveryRestrictionScope = "none" | "provider" | "sender";
+export type DeliveryRestrictionScope = "none" | "provider" | "sender" | "upstream";
 export type DeliveryRestriction = {
   scope: DeliveryRestrictionScope;
   reason:
@@ -11,6 +11,7 @@ export type DeliveryRestriction = {
 };
 
 export const SENDER_COOLDOWN_KEY = "__sender__";
+export const UPSTREAM_COOLDOWN_KEY = "__upstream__";
 
 export function providerForEmail(email: string): MailboxProvider {
   const domain = String(email || "").trim().toLowerCase().split("@").pop() || "unknown";
@@ -46,6 +47,7 @@ export function providerForDelivery(email: string, response?: string | null): Ma
 }
 
 export function providerLabel(provider: string) {
+  if (provider === UPSTREAM_COOLDOWN_KEY) return "Outbound infrastructure";
   if (provider === SENDER_COOLDOWN_KEY) return "Sender / outbound path";
   if (provider === "gmail") return "Gmail / Google Workspace";
   if (provider === "yahoo") return "Yahoo / AOL";
@@ -79,24 +81,14 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
     return { scope: "none", reason: "recipient_or_mailbox_condition" };
   }
 
-  // JFE050004 is emitted by the upstream outbound Mail Bridge before the
-  // destination SMTP conversation. It therefore applies to the sending path,
-  // not to one recipient provider. Stop the sender immediately instead of
-  // continuing to feed thousands of messages into the restricted bridge.
+  // Known bridge responses can be returned as the initial SMTP greeting before
+  // EHLO/MAIL/RCPT. They describe the shared outbound infrastructure, not the
+  // destination provider. Keep one circuit breaker instead of fake provider
+  // cards for every unrelated recipient network.
   const outboundBridgeRestriction =
-    /jfe050004|unusual number of invalid recipients originating from your account/i.test(text);
+    /jfe050004|jfe050005|unusual number of invalid recipients originating from your account|unusual amount of content policy violations originating from your account/i.test(text);
   if (outboundBridgeRestriction) {
-    return { scope: "sender", reason: "sender_or_outbound_path_restriction" };
-  }
-
-  // Provider-local policy systems sometimes use sender/account wording even
-  // though the restriction applies only at that receiving network. Keep
-  // these responses provider-scoped; they must never freeze unrelated
-  // recipients or the entire sending account.
-  const providerReportedSenderRestriction =
-    /jfe050005|unusual amount of content policy violations originating from your account/i.test(text);
-  if (providerReportedSenderRestriction) {
-    return { scope: "provider", reason: "sender_or_outbound_path_restriction" };
+    return { scope: "upstream", reason: "sender_or_outbound_path_restriction" };
   }
 
   // Reserve immediate sender-wide cooldowns for responses that explicitly
@@ -104,7 +96,7 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
   const explicitSenderOrOutboundPath =
     /sending account (?:is )?(?:restricted|blocked|suspended)|outbound (?:mail|smtp).*(?:account|sender).*(?:restricted|blocked|suspended)/i.test(text);
   if (explicitSenderOrOutboundPath) {
-    return { scope: "sender", reason: "sender_or_outbound_path_restriction" };
+    return { scope: "upstream", reason: "sender_or_outbound_path_restriction" };
   }
 
   const explicitProviderRestriction =
