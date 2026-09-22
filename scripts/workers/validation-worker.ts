@@ -92,7 +92,6 @@ async function contactsForJob(scope: string) {
       eq(contacts.id, contactId),
       eq(contacts.status, "active"),
       inArray(contacts.validationStatus, ["pending", "unknown", "error"]),
-      sql`lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'`,
     ));
   }
 
@@ -113,18 +112,16 @@ async function contactsForJob(scope: string) {
     return db.select().from(contacts).where(inArray(contacts.id, ids));
   }
 
-  if (scope === "gmail:pending") {
+  if (scope === "gmail:pending" || scope === "pending") {
     return db.select().from(contacts).where(and(
       eq(contacts.status, "active"),
       eq(contacts.validationStatus, "pending"),
-      sql`lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'`,
     ));
   }
 
   return db.select().from(contacts).where(and(
     eq(contacts.status, "active"),
     inArray(contacts.validationStatus, ["pending", "unknown", "error"]),
-    sql`lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'`,
   ));
 }
 
