@@ -15,6 +15,7 @@ import { providerForEmail, SENDER_COOLDOWN_KEY } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
+import { sendingDomainBlockReason } from "../../src/lib/sending-domain-policy";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -168,10 +169,11 @@ async function runOnce() {
   const settings = await readDeliverySettings();
   const delayMs = Math.ceil(1000 / settings.maxPerSecond);
   const claimed = await claimMessages();
-  let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0;
+  let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0, deliverabilityBlocked = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
   const templateAttachmentCache = new Map<string, CampaignAttachment[]>();
   const bounceDomainCache = new Map<string, string | null>();
+  const domainHealthCache = new Map<string, typeof sendingDomains.$inferSelect | null>();
 
   for (const claim of claimed) {
     const [message] = await db.select().from(messages).where(eq(messages.id, claim.id)).limit(1);
