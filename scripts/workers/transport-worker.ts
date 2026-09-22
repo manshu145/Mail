@@ -303,7 +303,7 @@ async function runOnce() {
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
     const raw = [
       `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
-      `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, `Feedback-ID: ${campaign.id}:${account.id}:bulk:neximail`, `List-ID: NexiMail ${headerValue(listIdLabel(campaign.name))} <${campaign.listId}.${senderDomain}>`, "MIME-Version: 1.0",
+      `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, `Feedback-ID: ${campaign.id}:${account.id}:bulk:neximail`, `List-ID: NexiMail ${headerValue(listIdLabel(campaign.name))} <${campaign.listId || campaign.id}.${senderDomain}>`, "MIME-Version: 1.0",
       `List-Unsubscribe: <${unsubscribeUrl}>`, "List-Unsubscribe-Post: List-Unsubscribe=One-Click", mime.contentTypeHeader, "", ...mime.bodyLines,
     ].join("\r\n");
 
