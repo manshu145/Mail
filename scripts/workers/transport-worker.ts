@@ -148,6 +148,12 @@ async function markDeferred(id: string, attempt: number, error: unknown, setting
   return "deferred" as const;
 }
 async function releaseThrottled(id: string) { await pool.query(`update messages set status='ready_for_transport',next_attempt_at=now()+interval '60 seconds',last_error='sending_account_rate_limited',attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'`, [id]); await event(id,"transport_throttled",{retryInSeconds:60}); }
+async function pauseCampaignForDeliverability(campaignId: string, messageId: string, reason: string) {
+  const detail = `deliverability_blocked:${reason}`;
+  await pool.query("update campaigns set status=\'paused\',last_error=$2,updated_at=now() where id=$1 and status=\'sending\'", [campaignId, detail]);
+  await pool.query("update messages set status=\'ready_for_transport\',next_attempt_at=null,last_error=$2,attempt_count=greatest(attempt_count-1,0) where id=$1 and status=\'sending\'", [messageId, detail]);
+  await event(messageId, "deliverability_blocked", { reason, campaignId });
+}
 async function recoverStaleClaims() {
   const result=await pool.query<{id:string}>(`update messages set status='failed',next_attempt_at=null,last_error='transport_state_uncertain_after_worker_restart' where status='sending' and accepted_at is null and last_attempt_at is not null and last_attempt_at < now()-interval '10 minutes' returning id`);
   for(const row of result.rows) await event(row.id,"transport_recovery_failed",{reason:"stale_sending_claim"});
@@ -203,6 +209,22 @@ async function runOnce() {
     // Check owner-configured sender/global capacity before reserving a cooldown
     // probe slot. Otherwise a rate-limited sender could consume the next probe
     // time without actually sending the probe.
+    const accountFromEmail = headerValue(account.fromEmail).toLowerCase();
+    const accountSenderDomain = accountFromEmail.split("@")[1]?.toLowerCase() || "";
+    let domainHealth = domainHealthCache.get(accountSenderDomain);
+    if (!domainHealthCache.has(accountSenderDomain)) {
+      const [row] = accountSenderDomain
+        ? await db.select().from(sendingDomains).where(eq(sendingDomains.domain, accountSenderDomain)).limit(1)
+        : [];
+      domainHealth = row || null;
+      domainHealthCache.set(accountSenderDomain, domainHealth);
+    }
+    const domainBlock = sendingDomainBlockReason(domainHealth, { bounceSigningEnabled });
+    if (domainBlock) {
+      await pauseCampaignForDeliverability(campaign.id, message.id, domainBlock);
+      deliverabilityBlocked++;
+      continue;
+    }
     const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
