@@ -1,4 +1,4 @@
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { campaigns, messageEvents, messages, suppressions, systemSettings } from "@/db/schema";
 import { providerCooldowns } from "@/db/operations-schema";
@@ -10,7 +10,7 @@ import { classifyDeliveryRestriction, providerForDelivery, SENDER_COOLDOWN_KEY, 
 import { DELIVERY_SETTING_KEYS, MAX_PROVIDER_COOLDOWN_MINUTES, defaultDeliverySettings } from "@/lib/delivery-settings";
 
 const terminalStatuses = new Set(["delivered", "bounced", "failed", "cancelled"]);
-export type EventDb = Pick<typeof db, "select" | "insert" | "update">;
+export type EventDb = Pick<typeof db, "select" | "insert" | "update" | "execute">;
 
 async function cooldownMinutes(db: EventDb) {
   const fallback = defaultDeliverySettings().providerCooldownMinutes;
@@ -190,17 +190,23 @@ async function clearCooldownByKey(db: EventDb, campaignId: string, cooldownKey: 
   }).where(eq(providerCooldowns.id, cooldown.id));
 
   const heldError = `provider_cooldown:${cooldownKey}`;
-  const heldPredicate = cooldownKey === SENDER_COOLDOWN_KEY
-    ? or(eq(messages.lastError, heldError), eq(messages.lastError, "sender_cooldown"))
-    : eq(messages.lastError, heldError);
-  await db.update(messages).set({
-    nextAttemptAt: now,
-    lastError: null,
-  }).where(and(
-    eq(messages.campaignId, campaignId),
-    eq(messages.status, "ready_for_transport"),
-    heldPredicate,
-  ));
+  if (cooldownKey === SENDER_COOLDOWN_KEY) {
+    await db.execute(sql`
+      update messages
+      set next_attempt_at=${now}, last_error=null
+      where campaign_id=${campaignId}
+        and status='ready_for_transport'
+        and last_error in ('sender_cooldown','provider_cooldown:__sender__')
+    `);
+  } else {
+    await db.execute(sql`
+      update messages
+      set next_attempt_at=${now}, last_error=null
+      where campaign_id=${campaignId}
+        and status='ready_for_transport'
+        and last_error=${heldError}
+    `);
+  }
 
   await db.insert(providerCooldownEvents).values({
     cooldownId: cooldown.id,
