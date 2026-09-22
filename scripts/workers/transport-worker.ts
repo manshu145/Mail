@@ -47,7 +47,6 @@ async function paceProvider(provider: string, globalRate: number) {
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
 function headerValue(value: string) { return value.replace(/[\r\n]+/g, " ").trim(); }
-function listIdLabel(value: string) { return value.replace(/[<>\r\n]+/g, " ").trim().slice(0, 80) || "Mailing list"; }
 function retryDelaySeconds(attempt: number, settings: DeliverySettings) { return Math.min(settings.retryMaxSeconds, Math.max(settings.retryInitialSeconds, Math.round(settings.retryInitialSeconds * settings.retryBackoffMultiplier ** Math.max(0, attempt - 1)))); }
 function ensureUnsubscribe(html: string, text: string, unsubscribeUrl: string) {
   let nextHtml = html;
@@ -303,7 +302,7 @@ async function runOnce() {
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
     const raw = [
       `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
-      `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, `Feedback-ID: ${campaign.id}:${account.id}:bulk:neximail`, `List-ID: NexiMail ${headerValue(listIdLabel(campaign.name))} <${campaign.listId || campaign.id}.${senderDomain}>`, "MIME-Version: 1.0",
+      `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, `Feedback-ID: ${campaign.id}:${account.id}:bulk:neximail`, `List-ID: <${campaign.listId || campaign.id}.${senderDomain}>`, "MIME-Version: 1.0",
       `List-Unsubscribe: <${unsubscribeUrl}>`, "List-Unsubscribe-Post: List-Unsubscribe=One-Click", mime.contentTypeHeader, "", ...mime.bodyLines,
     ].join("\r\n");
 
