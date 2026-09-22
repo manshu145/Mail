@@ -88,7 +88,7 @@ async function runOnce(){
   const [suppressed]=await db.select({id:suppressions.id,reason:suppressions.reason}).from(suppressions).where(eq(suppressions.normalizedEmail,contact.normalizedEmail)).limit(1);
   if(suppressed){await db.update(messages).set({status:"cancelled",lastError:`suppressed:${suppressed.reason}`}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
   if(!validationAllowsSend(contact.normalizedEmail, contact.validationStatus)){
-   const reason=contact.validationStatus==="invalid"?"validation_invalid":"awaiting_gmail_validation";
+   const reason=contact.validationStatus==="invalid"?"validation_invalid":"awaiting_mailbox_validation";
    await db.update(messages).set({status:"cancelled",lastError:reason}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue
   }
   await db.update(messages).set({status:"ready_for_transport",lastError:null}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));ready++;safety.released++;safety.canRelease=safety.released<safety.releaseLimit
