@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, databaseConfigured, pool } from "@/db";
 import { contacts, importJobs, systemSettings, validationJobs } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { isValidEmail, normalizeEmail } from "@/lib/contact-utils";
-import { decryptWorkspaceSecret } from "@/lib/secure-setting";
 
-const gmailSql = sql`lower(${contacts.normalizedEmail}) ~ '@(gmail|googlemail)\\.com$'`;
 const unresolved = inArray(contacts.validationStatus, ["pending","unknown","error"]);
 
 async function activeJob() {
