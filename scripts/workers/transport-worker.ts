@@ -25,10 +25,29 @@ const smtpTimeoutMs = Math.max(3000, Number(process.env.MTA_SMTP_TIMEOUT_MS || "
 const intervalMs = Math.max(1000, Number(process.env.TRANSPORT_WORKER_INTERVAL_MS || "3000"));
 const claimBatch = Math.min(200, Math.max(1, Number(process.env.TRANSPORT_BATCH_SIZE || "50")));
 const bounceSigningEnabled = Boolean(process.env.BOUNCE_SECRET?.trim());
+const providerLastAttemptAt = new Map<string, number>();
+function providerRatePerSecond(provider: string, globalRate: number) {
+  const key = provider === "gmail" ? "GMAIL_MAX_PER_SECOND"
+    : provider === "microsoft" ? "MICROSOFT_MAX_PER_SECOND"
+    : provider === "yahoo" ? "YAHOO_MAX_PER_SECOND"
+    : "OTHER_PROVIDER_MAX_PER_SECOND";
+  const configured = Number(process.env[key] || "1");
+  const safe = Number.isFinite(configured) && configured > 0 ? configured : 1;
+  return Math.max(0.1, Math.min(globalRate, safe));
+}
+async function paceProvider(provider: string, globalRate: number) {
+  const perSecond = providerRatePerSecond(provider, globalRate);
+  const interval = Math.ceil(1000 / perSecond);
+  const previous = providerLastAttemptAt.get(provider) || 0;
+  const wait = Math.max(0, previous + interval - Date.now());
+  if (wait) await sleep(wait);
+  providerLastAttemptAt.set(provider, Date.now());
+}
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
 function headerValue(value: string) { return value.replace(/[\r\n]+/g, " ").trim(); }
+function listIdLabel(value: string) { return value.replace(/[<>\r\n]+/g, " ").trim().slice(0, 80) || "Mailing list"; }
 function retryDelaySeconds(attempt: number, settings: DeliverySettings) { return Math.min(settings.retryMaxSeconds, Math.max(settings.retryInitialSeconds, Math.round(settings.retryInitialSeconds * settings.retryBackoffMultiplier ** Math.max(0, attempt - 1)))); }
 function ensureUnsubscribe(html: string, text: string, unsubscribeUrl: string) {
   let nextHtml = html;
@@ -232,6 +251,7 @@ async function runOnce() {
     const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
     if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.cooldownKey, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
     if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope,retryAt:gate.retryAt?.toISOString()}); }
+    await paceProvider(gate.provider, settings.maxPerSecond);
 
     let campaignAttachments = campaignAttachmentCache.get(campaign.id);
     if (!campaignAttachments) { campaignAttachments = await loadCampaignAttachments(campaign.id); campaignAttachmentCache.set(campaign.id, campaignAttachments); }
@@ -283,7 +303,7 @@ async function runOnce() {
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
     const raw = [
       `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
-      `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, `Feedback-ID: ${campaign.id}:${account.id}:bulk:neximail`, "MIME-Version: 1.0",
+      `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, `Feedback-ID: ${campaign.id}:${account.id}:bulk:neximail`, `List-ID: NexiMail ${headerValue(listIdLabel(campaign.name))} <${campaign.listId}.${senderDomain}>`, "MIME-Version: 1.0",
       `List-Unsubscribe: <${unsubscribeUrl}>`, "List-Unsubscribe-Post: List-Unsubscribe=One-Click", mime.contentTypeHeader, "", ...mime.bodyLines,
     ].join("\r\n");
 
