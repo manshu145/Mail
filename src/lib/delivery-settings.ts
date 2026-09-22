@@ -54,8 +54,8 @@ export function defaultDeliverySettings(env: Readonly<Record<string,string|undef
     retryMaxSeconds: int(env.TRANSPORT_RETRY_MAX_SECONDS, 3600, 30, 604_800),
     retryBackoffMultiplier: num(env.TRANSPORT_RETRY_BACKOFF_MULTIPLIER, 2, 1, 10),
     providerCooldownMinutes: int(env.PROVIDER_COOLDOWN_MINUTES, 15, 1, MAX_PROVIDER_COOLDOWN_MINUTES),
-    reputationBounceStopRate: num(env.REPUTATION_BOUNCE_STOP_RATE, 0.05, 0, 1),
-    reputationComplaintStopRate: num(env.REPUTATION_COMPLAINT_STOP_RATE, 0.003, 0, 1),
+    reputationBounceStopRate: num(env.REPUTATION_BOUNCE_STOP_RATE, 0.02, 0, 1),
+    reputationComplaintStopRate: num(env.REPUTATION_COMPLAINT_STOP_RATE, 0.001, 0, 1),
     reputationMinSample: int(env.REPUTATION_MIN_SAMPLE, 100, 1, 10_000_000),
   };
 }

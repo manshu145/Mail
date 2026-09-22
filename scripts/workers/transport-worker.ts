@@ -15,6 +15,8 @@ import { providerForEmail, SENDER_COOLDOWN_KEY } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
+import { sendingDomainBlockReason } from "../../src/lib/sending-domain-policy";
+import { emailContentBlockReason } from "../../src/lib/email-content-policy";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -23,10 +25,39 @@ const smtpTimeoutMs = Math.max(3000, Number(process.env.MTA_SMTP_TIMEOUT_MS || "
 const intervalMs = Math.max(1000, Number(process.env.TRANSPORT_WORKER_INTERVAL_MS || "3000"));
 const claimBatch = Math.min(200, Math.max(1, Number(process.env.TRANSPORT_BATCH_SIZE || "50")));
 const bounceSigningEnabled = Boolean(process.env.BOUNCE_SECRET?.trim());
+const providerLastAttemptAt = new Map<string, number>();
+function providerRatePerSecond(provider: string, globalRate: number) {
+  const key = provider === "gmail" ? "GMAIL_MAX_PER_SECOND"
+    : provider === "microsoft" ? "MICROSOFT_MAX_PER_SECOND"
+    : provider === "yahoo" ? "YAHOO_MAX_PER_SECOND"
+    : "OTHER_PROVIDER_MAX_PER_SECOND";
+  const configured = Number(process.env[key] || "1");
+  const safe = Number.isFinite(configured) && configured > 0 ? configured : 1;
+  return Math.max(0.1, Math.min(globalRate, safe));
+}
+async function paceProvider(provider: string, globalRate: number) {
+  const perSecond = providerRatePerSecond(provider, globalRate);
+  const interval = Math.ceil(1000 / perSecond);
+  const previous = providerLastAttemptAt.get(provider) || 0;
+  const wait = Math.max(0, previous + interval - Date.now());
+  if (wait) await sleep(wait);
+  providerLastAttemptAt.set(provider, Date.now());
+}
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
 function headerValue(value: string) { return value.replace(/[\r\n]+/g, " ").trim(); }
+function encodeHeaderText(value: string) {
+  const clean = headerValue(value);
+  if (!clean) return "";
+  return /^[\x20-\x7e]*$/.test(clean) ? clean : `=?UTF-8?B?${Buffer.from(clean, "utf8").toString("base64")}?=`;
+}
+function formatDisplayName(value: string) {
+  const clean = headerValue(value);
+  if (!clean) return "";
+  if (!/^[\x20-\x7e]*$/.test(clean)) return encodeHeaderText(clean);
+  return `"${clean.replace(/([\\"])/g, "\\$1")}"`;
+}
 function retryDelaySeconds(attempt: number, settings: DeliverySettings) { return Math.min(settings.retryMaxSeconds, Math.max(settings.retryInitialSeconds, Math.round(settings.retryInitialSeconds * settings.retryBackoffMultiplier ** Math.max(0, attempt - 1)))); }
 function ensureUnsubscribe(html: string, text: string, unsubscribeUrl: string) {
   let nextHtml = html;
@@ -147,6 +178,12 @@ async function markDeferred(id: string, attempt: number, error: unknown, setting
   return "deferred" as const;
 }
 async function releaseThrottled(id: string) { await pool.query(`update messages set status='ready_for_transport',next_attempt_at=now()+interval '60 seconds',last_error='sending_account_rate_limited',attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'`, [id]); await event(id,"transport_throttled",{retryInSeconds:60}); }
+async function pauseCampaignForDeliverability(campaignId: string, messageId: string, reason: string) {
+  const detail = `deliverability_blocked:${reason}`;
+  await pool.query("update campaigns set status=\'paused\',last_error=$2,updated_at=now() where id=$1 and status=\'sending\'", [campaignId, detail]);
+  await pool.query("update messages set status=\'ready_for_transport\',next_attempt_at=null,last_error=$2,attempt_count=greatest(attempt_count-1,0) where id=$1 and status=\'sending\'", [messageId, detail]);
+  await event(messageId, "deliverability_blocked", { reason, campaignId });
+}
 async function recoverStaleClaims() {
   const result=await pool.query<{id:string}>(`update messages set status='failed',next_attempt_at=null,last_error='transport_state_uncertain_after_worker_restart' where status='sending' and accepted_at is null and last_attempt_at is not null and last_attempt_at < now()-interval '10 minutes' returning id`);
   for(const row of result.rows) await event(row.id,"transport_recovery_failed",{reason:"stale_sending_claim"});
@@ -168,10 +205,11 @@ async function runOnce() {
   const settings = await readDeliverySettings();
   const delayMs = Math.ceil(1000 / settings.maxPerSecond);
   const claimed = await claimMessages();
-  let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0;
+  let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0, deliverabilityBlocked = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
   const templateAttachmentCache = new Map<string, CampaignAttachment[]>();
   const bounceDomainCache = new Map<string, string | null>();
+  const domainHealthCache = new Map<string, typeof sendingDomains.$inferSelect | null>();
 
   for (const claim of claimed) {
     const [message] = await db.select().from(messages).where(eq(messages.id, claim.id)).limit(1);
@@ -201,12 +239,29 @@ async function runOnce() {
     // Check owner-configured sender/global capacity before reserving a cooldown
     // probe slot. Otherwise a rate-limited sender could consume the next probe
     // time without actually sending the probe.
+    const accountFromEmail = headerValue(account.fromEmail).toLowerCase();
+    const accountSenderDomain = accountFromEmail.split("@")[1]?.toLowerCase() || "";
+    let domainHealth = domainHealthCache.get(accountSenderDomain);
+    if (!domainHealthCache.has(accountSenderDomain)) {
+      const [row] = accountSenderDomain
+        ? await db.select().from(sendingDomains).where(eq(sendingDomains.domain, accountSenderDomain)).limit(1)
+        : [];
+      domainHealth = row || null;
+      domainHealthCache.set(accountSenderDomain, domainHealth);
+    }
+    const domainBlock = sendingDomainBlockReason(domainHealth, { bounceSigningEnabled });
+    if (domainBlock) {
+      await pauseCampaignForDeliverability(campaign.id, message.id, domainBlock);
+      deliverabilityBlocked++;
+      continue;
+    }
     const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
     const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
     if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.cooldownKey, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
     if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope,retryAt:gate.retryAt?.toISOString()}); }
+    await paceProvider(gate.provider, settings.maxPerSecond);
 
     let campaignAttachments = campaignAttachmentCache.get(campaign.id);
     if (!campaignAttachments) { campaignAttachments = await loadCampaignAttachments(campaign.id); campaignAttachmentCache.set(campaign.id, campaignAttachments); }
@@ -224,6 +279,15 @@ async function runOnce() {
     const unsubscribeUrl = `${appUrl}/unsubscribe/${unsubscribeToken}`;
     let html = personalizeContactHtml(template.htmlBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
     let text = personalize(template.textBody, contact).replaceAll("{{unsubscribe_url}}", unsubscribeUrl);
+    const subject = headerValue(personalize(campaign.subject || template.subject || "", contact));
+    const encodedSubject = encodeHeaderText(subject);
+    const contentBlock = emailContentBlockReason({ subject, html, text });
+    if (contentBlock) {
+      await pauseCampaignForDeliverability(campaign.id, message.id, contentBlock);
+      deliverabilityBlocked++;
+      continue;
+    }
+
     const preheader = personalize(campaign.preheader || "", contact);
     html = injectPreheader(html, preheader);
     ({ html, text } = ensureUnsubscribe(html, text, unsubscribeUrl));
@@ -232,9 +296,7 @@ async function runOnce() {
       const token = await signPublicToken({ messageId: message.id }, "30d");
       html += `<img src="${appUrl}/tracking/open/${token}" width="1" height="1" alt="" style="display:none!important" />`;
     }
-
-    const subject = headerValue(personalize(campaign.subject || template.subject || "", contact));
-    const fromName = headerValue(account.fromName);
+    const fromName = formatDisplayName(account.fromName);
     const fromEmail = headerValue(account.fromEmail).toLowerCase();
     const replyTo = headerValue(account.replyTo || account.fromEmail);
     const recipient = headerValue(contact.email);
@@ -243,10 +305,7 @@ async function runOnce() {
     if (bounceDomainCache.has(senderDomain)) {
       bounceDomain = bounceDomainCache.get(senderDomain) ?? null;
     } else {
-      const [domainRow] = senderDomain
-        ? await db.select({ bounceDomain: sendingDomains.bounceDomain }).from(sendingDomains).where(eq(sendingDomains.domain, senderDomain)).limit(1)
-        : [];
-      const dynamicDomain = domainRow?.bounceDomain?.trim().toLowerCase() || null;
+      const dynamicDomain = domainHealth?.bounceDomain?.trim().toLowerCase() || null;
       const legacyDomain = process.env.BOUNCE_DOMAIN?.trim().toLowerCase() || null;
       bounceDomain = dynamicDomain || legacyDomain;
       bounceDomainCache.set(senderDomain, bounceDomain);
@@ -254,8 +313,8 @@ async function runOnce() {
     const envelopeFrom = bounceSigningEnabled && bounceDomain ? makeBounceAddress(message.id, bounceDomain) : fromEmail;
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
     const raw = [
-      `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
-      `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, "MIME-Version: 1.0",
+      `From: ${fromName ? `${fromName} ` : ""}<${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${encodedSubject}`, `Date: ${new Date().toUTCString()}`,
+      `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, `Feedback-ID: ${campaign.id}:${account.id}:bulk:neximail`, `List-ID: <${campaign.listId || campaign.id}.${senderDomain}>`, "MIME-Version: 1.0",
       `List-Unsubscribe: <${unsubscribeUrl}>`, "List-Unsubscribe-Post: List-Unsubscribe=One-Click", mime.contentTypeHeader, "", ...mime.bodyLines,
     ].join("\r\n");
 
@@ -301,7 +360,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, deliverabilityBlocked, recoveredStale, perSecond: settings.maxPerSecond, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
 }
 
 async function main() {
