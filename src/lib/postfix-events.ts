@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import { campaigns, messageEvents, messages, suppressions, systemSettings } from "@/db/schema";
 import { providerCooldowns } from "@/db/operations-schema";
@@ -6,8 +6,8 @@ import { providerCooldownEvents } from "@/db/provider-cooldown-event-schema";
 import { normalizeEmail } from "@/lib/contact-utils";
 import { emitWebhookEvent } from "@/lib/webhooks";
 import { classifyBounce } from "@/lib/bounce-classification";
-import { classifyDeliveryRestriction, providerForDelivery, SENDER_COOLDOWN_KEY, type DeliveryRestrictionScope } from "@/lib/provider";
-import { DELIVERY_SETTING_KEYS, defaultDeliverySettings } from "@/lib/delivery-settings";
+import { classifyDeliveryRestriction, providerForDelivery, SENDER_COOLDOWN_KEY, SENDER_RESTRICTION_ESCALATION_THRESHOLD, SENDER_RESTRICTION_ESCALATION_WINDOW_MS, shouldEscalateSenderRestriction, type DeliveryRestrictionScope } from "@/lib/provider";
+import { DELIVERY_SETTING_KEYS, MAX_PROVIDER_COOLDOWN_MINUTES, defaultDeliverySettings } from "@/lib/delivery-settings";
 
 const terminalStatuses = new Set(["delivered", "bounced", "failed", "cancelled"]);
 export type EventDb = Pick<typeof db, "select" | "insert" | "update">;
@@ -16,7 +16,7 @@ async function cooldownMinutes(db: EventDb) {
   const fallback = defaultDeliverySettings().providerCooldownMinutes;
   const [row] = await db.select({ value: systemSettings.value }).from(systemSettings).where(eq(systemSettings.key, DELIVERY_SETTING_KEYS.providerCooldownMinutes)).limit(1);
   const value = Number(row?.value);
-  return Number.isFinite(value) ? Math.min(1440, Math.max(1, Math.floor(value))) : fallback;
+  return Number.isFinite(value) ? Math.min(MAX_PROVIDER_COOLDOWN_MINUTES, Math.max(1, Math.floor(value))) : fallback;
 }
 
 async function sendingAccountForMessage(db: EventDb, campaignId: string) {
@@ -80,6 +80,71 @@ async function activateProviderCooldown(db: EventDb, params: {
     });
   }
 
+  // Provider-local policy responses can contain account/sender wording.
+  // Do not freeze unrelated providers on the first one. Escalate to a
+  // sender-wide cooldown only after three distinct provider keys corroborate
+  // the same sender/outbound-path signal inside the short escalation window.
+  if (cooldown && params.scope === "provider" && reason === "sender_or_outbound_path_restriction") {
+    const activeCooldowns = await db.select().from(providerCooldowns).where(and(
+      eq(providerCooldowns.sendingAccountId, sendingAccountId),
+      eq(providerCooldowns.active, true),
+    ));
+    const cutoff = now.getTime() - SENDER_RESTRICTION_ESCALATION_WINDOW_MS;
+    const recentProviders = activeCooldowns
+      .filter((row) =>
+        row.provider !== SENDER_COOLDOWN_KEY
+        && row.reason === "sender_or_outbound_path_restriction"
+        && row.detectedAt.getTime() >= cutoff
+      )
+      .map((row) => row.provider);
+    const senderAlreadyActive = activeCooldowns.some((row) => row.provider === SENDER_COOLDOWN_KEY);
+
+    if (!senderAlreadyActive && shouldEscalateSenderRestriction(recentProviders)) {
+      const corroboratingProviders = Array.from(new Set(recentProviders)).sort();
+      const [senderCooldown] = await db.insert(providerCooldowns).values({
+        sendingAccountId,
+        provider: SENDER_COOLDOWN_KEY,
+        active: true,
+        reason,
+        lastResponse: response,
+        detectedAt: now,
+        nextProbeAt,
+        updatedAt: now,
+      }).onConflictDoUpdate({
+        target: [providerCooldowns.sendingAccountId, providerCooldowns.provider],
+        set: {
+          active: true,
+          reason,
+          lastResponse: response,
+          detectedAt: now,
+          nextProbeAt,
+          clearedAt: null,
+          updatedAt: now,
+        },
+      }).returning({ id: providerCooldowns.id });
+
+      if (senderCooldown) {
+        await db.insert(providerCooldownEvents).values({
+          cooldownId: senderCooldown.id,
+          sendingAccountId,
+          provider: SENDER_COOLDOWN_KEY,
+          eventType: "detected",
+          reason,
+          response,
+          metadata: {
+            campaignId: params.campaignId,
+            scope: "sender",
+            escalated: true,
+            threshold: SENDER_RESTRICTION_ESCALATION_THRESHOLD,
+            windowMs: SENDER_RESTRICTION_ESCALATION_WINDOW_MS,
+            corroboratingProviders,
+            nextProbeAt: nextProbeAt.toISOString(),
+          },
+        });
+      }
+    }
+  }
+
   return { id: cooldown?.id || null, provider, nextProbeAt, sendingAccountId, scope: params.scope };
 }
 
@@ -123,6 +188,20 @@ async function clearCooldownByKey(db: EventDb, campaignId: string, cooldownKey: 
     nextProbeAt: null,
     updatedAt: now,
   }).where(eq(providerCooldowns.id, cooldown.id));
+
+  const heldError = `provider_cooldown:${cooldownKey}`;
+  const heldPredicate = cooldownKey === SENDER_COOLDOWN_KEY
+    ? or(eq(messages.lastError, heldError), eq(messages.lastError, "sender_cooldown"))
+    : eq(messages.lastError, heldError);
+  await db.update(messages).set({
+    nextAttemptAt: now,
+    lastError: null,
+  }).where(and(
+    eq(messages.campaignId, campaignId),
+    eq(messages.status, "ready_for_transport"),
+    heldPredicate,
+  ));
+
   await db.insert(providerCooldownEvents).values({
     cooldownId: cooldown.id,
     sendingAccountId,

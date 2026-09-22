@@ -3,7 +3,7 @@ import { db, databaseConfigured } from "@/db";
 import { systemSettings } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { canManageInfrastructure, getSession } from "@/lib/auth";
-import { DELIVERY_SETTING_KEYS, readDeliverySettings, type DeliverySettings } from "@/lib/delivery-settings";
+import { DELIVERY_SETTING_KEYS, MAX_PROVIDER_COOLDOWN_MINUTES, readDeliverySettings, type DeliverySettings } from "@/lib/delivery-settings";
 
 const numericKeys = Object.keys(DELIVERY_SETTING_KEYS) as Array<keyof DeliverySettings>;
 
@@ -34,7 +34,7 @@ export async function PATCH(request: NextRequest) {
 
   const constraints: Array<[keyof DeliverySettings, number, number]> = [
     ["maxPerSecond",1,1000],["maxRecipientsPerCampaign",0,10_000_000],["maxRollingHour",0,10_000_000],["maxRolling24h",0,100_000_000],["maxActiveQueued",100,10_000_000],
-    ["retryMaxAttempts",1,20],["retryInitialSeconds",10,86_400],["retryMaxSeconds",30,604_800],["retryBackoffMultiplier",1,10],["providerCooldownMinutes",1,1440],
+    ["retryMaxAttempts",1,20],["retryInitialSeconds",10,86_400],["retryMaxSeconds",30,604_800],["retryBackoffMultiplier",1,10],["providerCooldownMinutes",1,MAX_PROVIDER_COOLDOWN_MINUTES],
     ["reputationBounceStopRate",0,1],["reputationComplaintStopRate",0,1],["reputationMinSample",1,10_000_000],
   ];
   for (const [key,min,max] of constraints) if (next[key] < min || next[key] > max) return NextResponse.json({ error: `${key} must be between ${min} and ${max}.` }, { status: 400 });

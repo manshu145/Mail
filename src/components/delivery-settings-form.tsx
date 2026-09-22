@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import type { DeliverySettings } from "@/lib/delivery-settings";
 
 type Section = "Reputation protection" | "Sending limits" | "Retry policy";
-type Field = { key:keyof DeliverySettings; label:string; help:string; section:Section; step?:string; display?:"percent" };
+type Field = { key:keyof DeliverySettings; label:string; help:string; section:Section; step?:string; min?:string; max?:string; display?:"percent" };
 
 const fields: Field[] = [
   { key:"reputationBounceStopRate", section:"Reputation protection", label:"Pause sender at bounce rate (%)", help:"Automatically pause a sender when its 24-hour bounce rate reaches this level.", step:"0.01", display:"percent" },
   { key:"reputationComplaintStopRate", section:"Reputation protection", label:"Pause sender at complaint rate (%)", help:"Automatically pause a sender when complaint rate reaches this level.", step:"0.01", display:"percent" },
   { key:"reputationMinSample", section:"Reputation protection", label:"Minimum sample before auto-pause", help:"Reputation thresholds are ignored until at least this many messages are observed." },
-  { key:"providerCooldownMinutes", section:"Reputation protection", label:"Provider cooldown / probe interval (minutes)", help:"When Gmail, Yahoo, Microsoft or another provider applies temporary pressure, NexiMail holds that provider and probes again after this interval." },
+  { key:"providerCooldownMinutes", section:"Reputation protection", label:"Provider cooldown / probe interval (minutes)", help:"When a provider applies temporary pressure, NexiMail holds only that provider and probes again after this interval. Allowed range: 1–60 minutes.", min:"1", max:"60" },
 
   { key:"maxPerSecond", section:"Sending limits", label:"Maximum sends per second", help:"Global release speed. Lower values are gentler; higher values require stronger reputation and capacity." },
   { key:"maxRecipientsPerCampaign", section:"Sending limits", label:"Recipients per campaign", help:"0 = unlimited. Use a value only when you want a hard campaign-size ceiling." },
@@ -71,7 +71,7 @@ export function DeliverySettingsForm({ initial, editable }: { initial: DeliveryS
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {fields.filter((field)=>field.section===section.name).map((field)=><label key={field.key} className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4">
           <span className="text-xs font-black">{field.label}</span>
-          <input disabled={!editable||busy} type="number" step={field.step||"1"} value={values[field.key]} onChange={(e)=>setValues((v)=>({...v,[field.key]:e.target.value}))} className="mt-2 w-full min-w-0 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm font-bold outline-none focus:border-violet-500 disabled:opacity-60"/>
+          <input disabled={!editable||busy} type="number" step={field.step||"1"} min={field.min} max={field.max} value={values[field.key]} onChange={(e)=>setValues((v)=>({...v,[field.key]:e.target.value}))} className="mt-2 w-full min-w-0 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm font-bold outline-none focus:border-violet-500 disabled:opacity-60"/>
           <span className="mt-2 block text-[11px] leading-5 text-[var(--muted)]">{field.help}</span>
         </label>)}
       </div>
