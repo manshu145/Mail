@@ -51,7 +51,7 @@ async function run(){
     const expected=row.dkimPublicKey?normalizeDkim(`p=${row.dkimPublicKey}`):null;
     const actual=normalizeDkim(dkim);
     const dkimOk=Boolean(expected&&/v=dkim1/i.test(dkim)&&actual.includes(expected));
-    const dmarcOk=/v=dmarc1/i.test(dmarc);
+    const dmarcOk=/v=dmarc1/i.test(dmarc)&&/(?:^|;)\s*p\s*=\s*(none|quarantine|reject)(?:\s*;|\s*$)/i.test(dmarc);
     const bounceSpfOk=Boolean(bounceDomain&&/v=spf1/i.test(bounceSpf)&&outboundIps.length>0&&outboundIps.some(ip=>spfAuthorizesIp(bounceSpf,ip)));
     const normalizedMta=mtaHostname.replace(/\.$/,"");
     const bounceMxOk=Boolean(bounceDomain&&normalizedMta&&bounceMx.some(record=>record.exchange.toLowerCase().replace(/\.$/,"")===normalizedMta));
