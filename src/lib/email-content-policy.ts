@@ -23,13 +23,13 @@ export function emailContentBlockReason(input: EmailContentInput): string | null
   const text = (input.text || "").replace(/\s+/g, " ").trim();
   const visibleHtml = plainText(html);
 
-  if (!text && !visibleHtml) return "body_missing";
   if (/<\s*(script|iframe|object|embed|form)\b/i.test(html)) return "unsafe_html_element";
   if (/\b(?:href|src)\s*=\s*["']\s*javascript:/i.test(html)) return "unsafe_link_scheme";
 
   const hasImage = /<\s*img\b/i.test(html);
   const substantiveText = Math.max(text.length, visibleHtml.length);
   if (hasImage && substantiveText < 40) return "image_only_content";
+  if (!text && !visibleHtml) return "body_missing";
 
   return null;
 }
