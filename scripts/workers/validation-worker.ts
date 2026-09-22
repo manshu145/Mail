@@ -3,12 +3,12 @@ import { db, pool } from "../../src/db";
 import { contacts, suppressions, systemSettings, validationJobs, validationResults } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
-import { isDirectGmailAddress, type ValidationVerdict } from "../../src/lib/validation-policy";
+import { type ValidationVerdict } from "../../src/lib/validation-policy";
 import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
 
 const intervalMs = Math.max(15000, Number(process.env.VALIDATION_INTERVAL_MS || "30000"));
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_API_TIMEOUT_MS || "10000"));
-const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v1/verify-email").trim();
+const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v2/email-validation/verify").trim();
 
 type ExistingResult = {
   contact_id: string;
@@ -21,19 +21,17 @@ async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "validation", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
 }
 
-function classifySupersendMessage(message: string): ValidationVerdict {
-  const normalized = message.trim().toLowerCase();
-  if (!normalized) return { status: "unknown", detail: "supersend_empty_message" };
+function classifySupersendPayload(body: unknown): ValidationVerdict {
+  const data = body && typeof body === "object" && "data" in body
+    ? (body as { data?: unknown }).data
+    : null;
+  if (!data || typeof data !== "object") return { status: "unknown", detail: "supersend_v2_missing_data" };
 
-  if (/(invalid|undeliverable|does not exist|not exist|user unknown|mailbox not found|rejected)/i.test(normalized)) {
-    return { status: "invalid", detail: `supersend:${message.slice(0, 300)}` };
-  }
-
-  if (/(valid|deliverable|verified|exists|safe to send)/i.test(normalized)) {
-    return { status: "valid", detail: `supersend:${message.slice(0, 300)}` };
-  }
-
-  return { status: "unknown", detail: `supersend:${message.slice(0, 300)}` };
+  const record = data as Record<string, unknown>;
+  if (record.is_disallowed === true) return { status: "invalid", detail: "supersend_v2_disallowed" };
+  if (record.valid === true) return { status: "valid", detail: "supersend_v2_valid" };
+  if (record.valid === false) return { status: "invalid", detail: "supersend_v2_invalid" };
+  return { status: "unknown", detail: "supersend_v2_ambiguous" };
 }
 
 async function configuredSupersendApiKey() {
@@ -43,35 +41,32 @@ async function configuredSupersendApiKey() {
 }
 
 async function verifyWithSupersend(email: string, apiKey: string): Promise<ValidationVerdict> {
-  if (!isDirectGmailAddress(email)) return { status: "unknown", detail: "gmail_scope_only" };
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const url = new URL(supersendEndpoint);
-    url.searchParams.set("email", email);
-    url.searchParams.set("key", apiKey);
-
-    const response = await fetch(url, {
-      method: "GET",
+    const response = await fetch(supersendEndpoint, {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
       },
+      body: JSON.stringify({ email }),
       signal: controller.signal,
     });
 
-    const body = await response.json().catch(() => null) as { message?: unknown } | null;
-    const message = typeof body?.message === "string" ? body.message : "";
+    const body = await response.json().catch(() => null) as unknown;
 
     if (!response.ok) {
+      const detail = body && typeof body === "object"
+        ? JSON.stringify(body).slice(0, 240)
+        : "";
       return {
-        status: response.status >= 500 || response.status === 429 ? "unknown" : "error",
-        detail: `supersend_http_${response.status}:${message.slice(0, 240)}`,
+        status: response.status === 402 ? "error" : response.status >= 500 || response.status === 429 ? "unknown" : "error",
+        detail: `supersend_http_${response.status}:${detail}`,
       };
     }
 
-    return classifySupersendMessage(message);
+    return classifySupersendPayload(body);
   } catch (error) {
     return {
       status: "unknown",
@@ -111,7 +106,6 @@ async function contactsForJob(scope: string) {
       where s.job_id=$1
         and c.status='active'
         and c.validation_status in ('pending','unknown','error')
-        and lower(c.normalized_email) ~ '@(gmail|googlemail)\\.com$'
       order by c.id
     `, [importId]);
     const ids = result.rows.map((row) => row.id);
@@ -151,7 +145,7 @@ async function addInvalidSuppression(email: string, contactId: string, detail: s
     normalizedEmail: normalizeEmail(email),
     contactId,
     reason: "invalid",
-    source: "gmail_validation",
+    source: "email_validation",
     note: detail,
   }).onConflictDoNothing({ target: suppressions.normalizedEmail });
 }
@@ -260,7 +254,7 @@ async function runWithWorkerLock() {
 }
 
 async function main() {
-  console.log("[validation-worker] started; optional Gmail validation via Supersend API");
+  console.log("[validation-worker] started; mailbox validation via SuperSend V2 API");
   while (true) {
     try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
