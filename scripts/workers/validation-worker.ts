@@ -3,12 +3,14 @@ import { db, pool } from "../../src/db";
 import { contacts, suppressions, systemSettings, validationJobs, validationResults } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
-import { type ValidationVerdict } from "../../src/lib/validation-policy";
+import { isDirectGmailAddress, type ValidationVerdict } from "../../src/lib/validation-policy";
+import { validateMailboxInternally } from "../../src/lib/mailbox-validator";
 import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
 
 const intervalMs = Math.max(15000, Number(process.env.VALIDATION_INTERVAL_MS || "30000"));
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_API_TIMEOUT_MS || "10000"));
 const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v2/email-validation/verify").trim();
+const supersendFallbackEnabled = process.env.SUPERSEND_FALLBACK_ENABLED === "true";
 
 type ExistingResult = {
   contact_id: string;
@@ -190,15 +192,11 @@ async function runJob() {
   }
   const job = await selectWorkJob();
   if (!job) {
-    await heartbeat({ state: "idle", provider: "supersend", automaticValidation: false });
+    await heartbeat({ state: "idle", provider: "internal_smtp", supersendFallbackEnabled });
     return;
   }
 
-  const apiKey = await configuredSupersendApiKey();
-  if (!apiKey) {
-    await heartbeat({ state: "waiting_provider_key", provider: "supersend", jobId: job.id, scope: job.scope });
-    return;
-  }
+  const apiKey = supersendFallbackEnabled ? await configuredSupersendApiKey() : null;
 
   const resumed = job.status === "processing";
   if (!resumed) await db.update(validationJobs).set({ status: "processing" }).where(eq(validationJobs.id, job.id));
@@ -222,7 +220,22 @@ async function runJob() {
       await heartbeat({ state: "paused", jobId: job.id, scope: job.scope, processed, total, remaining: total - processed });
       return;
     }
-    const result = await verifyWithSupersend(contact.normalizedEmail, apiKey);
+    let result = await validateMailboxInternally(contact.normalizedEmail, timeoutMs);
+
+    if (
+      (result.status === "unknown" || result.status === "error") &&
+      supersendFallbackEnabled &&
+      apiKey &&
+      isDirectGmailAddress(contact.normalizedEmail)
+    ) {
+      const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey);
+      if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
+        result = fallback;
+      } else {
+        result = { status: result.status, detail: `${result.detail};fallback:${fallback.detail}` };
+      }
+    }
+
     await db.insert(validationResults).values({ jobId: job.id, contactId: contact.id, email: contact.email, status: result.status, detail: result.detail });
     await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
     if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
@@ -251,7 +264,7 @@ async function runWithWorkerLock() {
 }
 
 async function main() {
-  console.log("[validation-worker] started; mailbox validation via SuperSend V2 API");
+  console.log("[validation-worker] started; internal SMTP mailbox validation primary; SuperSend optional fallback");
   while (true) {
     try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
