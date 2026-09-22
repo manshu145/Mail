@@ -23,11 +23,11 @@ test("ambiguous negative response remains unknown", () => {
 });
 
 
-test("only verified recipients are eligible for campaign sending", () => {
+test("unfinished and invalid validation block sending while inconclusive results remain allowed", () => {
   assert.equal(validationAllowsSend("person@gmail.com", "accepted"), true);
   assert.equal(validationAllowsSend("person@example.com", "valid"), true);
   assert.equal(validationAllowsSend("person@gmail.com", "pending"), false);
-  assert.equal(validationAllowsSend("person@googlemail.com", "unknown"), false);
-  assert.equal(validationAllowsSend("person@example.com", "error"), false);
+  assert.equal(validationAllowsSend("person@googlemail.com", "unknown"), true);
+  assert.equal(validationAllowsSend("person@example.com", "error"), true);
   assert.equal(validationAllowsSend("person@example.com", "invalid"), false);
 });
