@@ -6,7 +6,7 @@ import { providerCooldownEvents } from "@/db/provider-cooldown-event-schema";
 import { normalizeEmail } from "@/lib/contact-utils";
 import { emitWebhookEvent } from "@/lib/webhooks";
 import { classifyBounce } from "@/lib/bounce-classification";
-import { classifyDeliveryRestriction, providerForDelivery, SENDER_COOLDOWN_KEY, SENDER_RESTRICTION_ESCALATION_THRESHOLD, SENDER_RESTRICTION_ESCALATION_WINDOW_MS, shouldEscalateSenderRestriction, type DeliveryRestrictionScope } from "@/lib/provider";
+import { classifyDeliveryRestriction, providerForDelivery, SENDER_COOLDOWN_KEY, type DeliveryRestrictionScope } from "@/lib/provider";
 import { DELIVERY_SETTING_KEYS, MAX_PROVIDER_COOLDOWN_MINUTES, defaultDeliverySettings } from "@/lib/delivery-settings";
 
 const terminalStatuses = new Set(["delivered", "bounced", "failed", "cancelled"]);
@@ -80,70 +80,9 @@ async function activateProviderCooldown(db: EventDb, params: {
     });
   }
 
-  // Provider-local policy responses can contain account/sender wording.
-  // Do not freeze unrelated providers on the first one. Escalate to a
-  // sender-wide cooldown only after three distinct provider keys corroborate
-  // the same sender/outbound-path signal inside the short escalation window.
-  if (cooldown && params.scope === "provider" && reason === "sender_or_outbound_path_restriction") {
-    const activeCooldowns = await db.select().from(providerCooldowns).where(and(
-      eq(providerCooldowns.sendingAccountId, sendingAccountId),
-      eq(providerCooldowns.active, true),
-    ));
-    const cutoff = now.getTime() - SENDER_RESTRICTION_ESCALATION_WINDOW_MS;
-    const recentProviders = activeCooldowns
-      .filter((row) =>
-        row.provider !== SENDER_COOLDOWN_KEY
-        && row.reason === "sender_or_outbound_path_restriction"
-        && row.detectedAt.getTime() >= cutoff
-      )
-      .map((row) => row.provider);
-    const senderAlreadyActive = activeCooldowns.some((row) => row.provider === SENDER_COOLDOWN_KEY);
-
-    if (!senderAlreadyActive && shouldEscalateSenderRestriction(recentProviders)) {
-      const corroboratingProviders = Array.from(new Set(recentProviders)).sort();
-      const [senderCooldown] = await db.insert(providerCooldowns).values({
-        sendingAccountId,
-        provider: SENDER_COOLDOWN_KEY,
-        active: true,
-        reason,
-        lastResponse: response,
-        detectedAt: now,
-        nextProbeAt,
-        updatedAt: now,
-      }).onConflictDoUpdate({
-        target: [providerCooldowns.sendingAccountId, providerCooldowns.provider],
-        set: {
-          active: true,
-          reason,
-          lastResponse: response,
-          detectedAt: now,
-          nextProbeAt,
-          clearedAt: null,
-          updatedAt: now,
-        },
-      }).returning({ id: providerCooldowns.id });
-
-      if (senderCooldown) {
-        await db.insert(providerCooldownEvents).values({
-          cooldownId: senderCooldown.id,
-          sendingAccountId,
-          provider: SENDER_COOLDOWN_KEY,
-          eventType: "detected",
-          reason,
-          response,
-          metadata: {
-            campaignId: params.campaignId,
-            scope: "sender",
-            escalated: true,
-            threshold: SENDER_RESTRICTION_ESCALATION_THRESHOLD,
-            windowMs: SENDER_RESTRICTION_ESCALATION_WINDOW_MS,
-            corroboratingProviders,
-            nextProbeAt: nextProbeAt.toISOString(),
-          },
-        });
-      }
-    }
-  }
+  // Provider-scoped restrictions remain provider-scoped. Global sender cooldowns
+  // are created only for SMTP responses that explicitly identify the local
+  // sending account/outbound SMTP path as suspended or blocked.
 
   return { id: cooldown?.id || null, provider, nextProbeAt, sendingAccountId, scope: params.scope };
 }

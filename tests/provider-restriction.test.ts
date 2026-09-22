@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyDeliveryRestriction, providerForEmail, SENDER_COOLDOWN_KEY, shouldEscalateSenderRestriction } from "../src/lib/provider";
+import { classifyDeliveryRestriction, providerForEmail, SENDER_COOLDOWN_KEY } from "../src/lib/provider";
 
 test("generic SMTP 4.x does not create provider cooldown", () => {
   assert.deepEqual(
@@ -44,9 +44,9 @@ test("explicit local sending-account suspension still creates sender cooldown", 
   assert.equal(result.reason, "sender_or_outbound_path_restriction");
 });
 
-test("sender-wide cooldown requires three distinct corroborating providers", () => {
-  assert.equal(shouldEscalateSenderRestriction(["yahoo", "yahoo", "domain:example.com"]), false);
-  assert.equal(shouldEscalateSenderRestriction(["yahoo", "domain:example.com", "domain:example.net"]), true);
+test("provider-local policy signals never become a global sender cooldown", () => {
+  const result=classifyDeliveryRestriction("550 5.7.1 An unusual amount of content policy violations originating from your account has been detected (JFE050005)", "4.7.1");
+  assert.equal(result.scope, "provider");
 });
 
 test("Zoho mailbox domains map to Zoho provider", () => {

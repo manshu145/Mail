@@ -11,20 +11,6 @@ export type DeliveryRestriction = {
 };
 
 export const SENDER_COOLDOWN_KEY = "__sender__";
-export const SENDER_RESTRICTION_ESCALATION_THRESHOLD = 3;
-export const SENDER_RESTRICTION_ESCALATION_WINDOW_MS = 10 * 60_000;
-
-export function shouldEscalateSenderRestriction(
-  providers: Iterable<string>,
-  threshold = SENDER_RESTRICTION_ESCALATION_THRESHOLD,
-) {
-  const distinct = new Set(
-    Array.from(providers)
-      .map((provider) => String(provider || "").trim())
-      .filter((provider) => provider && provider !== SENDER_COOLDOWN_KEY),
-  );
-  return distinct.size >= threshold;
-}
 
 export function providerForEmail(email: string): MailboxProvider {
   const domain = String(email || "").trim().toLowerCase().split("@").pop() || "unknown";
@@ -94,10 +80,9 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
   }
 
   // Provider-local policy systems sometimes use sender/account wording even
-  // though the restriction applies only at that receiving network. Start
-  // those responses at provider scope. The event pipeline escalates to a
-  // sender-wide cooldown only after the same signal is corroborated by
-  // multiple distinct providers in a short window.
+  // though the restriction applies only at that receiving network. Keep
+  // these responses provider-scoped; they must never freeze unrelated
+  // recipients or the entire sending account.
   const providerReportedSenderRestriction =
     /jfe050005|unusual amount of content policy violations originating from your account/i.test(text);
   if (providerReportedSenderRestriction) {
