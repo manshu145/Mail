@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, databaseConfigured, pool } from "@/db";
 import { contacts, importJobs, systemSettings, validationJobs } from "@/db/schema";
 import { getSession } from "@/lib/auth";
@@ -20,12 +20,6 @@ async function activeJob() {
 async function setPaused(paused: boolean) {
   await db.insert(systemSettings).values({ key: "validation_paused", value: paused })
     .onConflictDoUpdate({ target: systemSettings.key, set: { value: paused, updatedAt: new Date() } });
-}
-
-async function validationProviderConfigured() {
-  const [row] = await db.select({ value: systemSettings.value }).from(systemSettings)
-    .where(eq(systemSettings.key, "validation.supersend_api_key")).limit(1);
-  return Boolean(decryptWorkspaceSecret(row?.value) || String(process.env.SUPERSEND_API_KEY || "").trim());
 }
 
 export async function POST(request: NextRequest) {
@@ -51,10 +45,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, paused: false });
   }
 
-  if (!(await validationProviderConfigured())) {
-    return NextResponse.json({ error: "Configure the Supersend API key in Validation before starting a validation job." }, { status: 409 });
-  }
-
   const active = await activeJob();
   if (active) return NextResponse.json({
     error: "A validation job is already active. Pause/resume that job or wait for it to finish.",
@@ -65,11 +55,11 @@ export async function POST(request: NextRequest) {
 
   if (body.action === "start_pending") {
     const [row] = await db.select({ value: sql<number>`count(*)::int` }).from(contacts)
-      .where(and(eq(contacts.status, "active"), gmailSql, unresolved));
+      .where(and(eq(contacts.status, "active"), unresolved));
     const total = row?.value ?? 0;
-    if (!total) return NextResponse.json({ error: "No unresolved Gmail / Googlemail contacts need validation." }, { status: 409 });
-    const [job] = await db.insert(validationJobs).values({ scope: "gmail:unresolved", totalRows: total }).returning({ id: validationJobs.id });
-    await audit("validation.queued", session, "validation_job", job.id, { scope: "gmail:unresolved", total });
+    if (!total) return NextResponse.json({ error: "No unresolved contacts need validation." }, { status: 409 });
+    const [job] = await db.insert(validationJobs).values({ scope: "pending", totalRows: total }).returning({ id: validationJobs.id });
+    await audit("validation.queued", session, "validation_job", job.id, { scope: "pending", total });
     return NextResponse.json({ ok: true, id: job.id, total });
   }
 
@@ -86,10 +76,9 @@ export async function POST(request: NextRequest) {
       where s.job_id=$1
         and c.status='active'
         and c.validation_status in ('pending','unknown','error')
-        and lower(c.normalized_email) ~ '@(gmail|googlemail)\\.com$'
     `, [importId]);
     const total = Number(result.rows[0]?.total || 0);
-    if (!total) return NextResponse.json({ error: "This import has no unresolved Gmail contacts to validate." }, { status: 409 });
+    if (!total) return NextResponse.json({ error: "This import has no unresolved contacts to validate." }, { status: 409 });
 
     const [job] = await db.insert(validationJobs).values({ scope: `import:${importId}`, totalRows: total }).returning({ id: validationJobs.id });
     await audit("validation.queued", session, "validation_job", job.id, { scope: `import:${importId}`, total });
@@ -97,8 +86,8 @@ export async function POST(request: NextRequest) {
   }
 
   const email = String(body.email || "").trim().toLowerCase();
-  if (!isValidEmail(email) || !/@(gmail|googlemail)\.com$/i.test(email)) {
-    return NextResponse.json({ error: "Enter a Gmail or Googlemail address that already exists in Contacts." }, { status: 400 });
+  if (!isValidEmail(email)) {
+    return NextResponse.json({ error: "Enter a valid email address that already exists in Contacts." }, { status: 400 });
   }
   const normalized = normalizeEmail(email);
   const [contact] = await db.select({ id: contacts.id, email: contacts.email, status: contacts.status, validationStatus: contacts.validationStatus })
