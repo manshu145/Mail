@@ -129,16 +129,26 @@ async function releaseProviderCooldown(id: string, cooldownKey: string | null, r
 }
 
 type Claimed = { id: string; attempt_count: number };
-async function claimMessages(): Promise<Claimed[]> {
+async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> {
   const result = await pool.query<Claimed>(`
-    with picked as (
-      select m.id
+    with eligible as (
+      select
+        m.id,
+        m.campaign_id,
+        m.queued_at,
+        coalesce(c.started_at,c.created_at) as campaign_started_at,
+        row_number() over(partition by m.campaign_id order by m.queued_at asc,m.id asc) as campaign_rank
       from messages m
       join campaigns c on c.id=m.campaign_id
       where c.status='sending'
         and m.status in ('ready_for_transport','deferred')
         and (m.next_attempt_at is null or m.next_attempt_at <= now())
-      order by m.queued_at asc
+    ),
+    picked as (
+      select e.id
+      from eligible e
+      join messages m on m.id=e.id
+      order by ((e.campaign_rank-1)/$2::int) asc,e.campaign_started_at asc,e.campaign_rank asc
       for update of m skip locked
       limit $1
     )
@@ -146,7 +156,7 @@ async function claimMessages(): Promise<Claimed[]> {
     set status='sending',last_attempt_at=now(),attempt_count=m.attempt_count+1,last_error=null
     from picked
     where m.id=picked.id
-    returning m.id,m.attempt_count`, [claimBatch]);
+    returning m.id,m.attempt_count`, [claimBatch,campaignBurstPerRound]);
   return result.rows;
 }
 async function markDeferred(id: string, attempt: number, error: unknown, settings: DeliverySettings) {
@@ -209,7 +219,7 @@ async function runOnce() {
   }
   const settings = await readDeliverySettings();
   const delayMs = Math.ceil(1000 / settings.maxPerSecond);
-  const claimed = await claimMessages();
+  const claimed = await claimMessages(settings.campaignBurstPerRound);
   let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
   const templateAttachmentCache = new Map<string, CampaignAttachment[]>();
@@ -350,7 +360,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, pollIntervalMs: intervalMs, claimBatch, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "round_robin", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
 }
 
 async function main() {
