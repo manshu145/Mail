@@ -5,6 +5,7 @@ import { contacts, importJobs, systemSettings, validationJobs } from "@/db/schem
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { isValidEmail, normalizeEmail } from "@/lib/contact-utils";
+import { DEFAULT_VALIDATION_MODE, normalizeValidationMode, VALIDATION_MODE_KEY, validationModeNeedsSupersend } from "@/lib/validation-provider";
 
 const unresolved = inArray(contacts.validationStatus, ["pending","unknown","error"]);
 
@@ -18,6 +19,19 @@ async function activeJob() {
 async function setPaused(paused: boolean) {
   await db.insert(systemSettings).values({ key: "validation_paused", value: paused })
     .onConflictDoUpdate({ target: systemSettings.key, set: { value: paused, updatedAt: new Date() } });
+}
+
+async function selectedValidationMode() {
+  const [row] = await db.select({ value: systemSettings.value }).from(systemSettings)
+    .where(eq(systemSettings.key, VALIDATION_MODE_KEY)).limit(1);
+  const mode = normalizeValidationMode(row?.value ?? DEFAULT_VALIDATION_MODE);
+  if (validationModeNeedsSupersend(mode)) {
+    const [keyRow] = await db.select({ value: systemSettings.value }).from(systemSettings)
+      .where(eq(systemSettings.key, "validation.supersend_api_key")).limit(1);
+    const configured = Boolean(keyRow?.value) || Boolean(String(process.env.SUPERSEND_API_KEY || "").trim());
+    if (!configured) throw new Error("SuperSend API key is required for the selected validation mode.");
+  }
+  return mode;
 }
 
 export async function POST(request: NextRequest) {
@@ -51,13 +65,20 @@ export async function POST(request: NextRequest) {
 
   await setPaused(false);
 
+  let validationMode;
+  try {
+    validationMode = await selectedValidationMode();
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Validation provider configuration is unavailable." }, { status: 409 });
+  }
+
   if (body.action === "start_pending") {
     const [row] = await db.select({ value: sql<number>`count(*)::int` }).from(contacts)
       .where(and(eq(contacts.status, "active"), unresolved));
     const total = row?.value ?? 0;
     if (!total) return NextResponse.json({ error: "No unresolved contacts need validation." }, { status: 409 });
-    const [job] = await db.insert(validationJobs).values({ scope: "pending", totalRows: total }).returning({ id: validationJobs.id });
-    await audit("validation.queued", session, "validation_job", job.id, { scope: "pending", total });
+    const [job] = await db.insert(validationJobs).values({ scope: "pending", validationMode, totalRows: total }).returning({ id: validationJobs.id });
+    await audit("validation.queued", session, "validation_job", job.id, { scope: "pending", total, validationMode });
     return NextResponse.json({ ok: true, id: job.id, total });
   }
 
@@ -78,8 +99,8 @@ export async function POST(request: NextRequest) {
     const total = Number(result.rows[0]?.total || 0);
     if (!total) return NextResponse.json({ error: "This import has no unresolved contacts to validate." }, { status: 409 });
 
-    const [job] = await db.insert(validationJobs).values({ scope: `import:${importId}`, totalRows: total }).returning({ id: validationJobs.id });
-    await audit("validation.queued", session, "validation_job", job.id, { scope: `import:${importId}`, total });
+    const [job] = await db.insert(validationJobs).values({ scope: `import:${importId}`, validationMode, totalRows: total }).returning({ id: validationJobs.id });
+    await audit("validation.queued", session, "validation_job", job.id, { scope: `import:${importId}`, total, validationMode });
     return NextResponse.json({ ok: true, id: job.id, total });
   }
 
@@ -105,7 +126,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "This contact already has an active validation check.", activeJob: existingJob }, { status: 409 });
   }
 
-  const [job] = await db.insert(validationJobs).values({ scope, totalRows: 1 }).returning({ id: validationJobs.id });
-  await audit("validation.queued", session, "validation_job", job.id, { scope: "single_contact", contactId: contact.id, email: contact.email });
+  const [job] = await db.insert(validationJobs).values({ scope, validationMode, totalRows: 1 }).returning({ id: validationJobs.id });
+  await audit("validation.queued", session, "validation_job", job.id, { scope: "single_contact", contactId: contact.id, email: contact.email, validationMode });
   return NextResponse.json({ ok: true, id: job.id, total: 1 });
 }
