@@ -425,7 +425,6 @@ async function runJob() {
       basePerSecond: validationMode === "supersend" ? null : validationBasePerSecond,
       providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
       globalStartGapMs: validationMode === "supersend" ? 250 : validationGlobalStartGapMs,
-      globalStartGapMs: validationMode === "supersend" ? 250 : validationGlobalStartGapMs,
       providerRates: validationMode === "supersend" ? {} : Object.fromEntries(providerRatePerSecond),
       providerBackoffMs: validationProviderBackoffMs,
       providerHoldMs: validationProviderHoldMs,
