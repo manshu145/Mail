@@ -82,6 +82,21 @@ for service in "${build_services[@]}"; do
 done
 
 # Build first. Existing processes continue serving until all builds succeed.
+# Guard against VPS disk exhaustion from accumulated BuildKit cache. Pruning the
+# build cache does not remove running containers, named volumes, or live data.
+free_kb=$(df -Pk / | awk 'NR==2 {print $4}')
+min_free_kb=$((3 * 1024 * 1024))
+if [[ "${free_kb:-0}" -lt "$min_free_kb" ]]; then
+  echo "[deploy] Low disk space before build: $((free_kb / 1024)) MB free. Pruning Docker build cache."
+  docker builder prune -af >/dev/null || true
+  docker image prune -f >/dev/null || true
+  free_kb=$(df -Pk / | awk 'NR==2 {print $4}')
+fi
+[[ "${free_kb:-0}" -ge "$min_free_kb" ]] || {
+  echo "At least 3 GB free disk space is required before building; currently $((free_kb / 1024)) MB free."
+  echo "Named Docker volumes were not touched. Free disk space manually, then retry."
+  exit 1
+}
 "${dc[@]}" build "${build_services[@]}"
 "${old_dc[@]}" exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$BACKUP_DIR/database.dump"
 [[ -s "$BACKUP_DIR/database.dump" ]] || { echo 'Database backup is empty; stopping.'; exit 1; }
