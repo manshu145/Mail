@@ -37,6 +37,7 @@ export async function runProviderAwarePool<T>(
     providerStartGapMs: number;
     backoffDelayMs: number;
     shouldStop?: () => Promise<boolean>;
+    shouldHoldProvider?: (verdict: ValidationVerdict) => boolean;
     sleep?: (ms: number) => Promise<void>;
     now?: () => number;
   },
@@ -61,6 +62,7 @@ export async function runProviderAwarePool<T>(
   }
 
   const providerNextStart = new Map<string, number>();
+  const heldProviders = new Set<string>();
   let cursor = 0;
   let completed = 0;
   let stopped = false;
@@ -81,6 +83,7 @@ export async function runProviderAwarePool<T>(
       const lane = lanes[index];
 
       for (const item of lane.items) {
+        if (heldProviders.has(lane.provider)) break;
         if (options.shouldStop && await options.shouldStop()) {
           stopped = true;
           return;
@@ -89,6 +92,11 @@ export async function runProviderAwarePool<T>(
         await reserveProviderStart(lane.provider);
         const verdict = await task(item);
         completed++;
+
+        if (options.shouldHoldProvider?.(verdict)) {
+          heldProviders.add(lane.provider);
+          continue;
+        }
 
         if (validationNeedsBackoff(verdict)) {
           const until = now() + Math.max(0, options.backoffDelayMs);
@@ -105,5 +113,6 @@ export async function runProviderAwarePool<T>(
     providers: byProvider.size,
     lanes: lanes.length,
     concurrency: workerCount,
+    heldProviders: [...heldProviders],
   };
 }
