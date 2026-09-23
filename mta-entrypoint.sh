@@ -60,9 +60,14 @@ postconf -e "disable_vrfy_command = yes"
 postconf -e "smtpd_helo_required = yes"
 postconf -e "message_size_limit = ${MTA_MESSAGE_SIZE_LIMIT}"
 postconf -e "maillog_file = /var/log/mta/mail.log"
+# Opportunistic outbound TLS is required for modern bulk-sender deliverability.
+# Prefer TLS whenever the recipient MX advertises STARTTLS, while retaining
+# standards-compatible fallback for MX hosts that do not support it.
 postconf -e "smtp_tls_security_level = may"
-postconf -e "smtp_tls_loglevel = 0"
+postconf -e "smtp_tls_loglevel = 1"
 postconf -e "smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt"
+postconf -e "smtp_tls_session_cache_database = btree:/var/lib/postfix/smtp_scache"
+postconf -e "smtp_tls_note_starttls_offer = yes"
 
 if [ -s "${TLS_DIR}/fullchain.pem" ] && [ -s "${TLS_DIR}/privkey.pem" ]; then
   postconf -e "smtpd_tls_cert_file = ${TLS_DIR}/fullchain.pem"
