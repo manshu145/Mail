@@ -48,7 +48,11 @@ async function run(){
     const normalizedMta=mtaHostname.replace(/\.$/,"");
     const bounceMxOk=Boolean(bounceDomain&&normalizedMta&&bounceMx.some(record=>record.exchange.toLowerCase().replace(/\.$/,"")===normalizedMta));
     const bounceStatus=!bounceDomain?"legacy":bounceSpfOk&&bounceMxOk?"ready":"warning";
-    const nextStatus=row.status==="disabled"?"disabled":spfOk&&dkimOk&&dmarcOk?"ready":"warning";
+    // When VERP/bounce tracking is configured, SPF is evaluated against the
+    // envelope-from bounce domain. Do not advertise a domain as send-ready
+    // unless that bounce domain also authorizes this IP and routes back here.
+    const bounceReady=!bounceDomain||bounceStatus==="ready";
+    const nextStatus=row.status==="disabled"?"disabled":spfOk&&dkimOk&&dmarcOk&&bounceReady?"ready":"warning";
     await db.update(sendingDomains).set({spfOk,dkimOk,dmarcOk,status:nextStatus,bounceSpfOk,bounceMxOk,bounceStatus,lastCheckedAt:new Date(),updatedAt:new Date()}).where(eq(sendingDomains.id,row.id));
   }
   await heartbeat({state:"online",checked:domains.length,spfIdentityReady:outboundIps.length>0,bounceDomains:domains.filter(row=>Boolean(row.bounceDomain)).length});
