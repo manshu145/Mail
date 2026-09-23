@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 type ImportOption = { id: string; filename: string; unresolved: number };
+type ValidationMode = "internal" | "hybrid" | "supersend";
 
 export function ValidationControls({
   paused,
@@ -14,7 +15,7 @@ export function ValidationControls({
   engine,
 }: {
   paused: boolean;
-  activeJob: { id: string; scope: string; status: string; processedRows: number; totalRows: number } | null;
+  activeJob: { id: string; scope: string; status: string; validationMode: string; processedRows: number; totalRows: number } | null;
   unresolved: number;
   imports: ImportOption[];
   engine: {
@@ -24,6 +25,7 @@ export function ValidationControls({
     providerStartGapMs:number;
     providerBackoffMs:number;
     hardTimeoutMs:number;
+    validationMode:string;
     validationsPerMinute:number;
     lastSeenAt:string|null;
   } | null;
@@ -41,6 +43,8 @@ export function ValidationControls({
   const [providerKey, setProviderKey] = useState("");
   const [providerBusy, setProviderBusy] = useState(false);
   const [providerMessage, setProviderMessage] = useState("");
+  const [providerMode, setProviderMode] = useState<ValidationMode>("internal");
+  const [providerModeBusy, setProviderModeBusy] = useState(false);
 
   async function loadProvider() {
     try {
@@ -50,12 +54,14 @@ export function ValidationControls({
         hint?: string | null;
         source?: "workspace" | "environment" | null;
         canManage?: boolean;
+        mode?: ValidationMode;
       };
       if (!response.ok) return;
       setProviderConfigured(Boolean(data.configured));
       setProviderHint(data.hint || null);
       setProviderSource(data.source || null);
       setProviderManage(Boolean(data.canManage));
+      setProviderMode(data.mode || "internal");
     } catch {}
   }
 
@@ -80,6 +86,31 @@ export function ValidationControls({
     } catch {
       setProviderMessage("Could not reach NexiMail.");
     } finally { setProviderBusy(false); }
+  }
+
+  async function saveProviderMode(mode: ValidationMode) {
+    if (!providerManage || providerModeBusy) return;
+    if (mode !== "internal" && !providerConfigured) {
+      setProviderMessage("Add a SuperSend API key before selecting this mode.");
+      return;
+    }
+    setProviderModeBusy(true); setProviderMessage("");
+    try {
+      const response = await fetch("/api/validation/provider", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      const data = await response.json().catch(() => ({})) as { error?: string; mode?: ValidationMode };
+      if (!response.ok) { setProviderMessage(data.error || "Could not change validation mode."); return; }
+      setProviderMode(data.mode || mode);
+      setProviderMessage("Validation mode saved. New jobs will use this method.");
+      router.refresh();
+    } catch {
+      setProviderMessage("Could not reach NexiMail.");
+    } finally {
+      setProviderModeBusy(false);
+    }
   }
 
   async function removeProviderKey() {
@@ -140,7 +171,7 @@ export function ValidationControls({
 
       {activeJob ? <div className="border-b border-[var(--border)] bg-blue-500/[0.035] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500"/><b className="text-xs">Active validation job</b><span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-black uppercase text-blue-700 dark:text-blue-300">{paused ? "paused" : activeJob.status}</span></div><div className="mt-1 truncate font-mono text-[11px] text-[var(--muted)]">{activeJob.scope} · {activeJob.id.slice(0,8)}</div></div>
+          <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500"/><b className="text-xs">Active validation job</b><span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-black uppercase text-blue-700 dark:text-blue-300">{paused ? "paused" : activeJob.status}</span><span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-black text-violet-700 dark:text-violet-300">{activeJob.validationMode==="hybrid"?"Smart hybrid":activeJob.validationMode==="supersend"?"SuperSend primary":"NexiMail internal"}</span></div><div className="mt-1 truncate font-mono text-[11px] text-[var(--muted)]">{activeJob.scope} · {activeJob.id.slice(0,8)}</div></div>
           <div className="text-right"><div className="text-[11px] font-black text-[var(--foreground)]">{activeJob.totalRows ? (activeJob.processedRows/activeJob.totalRows*100).toFixed(2) : "0.00"}%</div><div className="text-[11px] font-bold text-[var(--muted)]">{activeJob.processedRows.toLocaleString()} / {activeJob.totalRows.toLocaleString()}</div></div>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-violet-500 transition-all" style={{width:(activeJob.totalRows ? Math.min(100, activeJob.processedRows / activeJob.totalRows * 100) : 0) + "%"}}/></div>
@@ -167,6 +198,7 @@ export function ValidationControls({
         <div className="grid grid-cols-2 gap-px bg-[var(--border)]">
           {[
             ["State",engine?.state || "unknown"],
+            ["Method",engine?.validationMode==="hybrid"?"Smart hybrid":engine?.validationMode==="supersend"?"SuperSend primary":"NexiMail internal"],
             ["Scheduler",engine?.scheduler === "provider_aware" ? "Provider-aware" : engine?.scheduler || "Sequential"],
             ["Concurrency",engine ? String(engine.concurrency) : "—"],
             ["Throughput",engine ? `${engine.validationsPerMinute.toFixed(1)}/min` : "—"],
@@ -178,7 +210,25 @@ export function ValidationControls({
       </section>
 
       <section className="premium-panel overflow-hidden">
-        <div className="section-header"><div><p className="page-eyebrow">Provider</p><h2 className="section-title mt-1">Supersend API key</h2></div><KeyRound className="h-5 w-5 text-violet-600"/></div>
+        <div className="section-header"><div><p className="page-eyebrow">Validation method</p><h2 className="section-title mt-1">Choose how NexiMail validates</h2></div><ShieldCheck className="h-5 w-5 text-violet-600"/></div>
+        <div className="space-y-2 p-4">
+          {([
+            ["internal","NexiMail internal","No external credits","Syntax + MX + direct SMTP RCPT checks. Best default when you want validation fully inside NexiMail."],
+            ["hybrid","Smart hybrid","Credit-saving fallback","NexiMail checks first. Only Unknown/Error results are sent to SuperSend, so external credits are used selectively."],
+            ["supersend","SuperSend primary","External provider","Every new validation check goes through SuperSend. This consumes SuperSend verification credits."],
+          ] as Array<[ValidationMode,string,string,string]>).map(([mode,title,badge,body])=>{
+            const unavailable=mode!=="internal" && !providerConfigured;
+            const selected=providerMode===mode;
+            return <button key={mode} type="button" disabled={!providerManage || providerModeBusy || unavailable} onClick={()=>void saveProviderMode(mode)} className={`w-full rounded-xl border p-3 text-left transition ${selected?"border-violet-500/30 bg-violet-500/[0.07]":"border-[var(--border)] bg-[var(--surface-soft)] hover:border-violet-500/20"} disabled:cursor-not-allowed disabled:opacity-55`}>
+              <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black">{title}</p><p className="mt-1 text-[11px] leading-4 text-[var(--muted)]">{body}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black uppercase ${selected?"bg-violet-500/10 text-violet-700 dark:text-violet-300":"bg-[var(--surface)] text-[var(--muted)]"}`}>{selected?"Active":badge}</span></div>
+            </button>;
+          })}
+          <p className="pt-1 text-[10px] leading-4 text-[var(--muted)]">The selected method is snapshotted when a validation job starts. Changing the default never changes a job that is already running.</p>
+        </div>
+      </section>
+
+      <section className="premium-panel overflow-hidden">
+        <div className="section-header"><div><p className="page-eyebrow">External provider</p><h2 className="section-title mt-1">SuperSend API key</h2></div><KeyRound className="h-5 w-5 text-violet-600"/></div>
         <div className="p-4">
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2.5">
             <div><p className="text-[11px] font-bold text-[var(--muted)]">Status</p><p className="mt-0.5 text-[11.5px] font-black">{providerConfigured===null?"Checking…":providerConfigured?"Configured":"Not configured"}</p></div>
@@ -204,10 +254,10 @@ export function ValidationControls({
         <div className="section-header"><div><p className="page-eyebrow">How it works</p><h2 className="section-title mt-1">Current validator</h2></div><ShieldCheck className="h-5 w-5 text-violet-600"/></div>
         <div className="divide-y divide-[var(--border)]">
           {[
-            ["Method","NexiMail performs syntax, MX and SMTP RCPT checks directly. Supersend can be enabled as an optional fallback."],
-            ["Positive","The recipient MX accepted the mailbox probe, or the optional fallback returned a positive verdict. Inbox placement is separate."],
+            ["Method","Each job keeps the validation mode selected when it was created: NexiMail internal, Smart hybrid, or SuperSend primary."],
+            ["Positive","A positive result means the selected validator accepted the address at validation time. It does not guarantee inbox placement."],
             ["Invalid","Only explicit mailbox-missing or invalid-domain responses become invalid. NexiMail adds an invalid suppression."],
-            ["Unknown / Error","Temporary, provider or ambiguous result. Contact remains send-eligible and can be checked again."],
+            ["Unknown / Error","Temporary, policy, risky or ambiguous result. In Smart hybrid mode, NexiMail asks SuperSend only when the internal result is unresolved."],
           ].map(([title,body])=><div key={title} className="px-4 py-3"><p className="text-[11px] font-black">{title}</p><p className="mt-1 text-[12px] leading-4 text-[var(--muted)]">{body}</p></div>)}
         </div>
       </section>
