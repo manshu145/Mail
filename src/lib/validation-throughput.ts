@@ -5,70 +5,99 @@ export function recipientDomain(email: string) {
   return at >= 0 ? email.slice(at + 1).trim().toLowerCase() : "";
 }
 
-export function validationDelayForVerdict(
-  verdict: ValidationVerdict,
-  minDelayMs: number,
-  backoffDelayMs: number,
-) {
-  const detail = String(verdict.detail || "").toLowerCase();
-  if (
-    verdict.status === "unknown" &&
-    /temporary_or_policy|policy_or_ambiguous|timeout|connection_failed|banner_|helo_|mail_from_/.test(detail)
-  ) {
-    return Math.max(minDelayMs, backoffDelayMs);
-  }
-  return Math.max(0, minDelayMs);
+export function recipientProvider(domainInput: string) {
+  const domain = domainInput.trim().toLowerCase();
+  if (domain === "gmail.com" || domain === "googlemail.com") return "google";
+  if (["yahoo.com","yahoo.co.in","yahoo.in","yahoo.co.uk","ymail.com","rocketmail.com"].includes(domain)) return "yahoo";
+  if (["outlook.com","hotmail.com","hotmail.co.in","live.com","live.in","msn.com"].includes(domain)) return "microsoft";
+  if (domain === "rediffmail.com" || domain === "rediff.com") return "rediff";
+  if (["icloud.com","me.com","mac.com"].includes(domain)) return "apple";
+  return domain || "__unknown__";
 }
 
-export async function runDomainAwarePool<T>(
+export function validationNeedsBackoff(verdict: ValidationVerdict) {
+  const detail = String(verdict.detail || "").toLowerCase();
+  return verdict.status === "unknown" &&
+    /temporary_or_policy|policy_or_ambiguous|timeout|connection_failed|banner_|helo_|mail_from_/.test(detail);
+}
+
+export async function runProviderAwarePool<T>(
   items: readonly T[],
-  keyOf: (item: T) => string,
+  providerOf: (item: T) => string,
   task: (item: T) => Promise<ValidationVerdict>,
   options: {
     concurrency: number;
-    minDelayMs: number;
+    lanesForProvider: (provider: string) => number;
+    providerStartGapMs: number;
     backoffDelayMs: number;
     shouldStop?: () => Promise<boolean>;
     sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
   },
 ) {
-  const lanes = new Map<string, T[]>();
+  const sleep = options.sleep || ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = options.now || Date.now;
+  const byProvider = new Map<string, T[]>();
+
   for (const item of items) {
-    const key = keyOf(item) || "__unknown__";
-    const lane = lanes.get(key);
-    if (lane) lane.push(item);
-    else lanes.set(key, [item]);
+    const provider = providerOf(item) || "__unknown__";
+    const bucket = byProvider.get(provider);
+    if (bucket) bucket.push(item);
+    else byProvider.set(provider, [item]);
   }
 
-  const queue = [...lanes.entries()];
+  const lanes: Array<{ provider: string; items: T[] }> = [];
+  for (const [provider, bucket] of byProvider) {
+    const laneCount = Math.max(1, Math.min(bucket.length, Math.floor(options.lanesForProvider(provider) || 1)));
+    const providerLanes = Array.from({ length: laneCount }, () => [] as T[]);
+    bucket.forEach((item, index) => providerLanes[index % laneCount].push(item));
+    for (const laneItems of providerLanes) if (laneItems.length) lanes.push({ provider, items: laneItems });
+  }
+
+  const providerNextStart = new Map<string, number>();
   let cursor = 0;
   let completed = 0;
   let stopped = false;
-  const sleep = options.sleep || ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const workerCount = Math.max(1, Math.min(Math.floor(options.concurrency || 1), queue.length || 1));
+  const workerCount = Math.max(1, Math.min(Math.floor(options.concurrency || 1), lanes.length || 1));
+
+  async function reserveProviderStart(provider: string) {
+    const current = now();
+    const scheduled = Math.max(current, providerNextStart.get(provider) || 0);
+    providerNextStart.set(provider, scheduled + Math.max(0, options.providerStartGapMs));
+    const wait = scheduled - current;
+    if (wait > 0) await sleep(wait);
+  }
 
   const worker = async () => {
     while (!stopped) {
       const index = cursor++;
-      if (index >= queue.length) return;
-      const [, lane] = queue[index];
+      if (index >= lanes.length) return;
+      const lane = lanes[index];
 
-      // One worker owns a domain lane for the full batch, so the same recipient
-      // domain is never probed concurrently. Different domains can progress in
-      // parallel up to the global concurrency cap.
-      for (const item of lane) {
+      for (const item of lane.items) {
         if (options.shouldStop && await options.shouldStop()) {
           stopped = true;
           return;
         }
+
+        await reserveProviderStart(lane.provider);
         const verdict = await task(item);
         completed++;
-        const delay = validationDelayForVerdict(verdict, options.minDelayMs, options.backoffDelayMs);
-        if (delay > 0) await sleep(delay);
+
+        if (validationNeedsBackoff(verdict)) {
+          const until = now() + Math.max(0, options.backoffDelayMs);
+          providerNextStart.set(lane.provider, Math.max(providerNextStart.get(lane.provider) || 0, until));
+        }
       }
     }
   };
 
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return { completed, stopped, domains: lanes.size, concurrency: workerCount };
+  return {
+    completed,
+    stopped,
+    providers: byProvider.size,
+    lanes: lanes.length,
+    concurrency: workerCount,
+  };
 }
