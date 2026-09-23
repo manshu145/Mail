@@ -262,10 +262,6 @@ async function runOnce() {
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
     const provider = providerForEmail(contact.email);
-    const nextAt = providerNextAt.get(provider) || 0;
-    const waitMs = Math.max(0, nextAt - Date.now(), globalNextAt - Date.now());
-    if (waitMs) await sleep(waitMs);
-    const provider = providerForEmail(contact.email);
     const waitMs = Math.max(0, (providerNextAt.get(provider) || 0) - Date.now(), globalNextAt - Date.now());
     if (waitMs) await sleep(waitMs);
     const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
