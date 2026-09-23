@@ -6,6 +6,43 @@ import type { ValidationVerdict } from "@/lib/validation-policy";
 
 type SmtpReply = { code: number; line: string };
 
+type MxLookup =
+  | { records: Array<{ exchange: string; priority: number }>; errorCode: null }
+  | { records: null; errorCode: string };
+
+const mxCache = new Map<string, { expiresAt: number; value: MxLookup }>();
+const mxCacheTtlMs = Math.max(60_000, Number(process.env.VALIDATION_MX_CACHE_TTL_MS || "900000"));
+const mxNegativeCacheTtlMs = Math.max(30_000, Number(process.env.VALIDATION_MX_NEGATIVE_CACHE_TTL_MS || "300000"));
+
+async function cachedMxLookup(domain: string): Promise<MxLookup> {
+  const key = domain.trim().toLowerCase();
+  const cached = mxCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  let value: MxLookup;
+  let ttl = mxCacheTtlMs;
+  try {
+    value = { records: await resolveMx(key), errorCode: null };
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code || "")
+      : "";
+    value = { records: null, errorCode: code || "lookup_failed" };
+    ttl = mxNegativeCacheTtlMs;
+  }
+
+  mxCache.set(key, { expiresAt: Date.now() + ttl, value });
+  if (mxCache.size > 10_000) {
+    const now = Date.now();
+    for (const [cacheKey, entry] of mxCache) {
+      if (entry.expiresAt <= now) mxCache.delete(cacheKey);
+      if (mxCache.size <= 8_000) break;
+    }
+  }
+  return value;
+}
+
+
 function explicitMailboxMissing(code: number, line: string) {
   return code >= 500 && code < 600 &&
     /5\.1\.1|5\.1\.0|user unknown|unknown user|no such user|mailbox (?:not found|unavailable)|recipient (?:address )?rejected.*(?:not found|does not exist|unknown)|does not exist|invalid recipient|recipient not found/i.test(line);
@@ -93,18 +130,15 @@ export async function validateMailboxInternally(emailInput: string, timeoutMs = 
   if (!isValidEmail(email)) return { status: "invalid", detail: "invalid_email_syntax" };
 
   const domain = email.split("@")[1] || "";
-  let records: Array<{ exchange: string; priority: number }>;
-  try {
-    records = await resolveMx(domain);
-  } catch (error) {
-    const code = error && typeof error === "object" && "code" in error
-      ? String((error as { code?: unknown }).code || "")
-      : "";
-    if (code === "ENODATA" || code === "ENOTFOUND") return { status: "invalid", detail: "recipient_domain_no_mx" };
-    return { status: "unknown", detail: `recipient_domain_dns_error:${code || "lookup_failed"}` };
+  const lookup = await cachedMxLookup(domain);
+  if (!lookup.records) {
+    if (lookup.errorCode === "ENODATA" || lookup.errorCode === "ENOTFOUND") {
+      return { status: "invalid", detail: "recipient_domain_no_mx" };
+    }
+    return { status: "unknown", detail: `recipient_domain_dns_error:${lookup.errorCode}` };
   }
 
-  const hosts = records
+  const hosts = lookup.records
     .filter((record) => record.exchange && record.exchange !== ".")
     .sort((a, b) => a.priority - b.priority)
     .map((record) => record.exchange.replace(/\.$/, ""));
