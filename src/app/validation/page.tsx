@@ -15,6 +15,33 @@ function resultClass(status: string) {
   return "bg-orange-500/10 text-orange-700 dark:text-orange-300";
 }
 
+function friendlyValidationDetail(detail: string | null) {
+  const value = String(detail || "").toLowerCase();
+  if (!value) return { label: "No detail", note: "" };
+  if (value.includes("smtp_rcpt_250") || value.includes("supersend_v2_valid")) {
+    return { label: "Mailbox accepted", note: "The recipient server/provider returned a positive validation result." };
+  }
+  if (value.includes("5.1.1") || value.includes("user_unknown") || value.includes("no_such_user") || value.includes("mailbox_not_found") || value.includes("supersend_v2_invalid")) {
+    return { label: "Mailbox not found", note: "The provider returned an explicit invalid-mailbox result." };
+  }
+  if (value.startsWith("smtp_banner_") || value.startsWith("smtp_helo_") || value.startsWith("smtp_mail_from_")) {
+    return { label: "Provider blocked the probe", note: "The mailbox was not evaluated. NexiMail will retry after the provider hold." };
+  }
+  if (value.includes("smtp_rcpt_4") || value.includes("temporary_or_policy")) {
+    return { label: "Temporary provider deferral", note: "The provider deferred this check. This is not an invalid mailbox result." };
+  }
+  if (value.includes("timeout") || value.includes("connection_failed")) {
+    return { label: "Temporary connection issue", note: "The mailbox was not conclusively checked." };
+  }
+  if (value.includes("supersend_v2_risky")) {
+    return { label: "Risky / inconclusive", note: "SuperSend did not return a final valid or invalid verdict." };
+  }
+  if (value.startsWith("supersend_http_429")) {
+    return { label: "SuperSend rate limited", note: "The external provider asked NexiMail to retry later." };
+  }
+  return { label: detail || "Unknown result", note: "" };
+}
+
 export default async function ValidationPage() {
   const session = await getSession(); if (!session) redirect("/login");
 
@@ -149,7 +176,7 @@ export default async function ValidationPage() {
               {results.map((row)=><tr key={row.id} className="interactive-row align-middle">
                 <td className="max-w-[280px] truncate px-4 py-3 font-bold">{row.email}</td>
                 <td className="px-4 py-3"><span className={"rounded-full px-2.5 py-1 text-[10px] font-black capitalize "+resultClass(row.status)}>{row.status}</span></td>
-                <td className="max-w-[280px] px-4 py-3"><span className="block truncate font-mono text-[11px] text-[var(--muted)]" title={row.detail || ""}>{row.detail || "—"}</span></td>
+                <td className="max-w-[320px] px-4 py-3">{(()=>{const detail=friendlyValidationDetail(row.detail);return <div><span className="block truncate text-[11px] font-bold text-[var(--foreground)]" title={detail.note || row.detail || ""}>{detail.label}</span>{detail.note?<span className="mt-0.5 block truncate text-[10px] text-[var(--muted)]" title={row.detail || ""}>{detail.note}</span>:null}</div>})()}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-right text-[11px] text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short", timeZone:"Asia/Kolkata"}).format(row.createdAt)}</td>
               </tr>)}
             </tbody>
