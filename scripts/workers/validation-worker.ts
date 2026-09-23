@@ -111,13 +111,20 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
     const importId = scope.slice("import:".length);
     if (!/^[0-9a-f-]{36}$/i.test(importId)) return [];
     const result = await pool.query<ValidationContact>(`
-      select distinct c.id::text as id,c.email,c.normalized_email as "normalizedEmail"
-      from import_staging_rows s
-      join contacts c on c.id=s.contact_id
-      where s.job_id=$1
-        and c.status='active'
+      select c.id::text as id,c.email,c.normalized_email as "normalizedEmail"
+      from contacts c
+      where c.status='active'
         and c.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id)
+        and exists(
+          select 1
+          from import_staging_rows s
+          where s.job_id=$1 and s.contact_id=c.id
+        )
+        and not exists(
+          select 1
+          from validation_results vr
+          where vr.job_id=$2 and vr.contact_id=c.id
+        )
       order by c.id
       limit $3
     `, [importId, jobId, limit]);
