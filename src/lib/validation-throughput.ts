@@ -18,7 +18,7 @@ export function recipientProvider(domainInput: string) {
 export function validationNeedsBackoff(verdict: ValidationVerdict) {
   const detail = String(verdict.detail || "").toLowerCase();
   return verdict.status === "unknown" &&
-    /temporary_or_policy|policy_or_ambiguous|timeout|connection_failed|banner_|helo_|mail_from_/.test(detail);
+    /temporary_or_policy|policy_or_ambiguous|timeout|connection_failed|banner_|helo_|mail_from_|supersend_http_429|supersend_http_5\d\d|supersend_request_failed/.test(detail);
 }
 
 export async function runProviderAwarePool<T>(
