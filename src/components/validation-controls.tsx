@@ -11,11 +11,22 @@ export function ValidationControls({
   activeJob,
   unresolved,
   imports,
+  engine,
 }: {
   paused: boolean;
   activeJob: { id: string; scope: string; status: string; processedRows: number; totalRows: number } | null;
   unresolved: number;
   imports: ImportOption[];
+  engine: {
+    state:string;
+    scheduler:string;
+    concurrency:number;
+    providerStartGapMs:number;
+    providerBackoffMs:number;
+    hardTimeoutMs:number;
+    validationsPerMinute:number;
+    lastSeenAt:string|null;
+  } | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -130,7 +141,7 @@ export function ValidationControls({
       {activeJob ? <div className="border-b border-[var(--border)] bg-blue-500/[0.035] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500"/><b className="text-xs">Active validation job</b><span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-black uppercase text-blue-700 dark:text-blue-300">{paused ? "paused" : activeJob.status}</span></div><div className="mt-1 truncate font-mono text-[11px] text-[var(--muted)]">{activeJob.scope} · {activeJob.id.slice(0,8)}</div></div>
-          <div className="text-right text-[11px] font-bold text-[var(--muted)]">{activeJob.processedRows.toLocaleString()} / {activeJob.totalRows.toLocaleString()}</div>
+          <div className="text-right"><div className="text-[11px] font-black text-[var(--foreground)]">{activeJob.totalRows ? (activeJob.processedRows/activeJob.totalRows*100).toFixed(2) : "0.00"}%</div><div className="text-[11px] font-bold text-[var(--muted)]">{activeJob.processedRows.toLocaleString()} / {activeJob.totalRows.toLocaleString()}</div></div>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-violet-500 transition-all" style={{width:(activeJob.totalRows ? Math.min(100, activeJob.processedRows / activeJob.totalRows * 100) : 0) + "%"}}/></div>
       </div> : null}
@@ -138,7 +149,7 @@ export function ValidationControls({
       <div className="grid gap-3 p-4 md:grid-cols-2">
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3.5">
           <div className="mb-3 flex items-start gap-3"><div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-700 dark:text-violet-300"><SearchCheck className="h-4 w-4"/></div><div><h3 className="text-[12px] font-black">Validate one contact</h3><p className="mt-0.5 text-[12px] leading-4 text-[var(--muted)]">Existing contact with Pending, Unknown or Error status.</p></div></div>
-          <div className="flex gap-2"><input value={email} onChange={(e)=>setEmail(e.target.value)} type="email" placeholder="person@example.com" className="form-control min-w-0 flex-1"/><button type="button" disabled={busy || !!activeJob || !email.trim() || !validationReady} onClick={()=>act("start_single")} className="btn-secondary !min-h-10 shrink-0 !px-3">Validate</button></div>
+          <div className="flex gap-2"><input value={email} onChange={(e)=>setEmail(e.target.value)} type="email" placeholder="person@example.com" className="form-control min-w-0 flex-1"/><button type="button" disabled={busy || !email.trim() || !validationReady} onClick={()=>act("start_single")} className="btn-secondary !min-h-10 shrink-0 !px-3">Validate</button></div><p className="mt-2 text-[10px] leading-4 text-[var(--muted)]">{activeJob ? "Priority check: this contact can be checked while the bulk job keeps its progress and resumes automatically." : "Runs immediately through the same internal SMTP validator."}</p>
         </div>
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3.5">
@@ -151,6 +162,21 @@ export function ValidationControls({
     </section>
 
     <aside className="space-y-4">
+      <section className="premium-panel overflow-hidden">
+        <div className="section-header"><div><p className="page-eyebrow">Live engine</p><h2 className="section-title mt-1">Fast validator</h2></div><SearchCheck className="h-5 w-5 text-violet-600"/></div>
+        <div className="grid grid-cols-2 gap-px bg-[var(--border)]">
+          {[
+            ["State",engine?.state || "unknown"],
+            ["Scheduler",engine?.scheduler === "provider_aware" ? "Provider-aware" : engine?.scheduler || "Sequential"],
+            ["Concurrency",engine ? String(engine.concurrency) : "—"],
+            ["Throughput",engine ? `${engine.validationsPerMinute.toFixed(1)}/min` : "—"],
+            ["Provider gap",engine?.providerStartGapMs ? `${engine.providerStartGapMs} ms` : "—"],
+            ["Backoff",engine?.providerBackoffMs ? `${Math.round(engine.providerBackoffMs/1000)} sec` : "—"],
+          ].map(([label,value])=><div key={label} className="bg-[var(--surface)] px-4 py-3"><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">{label}</p><p className="mt-1 text-sm font-black">{value}</p></div>)}
+        </div>
+        <div className="border-t border-[var(--border)] px-4 py-3 text-[11px] leading-5 text-[var(--muted)]">Provider-aware lanes increase bulk speed while keeping provider-wide pacing and temporary-error backoff. Individual probes are bounded so a stalled DNS/SMTP request cannot freeze the whole job.</div>
+      </section>
+
       <section className="premium-panel overflow-hidden">
         <div className="section-header"><div><p className="page-eyebrow">Provider</p><h2 className="section-title mt-1">Supersend API key</h2></div><KeyRound className="h-5 w-5 text-violet-600"/></div>
         <div className="p-4">
