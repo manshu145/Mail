@@ -24,6 +24,10 @@ Canonicalization        relaxed/simple
 Mode                    sv
 SubDomains              no
 OversignHeaders         From
+# Preserve OpenDKIM's default recommended signed-header set and explicitly
+# cover deliverability-critical bulk-mail headers. Gmail FBL requires the
+# Feedback-ID to be present before DKIM signing.
+SignHeaders              *,+Feedback-ID,+List-ID,+List-Unsubscribe,+List-Unsubscribe-Post
 Socket                  inet:8891@127.0.0.1
 PidFile                 /run/opendkim/opendkim.pid
 KeyTable                refile:${DKIM_DIR}/KeyTable
