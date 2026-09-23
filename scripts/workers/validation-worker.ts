@@ -5,7 +5,7 @@ import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import type { ValidationVerdict } from "../../src/lib/validation-policy";
 import { validateMailboxInternally } from "../../src/lib/mailbox-validator";
-import { recipientDomain, recipientProvider, runProviderAwarePool } from "../../src/lib/validation-throughput";
+import { recipientDomain, recipientProvider, runProviderAwarePool, validationIsPreRecipientFailure } from "../../src/lib/validation-throughput";
 import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
 import { normalizeValidationMode, validationModeNeedsSupersend, type ValidationMode } from "../../src/lib/validation-provider";
 
@@ -115,6 +115,8 @@ const validationBatchSize = Math.max(25, Math.min(1000, Number(process.env.VALID
 const validationConcurrency = Math.max(1, Math.min(24, Number(process.env.VALIDATION_CONCURRENCY || "12")));
 const validationProviderStartGapMs = Math.max(250, Math.min(10_000, Number(process.env.VALIDATION_PROVIDER_START_GAP_MS || "750")));
 const validationProviderBackoffMs = Math.max(validationProviderStartGapMs, Math.min(120_000, Number(process.env.VALIDATION_PROVIDER_BACKOFF_MS || "15000")));
+const validationProviderHoldMs = Math.max(validationProviderBackoffMs, Math.min(3_600_000, Number(process.env.VALIDATION_PROVIDER_HOLD_MS || "600000")));
+const providerHoldUntil = new Map<string, number>();
 
 function providerLaneCount(provider: string) {
   if (provider === "google") return Math.max(1, Math.min(4, Number(process.env.VALIDATION_GOOGLE_LANES || "3")));
@@ -325,6 +327,21 @@ async function runJob() {
   const resumed = job.status === "processing";
   if (!resumed) await db.update(validationJobs).set({ status: "processing" }).where(eq(validationJobs.id, job.id));
 
+  // A banner/HELO/MAIL FROM/connection failure happens before the recipient
+  // mailbox is actually evaluated. Requeue transient rows written by older
+  // builds so a provider-side block does not permanently consume recipients.
+  await pool.query(`
+    delete from validation_results
+    where job_id=$1
+      and status='unknown'
+      and (
+        detail like 'smtp_banner_%'
+        or detail like 'smtp_helo_%'
+        or detail like 'smtp_mail_from_%'
+        or detail in ('smtp_validation_timeout','smtp_validation_connection_failed')
+      )
+  `, [job.id]);
+
   let processed = await existingResultCount(job.id);
   const remainingCount = await remainingCountForJob(job.scope, job.id);
   const remaining = await contactsForJob(job.scope, job.id);
@@ -347,7 +364,10 @@ async function runJob() {
       state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed,
       concurrency: validationConcurrency, scheduler: "provider_aware", validationMode,
       providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
-      providerBackoffMs: validationProviderBackoffMs, hardTimeoutMs: validationHardTimeoutMs,
+      providerBackoffMs: validationProviderBackoffMs,
+      providerHoldMs: validationProviderHoldMs,
+      providerHolds: [...providerHoldUntil.entries()].filter(([, until]) => until > Date.now()).length,
+      hardTimeoutMs: validationHardTimeoutMs,
     });
   };
 
@@ -355,11 +375,24 @@ async function runJob() {
     remaining,
     (contact) => recipientProvider(recipientDomain(contact.normalizedEmail)),
     async (contact) => {
+      const provider = recipientProvider(recipientDomain(contact.normalizedEmail));
       let result: ValidationVerdict;
+
       if (validationMode === "supersend") {
         result = await verifyWithSupersend(contact.normalizedEmail, apiKey as string);
       } else {
+        const holdUntil = providerHoldUntil.get(provider) || 0;
+        if (holdUntil > Date.now()) {
+          return { status: "unknown", detail: "provider_hold_active" };
+        }
+
         result = await validateMailboxWithDeadline(contact.normalizedEmail);
+
+        if (validationIsPreRecipientFailure(result)) {
+          providerHoldUntil.set(provider, Date.now() + validationProviderHoldMs);
+          return result;
+        }
+
         if (validationMode === "hybrid" && (result.status === "unknown" || result.status === "error")) {
           const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey as string);
           if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
@@ -401,6 +434,8 @@ async function runJob() {
     await heartbeat({
       state: "processing", jobId: job.id, scope: job.scope, processed, total, batchComplete: true, resumed,
       providers: outcome.providers, lanes: outcome.lanes, concurrency: outcome.concurrency, validationMode,
+      providerHoldMs: validationProviderHoldMs,
+      providerHolds: [...providerHoldUntil.entries()].filter(([, until]) => until > Date.now()).length,
     });
     return;
   }
