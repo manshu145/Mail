@@ -24,11 +24,21 @@ export default async function ValidationPage() {
   let paused = false;
   let activeJob: typeof validationJobs.$inferSelect | null = null;
   let imports: Array<{ id: string; filename: string; unresolved: number }> = [];
+  let engine: {
+    state:string;
+    scheduler:string;
+    concurrency:number;
+    providerStartGapMs:number;
+    providerBackoffMs:number;
+    hardTimeoutMs:number;
+    validationsPerMinute:number;
+    lastSeenAt:string|null;
+  } | null = null;
   let dbError = false;
 
   if (databaseConfigured) {
     try {
-      const [jobRows, resultRows, totalRows, acceptedRows, invalidRows, unresolvedRows, pauseRows, activeRows, importRows] = await Promise.all([
+      const [jobRows, resultRows, totalRows, acceptedRows, invalidRows, unresolvedRows, pauseRows, activeRows, importRows, engineRows, speedRows] = await Promise.all([
         db.select().from(validationJobs).orderBy(desc(validationJobs.createdAt)).limit(30),
         db.select().from(validationResults).orderBy(desc(validationResults.createdAt)).limit(80),
         db.select({value:sql<number>`count(*)::int`}).from(contacts).where(eq(contacts.status,"active")),
@@ -49,6 +59,17 @@ export default async function ValidationPage() {
           order by j.created_at desc
           limit 20
         `),
+        pool.query<{last_seen_at:Date;metadata:Record<string,unknown>}>(`
+          select last_seen_at,metadata
+          from worker_heartbeats
+          where worker_name='validation'
+          limit 1
+        `),
+        pool.query<{per_minute:number}>(`
+          select round(count(*)::numeric / 5, 1)::float as per_minute
+          from validation_results
+          where created_at > now()-interval '5 minutes'
+        `),
       ]);
       jobs = jobRows;
       results = resultRows;
@@ -59,6 +80,18 @@ export default async function ValidationPage() {
       paused = pauseRows[0]?.value === true;
       activeJob = activeRows[0] || null;
       imports = importRows.rows.map((row) => ({ id: row.id, filename: row.filename, unresolved: Number(row.unresolved || 0) }));
+      const engineRow = engineRows.rows[0];
+      const metadata = (engineRow?.metadata || {}) as Record<string,unknown>;
+      engine = engineRow ? {
+        state:String(metadata.state || "unknown"),
+        scheduler:String(metadata.scheduler || (metadata.concurrency ? "provider_aware" : "sequential")),
+        concurrency:Number(metadata.concurrency || 1),
+        providerStartGapMs:Number(metadata.providerStartGapMs || metadata.domainMinIntervalMs || 0),
+        providerBackoffMs:Number(metadata.providerBackoffMs || metadata.domainBackoffMs || 0),
+        hardTimeoutMs:Number(metadata.hardTimeoutMs || 0),
+        validationsPerMinute:Number(speedRows.rows[0]?.per_minute || 0),
+        lastSeenAt:engineRow.last_seen_at ? engineRow.last_seen_at.toISOString() : null,
+      } : null;
     } catch (error) {
       console.error("[validation-page] failed to read validation state", error);
       dbError = true;
@@ -86,6 +119,7 @@ export default async function ValidationPage() {
       activeJob={activeJob ? { id:activeJob.id, scope:activeJob.scope, status:activeJob.status, processedRows:activeJob.processedRows, totalRows:activeJob.totalRows } : null}
       unresolved={unresolved}
       imports={imports}
+      engine={engine}
     /> : null}
 
     <div className="mt-4 grid gap-4 xl:grid-cols-[.95fr_1.05fr]">
