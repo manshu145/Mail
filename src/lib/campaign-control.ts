@@ -22,8 +22,11 @@ export async function controlCampaign(id: string, action: string, connectionPool
       status = "paused";
     } else if (action === "resume") {
       if (status !== "paused") throw new CampaignControlError("Campaign is not paused.");
-      const { rows: [counts] } = await client.query("select count(*)::int total from messages where campaign_id=$1", [id]);
-      status = counts.total > 0 ? "sending" : "queued";
+      // Always route a resume back through the campaign worker. It re-runs the
+      // complete Send Guard (auth, audience, content, SMTP path, restrictions)
+      // before returning the campaign to active delivery. Existing message
+      // snapshots are preserved by the worker's ON CONFLICT insert.
+      status = "queued";
     } else if (action === "retry_failed") {
       if (status === "cancelled") throw new CampaignControlError("Cancelled campaigns cannot be retried.");
       const result = await client.query(`update messages set status='ready_for_transport',last_error=null,next_attempt_at=now(),attempt_count=0 where campaign_id=$1 and status='failed' and ${retryableMessageSql}`, [id]);
