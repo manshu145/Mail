@@ -15,6 +15,7 @@ import { providerForEmail, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY } from "..
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
+import { buildBulkDeliverabilityHeaders } from "../../src/lib/deliverability-headers";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -294,21 +295,17 @@ async function runOnce() {
     }
     const envelopeFrom = bounceSigningEnabled && bounceDomain ? makeBounceAddress(message.id, bounceDomain) : fromEmail;
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
-    // Gmail Postmaster Feedback Loop groups complaints by this stable campaign
-    // identifier. Keep it campaign-level (never message-level) and present
-    // before OpenDKIM signs the message.
-    const feedbackCampaign = campaign.id.replaceAll("-", "").slice(0, 16);
-    const feedbackAccount = account.id.replaceAll("-", "").slice(0, 16);
-    const feedbackId = `${feedbackCampaign}:${feedbackAccount}:marketing:neximail`;
-    const listId = campaign.listId && senderDomain
-      ? `<${campaign.listId.replaceAll("-", "")}.${senderDomain}>`
-      : null;
+    const deliverabilityHeaders = buildBulkDeliverabilityHeaders({
+      campaignId: campaign.id,
+      sendingAccountId: account.id,
+      listId: campaign.listId,
+      senderDomain,
+      unsubscribeUrl,
+    });
     const raw = [
       `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
       `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, "MIME-Version: 1.0",
-      `Feedback-ID: ${feedbackId}`,
-      ...(listId ? [`List-ID: ${listId}`] : []),
-      `List-Unsubscribe: <${unsubscribeUrl}>`, "List-Unsubscribe-Post: List-Unsubscribe=One-Click", mime.contentTypeHeader, "", ...mime.bodyLines,
+      ...deliverabilityHeaders, mime.contentTypeHeader, "", ...mime.bodyLines,
     ].join("\r\n");
 
     // Recheck after rendering: a queued contact may have unsubscribed or been
