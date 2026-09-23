@@ -128,7 +128,7 @@ async function releaseProviderCooldown(id: string, cooldownKey: string | null, r
   await event(id,"provider_cooldown",{cooldownKey:key,retryAt:next.toISOString()});
 }
 
-type Claimed = { id: string; attempt_count: number };
+type Claimed = { id: string; attempt_count: number; recipient_email: string };
 async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> {
   const result = await pool.query<Claimed>(`
     with eligible as (
@@ -218,7 +218,7 @@ async function runOnce() {
     return;
   }
   const settings = await readDeliverySettings();
-  const delayMs = Math.ceil(1000 / settings.maxPerSecond);
+  const delayMs = Math.max(Math.ceil(1000 / settings.maxPerSecond), settings.providerIntervalMs);\n  const providerNextAt = new Map<string, number>();
   const claimed = await claimMessages(settings.campaignBurstPerRound);
   let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
@@ -256,7 +256,7 @@ async function runOnce() {
     const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
-    const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
+    const provider = providerForEmail(contact.email);\n    const nextAt = providerNextAt.get(provider) || 0;\n    const waitMs = Math.max(0, nextAt - Date.now());\n    if (waitMs) await sleep(waitMs);\n    const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
     if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.cooldownKey, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
     if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope,retryAt:gate.retryAt?.toISOString()}); }
 
@@ -360,7 +360,7 @@ async function runOnce() {
     await sleep(delayMs);
   }
 
-  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "round_robin", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, providerIntervalMs: settings.providerIntervalMs, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "round_robin", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
 }
 
 async function main() {
