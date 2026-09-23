@@ -86,7 +86,7 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
   // destination provider. Keep one circuit breaker instead of fake provider
   // cards for every unrelated recipient network.
   const outboundBridgeRestriction =
-    /jfe050004|jfe050005|unusual number of invalid recipients originating from your account|unusual amount of content policy violations originating from your account/i.test(text);
+    /jfe050004|jfe050005|jfe050007|unusual number of invalid recipients originating from your account|unusual amount of content policy violations originating from your account/i.test(text);
   if (outboundBridgeRestriction) {
     return { scope: "upstream", reason: "sender_or_outbound_path_restriction" };
   }
