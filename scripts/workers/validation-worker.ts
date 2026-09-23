@@ -5,15 +5,13 @@ import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import { isDirectGmailAddress, type ValidationVerdict } from "../../src/lib/validation-policy";
 import { validateMailboxInternally } from "../../src/lib/mailbox-validator";
+import { recipientDomain, runDomainAwarePool } from "../../src/lib/validation-throughput";
 import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
 
-const intervalMs = Math.max(15000, Number(process.env.VALIDATION_INTERVAL_MS || "30000"));
+const intervalMs = Math.max(2000, Number(process.env.VALIDATION_INTERVAL_MS || "5000"));
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_API_TIMEOUT_MS || "10000"));
 const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v2/email-validation/verify").trim();
 const supersendFallbackEnabled = process.env.SUPERSEND_FALLBACK_ENABLED === "true";
-const validationProbeDelayMs = Math.max(250, Math.min(10_000, Number(process.env.VALIDATION_PROBE_DELAY_MS || "1500")));
-
-function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 type ExistingResult = {
   contact_id: string;
@@ -84,14 +82,23 @@ async function verifyWithSupersend(email: string, apiKey: string): Promise<Valid
   }
 }
 
-async function validationPaused() {
+let cachedPaused = false;
+let pausedCheckedAt = 0;
+async function validationPaused(force = false) {
+  const now = Date.now();
+  if (!force && now - pausedCheckedAt < 2000) return cachedPaused;
   const [row] = await db.select({ value: systemSettings.value }).from(systemSettings).where(eq(systemSettings.key, "validation_paused")).limit(1);
-  return row?.value === true;
+  cachedPaused = row?.value === true;
+  pausedCheckedAt = now;
+  return cachedPaused;
 }
 
 type ValidationContact = { id: string; email: string; normalizedEmail: string };
 
-const validationBatchSize = Math.max(10, Math.min(500, Number(process.env.VALIDATION_BATCH_SIZE || "100")));
+const validationBatchSize = Math.max(25, Math.min(1000, Number(process.env.VALIDATION_BATCH_SIZE || "250")));
+const validationConcurrency = Math.max(1, Math.min(20, Number(process.env.VALIDATION_CONCURRENCY || "8")));
+const validationDomainMinIntervalMs = Math.max(250, Math.min(10_000, Number(process.env.VALIDATION_DOMAIN_MIN_INTERVAL_MS || "1000")));
+const validationDomainBackoffMs = Math.max(validationDomainMinIntervalMs, Math.min(120_000, Number(process.env.VALIDATION_DOMAIN_BACKOFF_MS || "15000")));
 
 async function contactsForJob(scope: string, jobId: string, limit = validationBatchSize): Promise<ValidationContact[]> {
   if (scope.startsWith("contact:")) {
@@ -191,14 +198,8 @@ async function remainingCountForJob(scope: string, jobId: string) {
       from contacts c
       where c.status='active'
         and c.validation_status in ('pending','unknown','error')
-        and exists(
-          select 1 from import_staging_rows s
-          where s.job_id=$1 and s.contact_id=c.id
-        )
-        and not exists(
-          select 1 from validation_results vr
-          where vr.job_id=$2 and vr.contact_id=c.id
-        )
+        and exists(select 1 from import_staging_rows s where s.job_id=$1 and s.contact_id=c.id)
+        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id)
     `, [importId, jobId]);
     return Number(result.rows[0]?.total || 0);
   }
@@ -261,66 +262,90 @@ async function selectWorkJob() {
 }
 
 async function runJob() {
-  if (await validationPaused()) {
+  if (await validationPaused(true)) {
     await heartbeat({ state: "paused" });
     return;
   }
   const job = await selectWorkJob();
   if (!job) {
-    await heartbeat({ state: "idle", provider: "internal_smtp", supersendFallbackEnabled });
+    await heartbeat({ state: "idle", provider: "internal_smtp", supersendFallbackEnabled, concurrency: validationConcurrency });
     return;
   }
 
   const apiKey = supersendFallbackEnabled ? await configuredSupersendApiKey() : null;
-
   const resumed = job.status === "processing";
   if (!resumed) await db.update(validationJobs).set({ status: "processing" }).where(eq(validationJobs.id, job.id));
 
   let processed = await existingResultCount(job.id);
   const remainingCount = await remainingCountForJob(job.scope, job.id);
   const remaining = await contactsForJob(job.scope, job.id);
-  // Recompute the denominator from the live scoped workload on every cycle.
-  // This repairs legacy/stale job totals without changing which contacts are
-  // eligible for validation.
   const total = processed + remainingCount;
 
   await db.update(validationJobs).set({ totalRows: total, processedRows: processed }).where(eq(validationJobs.id, job.id));
-  await heartbeat({ state: resumed ? "resumed" : "processing", jobId: job.id, scope: job.scope, processed, total, batch: remaining.length });
+  await heartbeat({
+    state: resumed ? "resumed" : "processing", jobId: job.id, scope: job.scope, processed, total,
+    batch: remaining.length, concurrency: validationConcurrency, domainMinIntervalMs: validationDomainMinIntervalMs,
+  });
 
-  for (const contact of remaining) {
-    if (await validationPaused()) {
-      await heartbeat({ state: "paused", jobId: job.id, scope: job.scope, processed, total, remaining: total - processed });
-      return;
-    }
-    let result = await validateMailboxInternally(contact.normalizedEmail, timeoutMs);
+  let lastProgressPublish = 0;
+  const publishProgress = async (force = false) => {
+    const now = Date.now();
+    if (!force && processed % 10 !== 0 && now - lastProgressPublish < 2000) return;
+    lastProgressPublish = now;
+    await pool.query(`update validation_jobs set processed_rows=greatest(processed_rows,$2), total_rows=greatest(total_rows,$3) where id=$1`, [job.id, processed, total]);
+    await heartbeat({
+      state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed,
+      concurrency: validationConcurrency, domainMinIntervalMs: validationDomainMinIntervalMs, domainBackoffMs: validationDomainBackoffMs,
+    });
+  };
 
-    if (
-      (result.status === "unknown" || result.status === "error") &&
-      supersendFallbackEnabled &&
-      apiKey &&
-      isDirectGmailAddress(contact.normalizedEmail)
-    ) {
-      const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey);
-      if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
-        result = fallback;
-      } else {
-        result = { status: result.status, detail: `${result.detail};fallback:${fallback.detail}` };
+  const outcome = await runDomainAwarePool(
+    remaining,
+    (contact) => recipientDomain(contact.normalizedEmail),
+    async (contact) => {
+      let result = await validateMailboxInternally(contact.normalizedEmail, timeoutMs);
+
+      if (
+        (result.status === "unknown" || result.status === "error") &&
+        supersendFallbackEnabled &&
+        apiKey &&
+        isDirectGmailAddress(contact.normalizedEmail)
+      ) {
+        const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey);
+        if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
+          result = fallback;
+        } else {
+          result = { status: result.status, detail: `${result.detail};fallback:${fallback.detail}` };
+        }
       }
-    }
 
-    await db.insert(validationResults).values({ jobId: job.id, contactId: contact.id, email: contact.email, status: result.status, detail: result.detail });
-    await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
-    if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
-    processed++;
-    await db.update(validationJobs).set({ processedRows: processed }).where(eq(validationJobs.id, job.id));
-    await heartbeat({ state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed, probeDelayMs: validationProbeDelayMs });
-    if (!job.scope.startsWith("contact:")) await sleep(validationProbeDelayMs);
+      await db.insert(validationResults).values({ jobId: job.id, contactId: contact.id, email: contact.email, status: result.status, detail: result.detail });
+      await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
+      if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
+      processed++;
+      await publishProgress(false);
+      return result;
+    },
+    {
+      concurrency: job.scope.startsWith("contact:") ? 1 : validationConcurrency,
+      minDelayMs: job.scope.startsWith("contact:") ? 0 : validationDomainMinIntervalMs,
+      backoffDelayMs: validationDomainBackoffMs,
+      shouldStop: () => validationPaused(),
+    },
+  );
+
+  await publishProgress(true);
+  if (outcome.stopped) {
+    await heartbeat({ state: "paused", jobId: job.id, scope: job.scope, processed, total, remaining: Math.max(0, total - processed) });
+    return;
   }
 
   const hasMore = (await contactsForJob(job.scope, job.id, 1)).length > 0;
   if (hasMore) {
-    await db.update(validationJobs).set({ processedRows: processed }).where(eq(validationJobs.id, job.id));
-    await heartbeat({ state: "processing", jobId: job.id, scope: job.scope, processed, total, batchComplete: true, resumed });
+    await heartbeat({
+      state: "processing", jobId: job.id, scope: job.scope, processed, total, batchComplete: true, resumed,
+      domains: outcome.domains, concurrency: outcome.concurrency,
+    });
     return;
   }
 
@@ -328,7 +353,6 @@ async function runJob() {
   await syncImportValidationCounters(job.scope, job.id);
   await heartbeat({ state: "idle", lastJobId: job.id, scope: job.scope, processed, resumed });
 }
-
 async function runWithWorkerLock() {
   const client = await pool.connect();
   let locked = false;
@@ -344,7 +368,7 @@ async function runWithWorkerLock() {
 }
 
 async function main() {
-  console.log("[validation-worker] started; internal SMTP mailbox validation primary; SuperSend optional fallback");
+  console.log(`[validation-worker] started; internal SMTP primary; domain-aware concurrency=${validationConcurrency}, per-domain-gap=${validationDomainMinIntervalMs}ms; SuperSend optional fallback`);
   while (true) {
     try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
