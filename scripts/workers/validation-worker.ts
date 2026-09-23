@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { contacts, suppressions, systemSettings, validationJobs, validationResults } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
@@ -11,6 +11,9 @@ const intervalMs = Math.max(15000, Number(process.env.VALIDATION_INTERVAL_MS || 
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_API_TIMEOUT_MS || "10000"));
 const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v2/email-validation/verify").trim();
 const supersendFallbackEnabled = process.env.SUPERSEND_FALLBACK_ENABLED === "true";
+const validationProbeDelayMs = Math.max(250, Math.min(10_000, Number(process.env.VALIDATION_PROBE_DELAY_MS || "1500")));
+
+function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 type ExistingResult = {
   contact_id: string;
@@ -91,7 +94,6 @@ type ValidationContact = { id: string; email: string; normalizedEmail: string };
 const validationBatchSize = Math.max(10, Math.min(500, Number(process.env.VALIDATION_BATCH_SIZE || "100")));
 
 async function contactsForJob(scope: string, jobId: string, limit = validationBatchSize): Promise<ValidationContact[]> {
-  const unresolved = `('pending','unknown','error')`;
   if (scope.startsWith("contact:")) {
     const contactId = scope.slice("contact:".length);
     if (!/^[0-9a-f-]{36}$/i.test(contactId)) return [];
@@ -198,11 +200,21 @@ async function syncImportValidationCounters(scope: string, validationJobId: stri
 }
 
 async function selectWorkJob() {
-  // A processing job means a previous worker execution was interrupted. Resume it
-  // before accepting newer queued work so one stuck job cannot remain forever.
-  let [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "processing")).orderBy(validationJobs.createdAt).limit(1);
+  // Interactive single-contact checks must not sit behind a multi-hour import.
+  // A bulk job keeps its progress and resumes on the next cycle.
+  let [job] = await db.select().from(validationJobs)
+    .where(and(eq(validationJobs.status, "pending"), sql`${validationJobs.scope} like 'contact:%'`))
+    .orderBy(validationJobs.createdAt).limit(1);
   if (job) return job;
-  [job] = await db.select().from(validationJobs).where(eq(validationJobs.status, "pending")).orderBy(validationJobs.createdAt).limit(1);
+
+  [job] = await db.select().from(validationJobs)
+    .where(eq(validationJobs.status, "processing"))
+    .orderBy(validationJobs.createdAt).limit(1);
+  if (job) return job;
+
+  [job] = await db.select().from(validationJobs)
+    .where(eq(validationJobs.status, "pending"))
+    .orderBy(validationJobs.createdAt).limit(1);
   return job;
 }
 
@@ -255,7 +267,8 @@ async function runJob() {
     if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
     processed++;
     await db.update(validationJobs).set({ processedRows: processed }).where(eq(validationJobs.id, job.id));
-    await heartbeat({ state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed });
+    await heartbeat({ state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed, probeDelayMs: validationProbeDelayMs });
+    if (!job.scope.startsWith("contact:")) await sleep(validationProbeDelayMs);
   }
 
   const hasMore = (await contactsForJob(job.scope, job.id, 1)).length > 0;
