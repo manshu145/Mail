@@ -5,6 +5,7 @@ export const MAX_PROVIDER_COOLDOWN_MINUTES = 60;
 
 export type DeliverySettings = {
   maxPerSecond: number;
+  providerIntervalMs: number;
   maxRecipientsPerCampaign: number;
   maxRollingHour: number;
   maxRolling24h: number;
@@ -27,6 +28,7 @@ export type DeliverySettings = {
 
 export const DELIVERY_SETTING_KEYS = {
   maxPerSecond: "delivery.max_per_second",
+  providerIntervalMs: "delivery.provider_interval_ms",
   maxRecipientsPerCampaign: "delivery.max_recipients_per_campaign",
   maxRollingHour: "delivery.max_rolling_hour",
   maxRolling24h: "delivery.max_rolling_24h",
@@ -57,6 +59,7 @@ function num(value: unknown, fallback: number, min: number, max: number) { retur
 export function defaultDeliverySettings(env: Readonly<Record<string,string|undefined>> = process.env): DeliverySettings {
   return {
     maxPerSecond: int(env.TRANSPORT_RATE_PER_SECOND, 1, 1, 1000),
+    providerIntervalMs: int(env.TRANSPORT_PROVIDER_INTERVAL_MS, 1000, 250, 60_000),
     maxRecipientsPerCampaign: int(env.MAX_RECIPIENTS_PER_CAMPAIGN, 0, 0, 10_000_000),
     maxRollingHour: int(env.MAX_ROLLING_HOUR, 0, 0, 10_000_000),
     maxRolling24h: int(env.MAX_ROLLING_24H, 0, 0, 100_000_000),
@@ -84,6 +87,7 @@ export async function readDeliverySettings(): Promise<DeliverySettings> {
   const values = new Map(rows.map((row) => [row.key, row.value]));
   return {
     maxPerSecond: int(values.get(DELIVERY_SETTING_KEYS.maxPerSecond), defaults.maxPerSecond, 1, 1000),
+    providerIntervalMs: int(values.get(DELIVERY_SETTING_KEYS.providerIntervalMs), defaults.providerIntervalMs, 250, 60_000),
     maxRecipientsPerCampaign: int(values.get(DELIVERY_SETTING_KEYS.maxRecipientsPerCampaign), defaults.maxRecipientsPerCampaign, 0, 10_000_000),
     maxRollingHour: int(values.get(DELIVERY_SETTING_KEYS.maxRollingHour), defaults.maxRollingHour, 0, 10_000_000),
     maxRolling24h: int(values.get(DELIVERY_SETTING_KEYS.maxRolling24h), defaults.maxRolling24h, 0, 100_000_000),
