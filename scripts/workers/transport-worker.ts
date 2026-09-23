@@ -135,6 +135,7 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
       select
         m.id,
         m.campaign_id,
+        m.recipient_email,
         m.queued_at,
         coalesce(c.started_at,c.created_at) as campaign_started_at,
         row_number() over(partition by m.campaign_id order by m.queued_at asc,m.id asc) as campaign_rank
@@ -156,8 +157,10 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
     where m.id=picked.id
       and m.status in ('ready_for_transport','deferred')
       and (m.next_attempt_at is null or m.next_attempt_at <= now())
-    returning m.id,m.attempt_count`, [claimBatch,campaignBurstPerRound]);
-  return result.rows;
+    returning m.id,m.attempt_count,m.recipient_email`, [claimBatch,campaignBurstPerRound]);
+  const counts = new Map<string, number>();
+  for (const row of result.rows) { const p = providerForEmail(row.recipient_email); counts.set(p, (counts.get(p) || 0) + 1); }
+  return result.rows.sort((a,b) => (counts.get(providerForEmail(b.recipient_email)) || 0) - (counts.get(providerForEmail(a.recipient_email)) || 0));
 }
 async function markDeferred(id: string, attempt: number, error: unknown, settings: DeliverySettings) {
   const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error";
@@ -256,7 +259,10 @@ async function runOnce() {
     const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
-    const provider = providerForEmail(contact.email);\n    const nextAt = providerNextAt.get(provider) || 0;\n    const waitMs = Math.max(0, nextAt - Date.now(), globalNextAt - Date.now());\n    if (waitMs) await sleep(waitMs);\n    const provider = providerForEmail(contact.email);\n    const waitMs = Math.max(0, (providerNextAt.get(provider) || 0) - Date.now(), globalNextAt - Date.now());\n    if (waitMs) await sleep(waitMs);\n    const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
+    const provider = providerForEmail(contact.email);\n    const nextAt = providerNextAt.get(provider) || 0;\n    const waitMs = Math.max(0, nextAt - Date.now(), globalNextAt - Date.now());\n    if (waitMs) await sleep(waitMs);\n    const provider = providerForEmail(contact.email);\n    const waitMs = Math.max(0, (providerNextAt.get(provider) || 0) - Date.now(), globalNextAt - Date.now());\n    if (waitMs) await sleep(waitMs);\n    const provider = providerForEmail(contact.email);
+    const waitMs = Math.max(0, (providerNextAt.get(provider) || 0) - Date.now(), globalNextAt - Date.now());
+    if (waitMs) await sleep(waitMs);
+    const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
     if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.cooldownKey, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
     if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope,retryAt:gate.retryAt?.toISOString()}); }
 
@@ -357,7 +363,9 @@ async function runOnce() {
       const state = await markDeferred(message.id, claim.attempt_count, error, settings);
       if (state === "deferred") deferred++; else failed++;
     }
-    await sleep(delayMs);
+    const sentAt = Date.now();
+    providerNextAt.set(provider, sentAt + settings.providerIntervalMs);
+    globalNextAt = sentAt + (1000 / settings.maxPerSecond);
   }
 
   await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, providerIntervalMs: settings.providerIntervalMs, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "round_robin", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
