@@ -103,7 +103,7 @@ export default async function ValidationPage() {
   const usable = databaseConfigured && !dbError;
 
   return <AppShell session={session}>
-    <div className="page-intro"><div><p className="page-eyebrow mb-1.5">Deliverability</p><h1 className="page-title">Email validation</h1><p className="page-description">NexiMail validates recipient syntax, MX and mailbox responses directly. Supersend remains an optional fallback.</p></div></div>
+    <div className="page-intro"><div><p className="page-eyebrow mb-1.5">Deliverability</p><h1 className="page-title">Email validation</h1><p className="page-description">Validate recipient syntax, MX and mailbox responses with NexiMail Internal, Smart Hybrid or SuperSend Primary.</p></div></div>
 
     {!usable ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200"><b>Validation state unavailable.</b> The database could not be read.</div> : null}
 
@@ -135,11 +135,27 @@ export default async function ValidationPage() {
 
       <section className="section-card overflow-hidden">
         <div className="border-b border-[var(--border)] px-5 py-4">
-          <h2 className="font-black">Result log</h2>
-          <p className="mt-1 text-xs text-[var(--muted)]">Latest mailbox validation results from NexiMail internal checks or the optional provider fallback.</p>
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div><h2 className="font-black">Result log</h2><p className="mt-1 text-xs text-[var(--muted)]">Latest mailbox validation results from NexiMail internal checks or the optional provider fallback.</p></div>
+            <span className="status-pill self-start sm:self-auto">{results.length} latest</span>
+          </div>
         </div>
-        {!usable ? <div className="p-8 text-center text-sm text-[var(--muted)]">Validation data unavailable.</div> : results.length ? <div className="max-h-[620px] divide-y divide-[var(--border)] overflow-auto">{results.map((row)=><div key={row.id} className="interactive-row p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="break-all text-sm font-black">{row.email}</div><div className="mt-2 flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-[11px] font-extrabold capitalize ${resultClass(row.status)}`}>{row.status}</span>{row.detail ? <span className="rounded-full bg-[var(--surface-soft)] px-2 py-1 font-mono text-[11px] text-[var(--muted)]">{row.detail}</span> : null}</div></div><time className="shrink-0 text-[11px] text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short", timeZone:"Asia/Kolkata"}).format(row.createdAt)}</time></div></div>)}</div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation results yet.</div>}
-      </section>
+        {!usable ? <div className="p-8 text-center text-sm text-[var(--muted)]">Validation data unavailable.</div> : results.length ? <div className="max-h-[620px] overflow-auto">
+          <table className="w-full min-w-[760px] text-left text-xs">
+            <thead className="sticky top-0 z-10 bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]">
+              <tr><th className="px-4 py-3">Email</th><th className="px-4 py-3">Verdict</th><th className="px-4 py-3">Detail</th><th className="px-4 py-3 text-right">Time</th></tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {results.map((row)=><tr key={row.id} className="interactive-row align-middle">
+                <td className="max-w-[280px] truncate px-4 py-3 font-bold">{row.email}</td>
+                <td className="px-4 py-3"><span className={"rounded-full px-2.5 py-1 text-[10px] font-black capitalize "+resultClass(row.status)}>{row.status}</span></td>
+                <td className="max-w-[280px] px-4 py-3"><span className="block truncate font-mono text-[11px] text-[var(--muted)]" title={row.detail || ""}>{row.detail || "—"}</span></td>
+                <td className="whitespace-nowrap px-4 py-3 text-right text-[11px] text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short", timeZone:"Asia/Kolkata"}).format(row.createdAt)}</td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation results yet.</div>}
+      </section>>
     </div>
   </AppShell>;
 }
