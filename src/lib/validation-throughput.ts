@@ -34,7 +34,7 @@ export async function runProviderAwarePool<T>(
   options: {
     concurrency: number;
     lanesForProvider: (provider: string) => number;
-    providerStartGapMs: number;
+    providerStartGapMs: number | ((provider: string) => number);
     backoffDelayMs: number;
     shouldStop?: () => Promise<boolean>;
     shouldHoldProvider?: (verdict: ValidationVerdict) => boolean;
@@ -71,7 +71,10 @@ export async function runProviderAwarePool<T>(
   async function reserveProviderStart(provider: string) {
     const current = now();
     const scheduled = Math.max(current, providerNextStart.get(provider) || 0);
-    providerNextStart.set(provider, scheduled + Math.max(0, options.providerStartGapMs));
+    const configuredGap = typeof options.providerStartGapMs === "function"
+      ? options.providerStartGapMs(provider)
+      : options.providerStartGapMs;
+    providerNextStart.set(provider, scheduled + Math.max(0, configuredGap));
     const wait = scheduled - current;
     if (wait > 0) await sleep(wait);
   }
