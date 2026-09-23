@@ -210,7 +210,21 @@ async function remainingCountForJob(scope: string, jobId: string) {
       from contacts c
       where c.status='active'
         and c.validation_status in ('pending','unknown','error')
-        and lower(c.normalized_email) ~ '@(gmail|googlemail)\\.com
+        and lower(split_part(c.normalized_email,'@',2)) in ('gmail.com','googlemail.com')
+        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id)
+    `, [jobId]);
+    return Number(result.rows[0]?.total || 0);
+  }
+
+  const result = await pool.query<{ total: number }>(`
+    select count(*)::int as total
+    from contacts c
+    where c.status='active'
+      and c.validation_status in ('pending','unknown','error')
+      and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id)
+  `, [jobId]);
+  return Number(result.rows[0]?.total || 0);
+}
 async function addInvalidSuppression(email: string, contactId: string, detail: string | null) {
   await db.insert(suppressions).values({
     email,
