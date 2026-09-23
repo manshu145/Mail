@@ -155,7 +155,7 @@ export default async function ValidationPage() {
             </tbody>
           </table>
         </div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation results yet.</div>}
-      </section>>
+      </section>
     </div>
   </AppShell>;
 }
