@@ -44,8 +44,8 @@ export async function POST(request: NextRequest) {
   }
 
   const active = await activeJob();
-  if (active) return NextResponse.json({
-    error: "A validation job is already active. Pause/resume that job or wait for it to finish.",
+  if (active && body.action !== "start_single") return NextResponse.json({
+    error: "A bulk validation job is already active. Pause/resume that job or wait for it to finish.",
     activeJob: { id: active.id, scope: active.scope, status: active.status, totalRows: active.totalRows, processedRows: active.processedRows },
   }, { status: 409 });
 
@@ -96,7 +96,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `This contact already has a final validation status: ${contact.validationStatus}.` }, { status: 409 });
   }
 
-  const [job] = await db.insert(validationJobs).values({ scope: `contact:${contact.id}`, totalRows: 1 }).returning({ id: validationJobs.id });
+  const scope = `contact:${contact.id}`;
+  const [existingJob] = await db.select({ id: validationJobs.id, status: validationJobs.status })
+    .from(validationJobs)
+    .where(and(eq(validationJobs.scope, scope), inArray(validationJobs.status, ["pending","processing"])))
+    .limit(1);
+  if (existingJob) {
+    return NextResponse.json({ error: "This contact already has an active validation check.", activeJob: existingJob }, { status: 409 });
+  }
+
+  const [job] = await db.insert(validationJobs).values({ scope, totalRows: 1 }).returning({ id: validationJobs.id });
   await audit("validation.queued", session, "validation_job", job.id, { scope: "single_contact", contactId: contact.id, email: contact.email });
   return NextResponse.json({ ok: true, id: job.id, total: 1 });
 }
