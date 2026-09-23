@@ -5,7 +5,7 @@ import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import type { ValidationVerdict } from "../../src/lib/validation-policy";
 import { validateMailboxInternally } from "../../src/lib/mailbox-validator";
-import { recipientDomain, recipientProvider, runProviderAwarePool, validationIsPreRecipientFailure } from "../../src/lib/validation-throughput";
+import { recipientDomain, recipientProvider, runProviderAwarePool, validationIsPreRecipientFailure, validationNeedsBackoff } from "../../src/lib/validation-throughput";
 import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
 import { normalizeValidationMode, validationModeNeedsSupersend, type ValidationMode } from "../../src/lib/validation-provider";
 
@@ -114,13 +114,56 @@ type ValidationContact = { id: string; email: string; normalizedEmail: string };
 const validationBatchSize = Math.max(25, Math.min(1000, Number(process.env.VALIDATION_BATCH_SIZE || "250")));
 const validationConcurrency = Math.max(1, Math.min(32, Number(process.env.VALIDATION_CONCURRENCY || "20")));
 const validationTargetPerSecond = Math.max(1, Math.min(10, Number(process.env.VALIDATION_TARGET_PER_SECOND || "5")));
+const validationBasePerSecond = Math.max(1, Math.min(validationTargetPerSecond, Number(process.env.VALIDATION_BASE_PER_SECOND || "2")));
 const configuredProviderStartGapMs = Number(process.env.VALIDATION_PROVIDER_START_GAP_MS || "0");
 const validationProviderStartGapMs = configuredProviderStartGapMs > 0
   ? Math.max(100, Math.min(10_000, configuredProviderStartGapMs))
-  : Math.max(100, Math.ceil(1000 / validationTargetPerSecond));
-const validationProviderBackoffMs = Math.max(validationProviderStartGapMs, Math.min(120_000, Number(process.env.VALIDATION_PROVIDER_BACKOFF_MS || "15000")));
+  : 0;
+const defaultAdaptiveGapMs = Math.max(100, Math.ceil(1000 / validationBasePerSecond));
+const validationProviderBackoffMs = Math.max(defaultAdaptiveGapMs, Math.min(120_000, Number(process.env.VALIDATION_PROVIDER_BACKOFF_MS || "15000")));
 const validationProviderHoldMs = Math.max(validationProviderBackoffMs, Math.min(3_600_000, Number(process.env.VALIDATION_PROVIDER_HOLD_MS || "600000")));
+const validationProviderHoldFloorMs = Math.max(60_000, validationProviderBackoffMs * 4);
 const providerHoldUntil = new Map<string, number>();
+const providerRatePerSecond = new Map<string, number>();
+const providerSuccessStreak = new Map<string, number>();
+const providerFailureLevel = new Map<string, number>();
+
+function currentProviderRate(provider: string) {
+  return providerRatePerSecond.get(provider) || validationBasePerSecond;
+}
+
+function providerStartGapFor(provider: string) {
+  if (validationProviderStartGapMs > 0) return validationProviderStartGapMs;
+  return Math.max(100, Math.ceil(1000 / Math.max(1, currentProviderRate(provider))));
+}
+
+function registerProviderPressure(provider: string) {
+  const currentRate = currentProviderRate(provider);
+  providerRatePerSecond.set(provider, Math.max(1, Math.floor(currentRate / 2)));
+  providerSuccessStreak.set(provider, 0);
+  const level = Math.min(5, (providerFailureLevel.get(provider) || 0) + 1);
+  providerFailureLevel.set(provider, level);
+  const holdMs = Math.min(validationProviderHoldMs, validationProviderHoldFloorMs * (2 ** (level - 1)));
+  providerHoldUntil.set(provider, Date.now() + holdMs);
+}
+
+function registerProviderOutcome(provider: string, verdict: ValidationVerdict) {
+  if (validationNeedsBackoff(verdict)) {
+    providerRatePerSecond.set(provider, Math.max(1, currentProviderRate(provider) - 1));
+    providerSuccessStreak.set(provider, 0);
+    return;
+  }
+  const nextStreak = (providerSuccessStreak.get(provider) || 0) + 1;
+  if (nextStreak >= 25) {
+    providerRatePerSecond.set(provider, Math.min(validationTargetPerSecond, currentProviderRate(provider) + 1));
+    providerSuccessStreak.set(provider, 0);
+    if ((providerFailureLevel.get(provider) || 0) > 0) {
+      providerFailureLevel.set(provider, Math.max(0, (providerFailureLevel.get(provider) || 0) - 1));
+    }
+  } else {
+    providerSuccessStreak.set(provider, nextStreak);
+  }
+}
 
 function providerLaneCount(provider: string) {
   if (provider === "google") return Math.max(1, Math.min(8, Number(process.env.VALIDATION_GOOGLE_LANES || "6")));
@@ -355,8 +398,11 @@ async function runJob() {
   await heartbeat({
     state: resumed ? "resumed" : "processing", jobId: job.id, scope: job.scope, processed, total,
     batch: remaining.length, concurrency: validationConcurrency, scheduler: "provider_aware",
-    validationMode, targetPerSecond: validationMode === "supersend" ? null : validationTargetPerSecond,
+    validationMode,
+    targetPerSecond: validationMode === "supersend" ? null : validationTargetPerSecond,
+    basePerSecond: validationMode === "supersend" ? null : validationBasePerSecond,
     providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
+    providerRates: validationMode === "supersend" ? {} : Object.fromEntries(providerRatePerSecond),
   });
 
   let lastProgressPublish = 0;
@@ -369,7 +415,9 @@ async function runJob() {
       state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed,
       concurrency: validationConcurrency, scheduler: "provider_aware", validationMode,
       targetPerSecond: validationMode === "supersend" ? null : validationTargetPerSecond,
+      basePerSecond: validationMode === "supersend" ? null : validationBasePerSecond,
       providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
+      providerRates: validationMode === "supersend" ? {} : Object.fromEntries(providerRatePerSecond),
       providerBackoffMs: validationProviderBackoffMs,
       providerHoldMs: validationProviderHoldMs,
       providerHolds: [...providerHoldUntil.entries()].filter(([, until]) => until > Date.now()).length,
@@ -395,9 +443,11 @@ async function runJob() {
         result = await validateMailboxWithDeadline(contact.normalizedEmail);
 
         if (validationIsPreRecipientFailure(result)) {
-          providerHoldUntil.set(provider, Date.now() + validationProviderHoldMs);
+          registerProviderPressure(provider);
           return result;
         }
+
+        registerProviderOutcome(provider, result);
 
         if (validationMode === "hybrid" && (result.status === "unknown" || result.status === "error")) {
           const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey as string);
@@ -423,7 +473,7 @@ async function runJob() {
         : validationMode === "supersend"
           ? () => validationConcurrency
           : providerLaneCount,
-      providerStartGapMs: job.scope.startsWith("contact:") ? 0 : validationMode === "supersend" ? 250 : validationProviderStartGapMs,
+      providerStartGapMs: job.scope.startsWith("contact:") ? 0 : validationMode === "supersend" ? 250 : (provider) => providerStartGapFor(provider),
       backoffDelayMs: validationProviderBackoffMs,
       shouldHoldProvider: (verdict) => validationIsPreRecipientFailure(verdict) || verdict.detail === "provider_hold_active",
       shouldStop: () => validationPaused(),
@@ -438,12 +488,19 @@ async function runJob() {
 
   const hasMore = (await contactsForJob(job.scope, job.id, 1)).length > 0;
   if (hasMore) {
+    const activeHolds = [...providerHoldUntil.entries()].filter(([, until]) => until > Date.now());
+    const allProvidersHeld = outcome.providers > 0 && outcome.heldProviders.length >= outcome.providers && activeHolds.length >= outcome.providers;
+    const nextResumeAt = activeHolds.length ? new Date(Math.min(...activeHolds.map(([, until]) => until))).toISOString() : null;
     await heartbeat({
-      state: "processing", jobId: job.id, scope: job.scope, processed, total, batchComplete: true, resumed,
+      state: allProvidersHeld ? "provider_hold" : "processing", jobId: job.id, scope: job.scope, processed, total, batchComplete: true, resumed,
       providers: outcome.providers, lanes: outcome.lanes, concurrency: outcome.concurrency, validationMode,
       heldProviders: outcome.heldProviders,
       providerHoldMs: validationProviderHoldMs,
-      providerHolds: [...providerHoldUntil.entries()].filter(([, until]) => until > Date.now()).length,
+      providerHolds: activeHolds.length,
+      nextResumeAt,
+      targetPerSecond: validationMode === "supersend" ? null : validationTargetPerSecond,
+      basePerSecond: validationMode === "supersend" ? null : validationBasePerSecond,
+      providerRates: validationMode === "supersend" ? {} : Object.fromEntries(providerRatePerSecond),
     });
     return;
   }
@@ -467,7 +524,7 @@ async function runWithWorkerLock() {
 }
 
 async function main() {
-  console.log(`[validation-worker] started; selectable validation modes; provider-aware concurrency=${validationConcurrency}, target=${validationTargetPerSecond}/s, provider-start-gap=${validationProviderStartGapMs}ms`);
+  console.log(`[validation-worker] started; selectable validation modes; provider-aware concurrency=${validationConcurrency}, adaptive=${validationBasePerSecond}->${validationTargetPerSecond}/s, provider-start-gap=${validationProviderStartGapMs || "adaptive"}`);
   while (true) {
     try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
