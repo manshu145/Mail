@@ -112,17 +112,21 @@ async function validationPaused(force = false) {
 type ValidationContact = { id: string; email: string; normalizedEmail: string };
 
 const validationBatchSize = Math.max(25, Math.min(1000, Number(process.env.VALIDATION_BATCH_SIZE || "250")));
-const validationConcurrency = Math.max(1, Math.min(24, Number(process.env.VALIDATION_CONCURRENCY || "12")));
-const validationProviderStartGapMs = Math.max(250, Math.min(10_000, Number(process.env.VALIDATION_PROVIDER_START_GAP_MS || "750")));
+const validationConcurrency = Math.max(1, Math.min(32, Number(process.env.VALIDATION_CONCURRENCY || "20")));
+const validationTargetPerSecond = Math.max(1, Math.min(10, Number(process.env.VALIDATION_TARGET_PER_SECOND || "5")));
+const configuredProviderStartGapMs = Number(process.env.VALIDATION_PROVIDER_START_GAP_MS || "0");
+const validationProviderStartGapMs = configuredProviderStartGapMs > 0
+  ? Math.max(100, Math.min(10_000, configuredProviderStartGapMs))
+  : Math.max(100, Math.ceil(1000 / validationTargetPerSecond));
 const validationProviderBackoffMs = Math.max(validationProviderStartGapMs, Math.min(120_000, Number(process.env.VALIDATION_PROVIDER_BACKOFF_MS || "15000")));
 const validationProviderHoldMs = Math.max(validationProviderBackoffMs, Math.min(3_600_000, Number(process.env.VALIDATION_PROVIDER_HOLD_MS || "600000")));
 const providerHoldUntil = new Map<string, number>();
 
 function providerLaneCount(provider: string) {
-  if (provider === "google") return Math.max(1, Math.min(4, Number(process.env.VALIDATION_GOOGLE_LANES || "3")));
-  if (provider === "yahoo") return Math.max(1, Math.min(4, Number(process.env.VALIDATION_YAHOO_LANES || "2")));
-  if (provider === "microsoft") return Math.max(1, Math.min(3, Number(process.env.VALIDATION_MICROSOFT_LANES || "2")));
-  if (provider === "rediff") return Math.max(1, Math.min(3, Number(process.env.VALIDATION_REDIFF_LANES || "2")));
+  if (provider === "google") return Math.max(1, Math.min(8, Number(process.env.VALIDATION_GOOGLE_LANES || "6")));
+  if (provider === "yahoo") return Math.max(1, Math.min(6, Number(process.env.VALIDATION_YAHOO_LANES || "4")));
+  if (provider === "microsoft") return Math.max(1, Math.min(6, Number(process.env.VALIDATION_MICROSOFT_LANES || "4")));
+  if (provider === "rediff") return Math.max(1, Math.min(4, Number(process.env.VALIDATION_REDIFF_LANES || "3")));
   return 1;
 }
 
@@ -351,7 +355,8 @@ async function runJob() {
   await heartbeat({
     state: resumed ? "resumed" : "processing", jobId: job.id, scope: job.scope, processed, total,
     batch: remaining.length, concurrency: validationConcurrency, scheduler: "provider_aware",
-    validationMode, providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
+    validationMode, targetPerSecond: validationMode === "supersend" ? null : validationTargetPerSecond,
+    providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
   });
 
   let lastProgressPublish = 0;
@@ -363,6 +368,7 @@ async function runJob() {
     await heartbeat({
       state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed,
       concurrency: validationConcurrency, scheduler: "provider_aware", validationMode,
+      targetPerSecond: validationMode === "supersend" ? null : validationTargetPerSecond,
       providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
       providerBackoffMs: validationProviderBackoffMs,
       providerHoldMs: validationProviderHoldMs,
@@ -461,7 +467,7 @@ async function runWithWorkerLock() {
 }
 
 async function main() {
-  console.log(`[validation-worker] started; selectable validation modes; provider-aware concurrency=${validationConcurrency}, provider-start-gap=${validationProviderStartGapMs}ms`);
+  console.log(`[validation-worker] started; selectable validation modes; provider-aware concurrency=${validationConcurrency}, target=${validationTargetPerSecond}/s, provider-start-gap=${validationProviderStartGapMs}ms`);
   while (true) {
     try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
