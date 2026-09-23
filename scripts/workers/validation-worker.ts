@@ -3,10 +3,11 @@ import { db, pool } from "../../src/db";
 import { contacts, suppressions, systemSettings, validationJobs, validationResults } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
-import { isDirectGmailAddress, type ValidationVerdict } from "../../src/lib/validation-policy";
+import type { ValidationVerdict } from "../../src/lib/validation-policy";
 import { validateMailboxInternally } from "../../src/lib/mailbox-validator";
 import { recipientDomain, recipientProvider, runProviderAwarePool } from "../../src/lib/validation-throughput";
 import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
+import { normalizeValidationMode, validationModeNeedsSupersend, type ValidationMode } from "../../src/lib/validation-provider";
 
 const intervalMs = Math.max(2000, Number(process.env.VALIDATION_INTERVAL_MS || "5000"));
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_API_TIMEOUT_MS || "10000"));
@@ -22,7 +23,6 @@ async function validateMailboxWithDeadline(email: string): Promise<ValidationVer
   ]);
 }
 const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v2/email-validation/verify").trim();
-const supersendFallbackEnabled = process.env.SUPERSEND_FALLBACK_ENABLED === "true";
 
 type ExistingResult = {
   contact_id: string;
@@ -42,7 +42,12 @@ function classifySupersendPayload(body: unknown): ValidationVerdict {
   if (!data || typeof data !== "object") return { status: "unknown", detail: "supersend_v2_missing_data" };
 
   const record = data as Record<string, unknown>;
+  const verdict = String(record.verdict || "").toLowerCase();
+  const subtype = String(record.subtype || record.validation_subtype || "").trim().toLowerCase();
   if (record.is_disallowed === true) return { status: "invalid", detail: "supersend_v2_disallowed" };
+  if (verdict === "valid") return { status: "valid", detail: subtype ? `supersend_v2_valid:${subtype}` : "supersend_v2_valid" };
+  if (verdict === "invalid") return { status: "invalid", detail: subtype ? `supersend_v2_invalid:${subtype}` : "supersend_v2_invalid" };
+  if (verdict === "risky") return { status: "unknown", detail: subtype ? `supersend_v2_risky:${subtype}` : "supersend_v2_risky" };
   if (record.valid === true) return { status: "valid", detail: "supersend_v2_valid" };
   if (record.valid === false) return { status: "invalid", detail: "supersend_v2_invalid" };
   return { status: "unknown", detail: "supersend_v2_ambiguous" };
@@ -301,11 +306,22 @@ async function runJob() {
   }
   const job = await selectWorkJob();
   if (!job) {
-    await heartbeat({ state: "idle", provider: "internal_smtp", supersendFallbackEnabled, concurrency: validationConcurrency, scheduler: "provider_aware" });
+    await heartbeat({ state: "idle", provider: "selectable", concurrency: validationConcurrency, scheduler: "provider_aware" });
     return;
   }
 
-  const apiKey = supersendFallbackEnabled ? await configuredSupersendApiKey() : null;
+  const validationMode = normalizeValidationMode(job.validationMode);
+  const apiKey = validationModeNeedsSupersend(validationMode) ? await configuredSupersendApiKey() : null;
+  if (validationModeNeedsSupersend(validationMode) && !apiKey) {
+    await heartbeat({
+      state: "configuration_error",
+      jobId: job.id,
+      scope: job.scope,
+      validationMode,
+      detail: "supersend_api_key_missing",
+    });
+    return;
+  }
   const resumed = job.status === "processing";
   if (!resumed) await db.update(validationJobs).set({ status: "processing" }).where(eq(validationJobs.id, job.id));
 
@@ -318,7 +334,7 @@ async function runJob() {
   await heartbeat({
     state: resumed ? "resumed" : "processing", jobId: job.id, scope: job.scope, processed, total,
     batch: remaining.length, concurrency: validationConcurrency, scheduler: "provider_aware",
-    providerStartGapMs: validationProviderStartGapMs,
+    validationMode, providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
   });
 
   let lastProgressPublish = 0;
@@ -329,9 +345,9 @@ async function runJob() {
     await pool.query(`update validation_jobs set processed_rows=greatest(processed_rows,$2), total_rows=greatest(total_rows,$3) where id=$1`, [job.id, processed, total]);
     await heartbeat({
       state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed,
-      concurrency: validationConcurrency, scheduler: "provider_aware",
-      providerStartGapMs: validationProviderStartGapMs, providerBackoffMs: validationProviderBackoffMs,
-      hardTimeoutMs: validationHardTimeoutMs,
+      concurrency: validationConcurrency, scheduler: "provider_aware", validationMode,
+      providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
+      providerBackoffMs: validationProviderBackoffMs, hardTimeoutMs: validationHardTimeoutMs,
     });
   };
 
@@ -339,19 +355,18 @@ async function runJob() {
     remaining,
     (contact) => recipientProvider(recipientDomain(contact.normalizedEmail)),
     async (contact) => {
-      let result = await validateMailboxWithDeadline(contact.normalizedEmail);
-
-      if (
-        (result.status === "unknown" || result.status === "error") &&
-        supersendFallbackEnabled &&
-        apiKey &&
-        isDirectGmailAddress(contact.normalizedEmail)
-      ) {
-        const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey);
-        if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
-          result = fallback;
-        } else {
-          result = { status: result.status, detail: `${result.detail};fallback:${fallback.detail}` };
+      let result: ValidationVerdict;
+      if (validationMode === "supersend") {
+        result = await verifyWithSupersend(contact.normalizedEmail, apiKey as string);
+      } else {
+        result = await validateMailboxWithDeadline(contact.normalizedEmail);
+        if (validationMode === "hybrid" && (result.status === "unknown" || result.status === "error")) {
+          const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey as string);
+          if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
+            result = fallback;
+          } else {
+            result = { status: result.status, detail: `${result.detail};fallback:${fallback.detail}` };
+          }
         }
       }
 
@@ -364,8 +379,12 @@ async function runJob() {
     },
     {
       concurrency: job.scope.startsWith("contact:") ? 1 : validationConcurrency,
-      lanesForProvider: job.scope.startsWith("contact:") ? () => 1 : providerLaneCount,
-      providerStartGapMs: job.scope.startsWith("contact:") ? 0 : validationProviderStartGapMs,
+      lanesForProvider: job.scope.startsWith("contact:")
+        ? () => 1
+        : validationMode === "supersend"
+          ? () => validationConcurrency
+          : providerLaneCount,
+      providerStartGapMs: job.scope.startsWith("contact:") ? 0 : validationMode === "supersend" ? 250 : validationProviderStartGapMs,
       backoffDelayMs: validationProviderBackoffMs,
       shouldStop: () => validationPaused(),
     },
@@ -381,7 +400,7 @@ async function runJob() {
   if (hasMore) {
     await heartbeat({
       state: "processing", jobId: job.id, scope: job.scope, processed, total, batchComplete: true, resumed,
-      providers: outcome.providers, lanes: outcome.lanes, concurrency: outcome.concurrency,
+      providers: outcome.providers, lanes: outcome.lanes, concurrency: outcome.concurrency, validationMode,
     });
     return;
   }
@@ -405,7 +424,7 @@ async function runWithWorkerLock() {
 }
 
 async function main() {
-  console.log(`[validation-worker] started; internal SMTP primary; provider-aware concurrency=${validationConcurrency}, provider-start-gap=${validationProviderStartGapMs}ms; SuperSend optional fallback`);
+  console.log(`[validation-worker] started; selectable validation modes; provider-aware concurrency=${validationConcurrency}, provider-start-gap=${validationProviderStartGapMs}ms`);
   while (true) {
     try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
