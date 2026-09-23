@@ -84,7 +84,11 @@ export async function DELETE() {
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable." }, { status: 503 });
 
   await db.delete(systemSettings).where(eq(systemSettings.key, KEY));
-  await audit("validation.provider_key.removed", session, "system_setting", KEY, { provider: "supersend" });
   const environmentConfigured = Boolean(String(process.env.SUPERSEND_API_KEY || "").trim());
-  return NextResponse.json({ ok: true, configured: environmentConfigured, source: environmentConfigured ? "environment" : null });
+  if (!environmentConfigured) {
+    await db.insert(systemSettings).values({ key: VALIDATION_MODE_KEY, value: "internal" })
+      .onConflictDoUpdate({ target: systemSettings.key, set: { value: "internal", updatedAt: new Date() } });
+  }
+  await audit("validation.provider_key.removed", session, "system_setting", KEY, { provider: "supersend", fallbackMode: environmentConfigured ? null : "internal" });
+  return NextResponse.json({ ok: true, configured: environmentConfigured, source: environmentConfigured ? "environment" : null, mode: environmentConfigured ? undefined : "internal" });
 }
