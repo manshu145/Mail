@@ -419,6 +419,7 @@ async function runJob() {
           : providerLaneCount,
       providerStartGapMs: job.scope.startsWith("contact:") ? 0 : validationMode === "supersend" ? 250 : validationProviderStartGapMs,
       backoffDelayMs: validationProviderBackoffMs,
+      shouldHoldProvider: (verdict) => validationIsPreRecipientFailure(verdict) || verdict.detail === "provider_hold_active",
       shouldStop: () => validationPaused(),
     },
   );
@@ -434,6 +435,7 @@ async function runJob() {
     await heartbeat({
       state: "processing", jobId: job.id, scope: job.scope, processed, total, batchComplete: true, resumed,
       providers: outcome.providers, lanes: outcome.lanes, concurrency: outcome.concurrency, validationMode,
+      heldProviders: outcome.heldProviders,
       providerHoldMs: validationProviderHoldMs,
       providerHolds: [...providerHoldUntil.entries()].filter(([, until]) => until > Date.now()).length,
     });
