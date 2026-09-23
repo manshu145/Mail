@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 APP_CONTAINER=${NEXIMAIL_APP_CONTAINER:-neximail-next-app-1}
 PG_CONTAINER=${NEXIMAIL_PG_CONTAINER:-neximail-next-postgres-1}
+MTA_CONTAINER=${NEXIMAIL_MTA_CONTAINER:-neximail-next-mta-1}
 APP_DIR=${NEXIMAIL_APP_DIR:-/opt/neximail-next}
 
 env_value() {
@@ -18,6 +19,7 @@ trap cleanup EXIT
 echo "=== NexiMail production acceptance ==="
 docker inspect "$APP_CONTAINER" >/dev/null
 docker inspect "$PG_CONTAINER" >/dev/null
+docker inspect "$MTA_CONTAINER" >/dev/null
 
 if [[ -n "$SCRIPT_URL" ]]; then
   TMP=$(mktemp)
@@ -70,21 +72,31 @@ else
   echo "[WARN] Could not determine public IPv4 for PTR check."
 fi
 
+echo "Outbound SMTP TLS policy:"
+TLS_LEVEL=$(docker exec "$MTA_CONTAINER" postconf -h smtp_tls_security_level 2>/dev/null || true)
+TLS_CAFILE=$(docker exec "$MTA_CONTAINER" postconf -h smtp_tls_CAfile 2>/dev/null || true)
+if [[ "$TLS_LEVEL" == "may" || "$TLS_LEVEL" == "encrypt" || "$TLS_LEVEL" == "dane" || "$TLS_LEVEL" == "dane-only" || "$TLS_LEVEL" == "secure" || "$TLS_LEVEL" == "verify" ]]; then
+  echo "[PASS] Postfix outbound TLS is enabled (smtp_tls_security_level=$TLS_LEVEL, CAfile=${TLS_CAFILE:-unset})"
+else
+  echo "[WARN] Postfix outbound TLS policy is not enabled as expected (smtp_tls_security_level=${TLS_LEVEL:-unset})"
+fi
+
 if command -v openssl >/dev/null 2>&1; then
-  echo "SMTP STARTTLS:"
+  echo "Inbound SMTP STARTTLS certificate:"
   TLS_HOST="${MTA_TLS_HOSTNAME:-$(env_value MTA_HOSTNAME)}"
   if [[ -z "$TLS_HOST" ]]; then
     echo "[WARN] MTA_HOSTNAME is not configured; STARTTLS hostname probe skipped."
     TLS_HOST=""
   fi
   TLS_OUT=$(mktemp)
-  if [[ -n "$TLS_HOST" ]] && timeout 15 openssl s_client -starttls smtp -connect 127.0.0.1:25 -servername "$TLS_HOST" -verify_hostname "$TLS_HOST" </dev/null >"$TLS_OUT" 2>&1 \
-    && grep -Eq 'Protocol *: TLS|New, TLSv|Cipher is|Ciphersuite:' "$TLS_OUT" \
-    && grep -q 'Verify return code: 0 (ok)' "$TLS_OUT"; then
+  if [[ -n "$TLS_HOST" ]] \
+    && timeout 15 openssl s_client -verify_return_error -starttls smtp -connect 127.0.0.1:25 -servername "$TLS_HOST" -verify_hostname "$TLS_HOST" </dev/null >"$TLS_OUT" 2>&1 \
+    && grep -q 'Verify return code: 0 (ok)' "$TLS_OUT" \
+    && ! grep -qi 'no peer certificate' "$TLS_OUT"; then
     echo "[PASS] STARTTLS handshake and certificate hostname verification succeeded for $TLS_HOST"
   else
     echo "[WARN] STARTTLS/certificate verification failed for $TLS_HOST."
-    grep -E 'Verify return code|verify error|hostname mismatch|subject=' "$TLS_OUT" || true
+    grep -E 'Verify return code|verify error|hostname mismatch|subject=|no peer certificate' "$TLS_OUT" || true
   fi
   rm -f "$TLS_OUT"
 else
