@@ -127,6 +127,8 @@ const providerHoldUntil = new Map<string, number>();
 const providerRatePerSecond = new Map<string, number>();
 const providerSuccessStreak = new Map<string, number>();
 const providerFailureLevel = new Map<string, number>();
+const providerHoldReason = new Map<string, string>();
+const providerLastPressureAt = new Map<string, string>();
 
 function currentProviderRate(provider: string) {
   return providerRatePerSecond.get(provider) || validationBasePerSecond;
@@ -137,14 +139,18 @@ function providerStartGapFor(provider: string) {
   return Math.max(100, Math.ceil(1000 / Math.max(1, currentProviderRate(provider))));
 }
 
-function registerProviderPressure(provider: string) {
+function registerProviderPressure(provider: string, verdict: ValidationVerdict) {
   const currentRate = currentProviderRate(provider);
   providerRatePerSecond.set(provider, Math.max(1, Math.floor(currentRate / 2)));
   providerSuccessStreak.set(provider, 0);
   const level = Math.min(5, (providerFailureLevel.get(provider) || 0) + 1);
   providerFailureLevel.set(provider, level);
   const holdMs = Math.min(validationProviderHoldMs, validationProviderHoldFloorMs * (2 ** (level - 1)));
-  providerHoldUntil.set(provider, Date.now() + holdMs);
+  const until = Date.now() + holdMs;
+  providerHoldUntil.set(provider, until);
+  providerHoldReason.set(provider, String(verdict.detail || verdict.status || "unknown"));
+  providerLastPressureAt.set(provider, new Date().toISOString());
+  console.warn(`[validation-worker] provider hold provider=${provider} level=${level} rate=${currentProviderRate(provider)}/s holdMs=${holdMs} detail=${String(verdict.detail || verdict.status || "unknown")}`);
 }
 
 function registerProviderOutcome(provider: string, verdict: ValidationVerdict) {
@@ -421,6 +427,8 @@ async function runJob() {
       providerBackoffMs: validationProviderBackoffMs,
       providerHoldMs: validationProviderHoldMs,
       providerHolds: [...providerHoldUntil.entries()].filter(([, until]) => until > Date.now()).length,
+      providerHoldReasons: Object.fromEntries([...providerHoldReason.entries()].filter(([provider]) => (providerHoldUntil.get(provider) || 0) > Date.now())),
+      providerLastPressureAt: Object.fromEntries([...providerLastPressureAt.entries()].filter(([provider]) => (providerHoldUntil.get(provider) || 0) > Date.now())),
       hardTimeoutMs: validationHardTimeoutMs,
     });
   };
@@ -443,7 +451,7 @@ async function runJob() {
         result = await validateMailboxWithDeadline(contact.normalizedEmail);
 
         if (validationIsPreRecipientFailure(result)) {
-          registerProviderPressure(provider);
+          registerProviderPressure(provider, result);
           return result;
         }
 
@@ -501,6 +509,8 @@ async function runJob() {
       targetPerSecond: validationMode === "supersend" ? null : validationTargetPerSecond,
       basePerSecond: validationMode === "supersend" ? null : validationBasePerSecond,
       providerRates: validationMode === "supersend" ? {} : Object.fromEntries(providerRatePerSecond),
+      providerHoldReasons: Object.fromEntries([...providerHoldReason.entries()].filter(([provider]) => (providerHoldUntil.get(provider) || 0) > Date.now())),
+      providerLastPressureAt: Object.fromEntries([...providerLastPressureAt.entries()].filter(([provider]) => (providerHoldUntil.get(provider) || 0) > Date.now())),
     });
     return;
   }
