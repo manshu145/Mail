@@ -241,10 +241,23 @@ async function runOnce() {
   });
 }
 
+async function runWithWorkerLock() {
+  const lock = await pool.connect();
+  let acquired = false;
+  try {
+    const result = await lock.query<{ acquired: boolean }>("select pg_try_advisory_lock(734201, 2) as acquired");
+    acquired = Boolean(result.rows[0]?.acquired);
+    if (acquired) await runOnce();
+  } finally {
+    if (acquired) await lock.query("select pg_advisory_unlock(734201, 2)").catch(() => {});
+    lock.release();
+  }
+}
+
 async function main() {
   await recoverAbandonedClaims();
   while (true) {
-    try { await runOnce(); }
+    try { await runWithWorkerLock(); }
     catch (error) { console.error("[campaign-worker]", error); await heartbeat({ state: "error" }).catch(() => {}); }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
