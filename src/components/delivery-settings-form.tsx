@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { DeliverySettings } from "@/lib/delivery-settings";
 
-type Section = "Reputation protection" | "Sending limits" | "Retry policy";
+type Section = "Reputation protection" | "Sending limits" | "Multi-campaign delivery" | "Retry policy";
 type Field = { key:keyof DeliverySettings; label:string; help:string; section:Section; step?:string; min?:string; max?:string; display?:"percent" };
 
 const fields: Field[] = [
@@ -23,6 +23,9 @@ const fields: Field[] = [
   { key:"maxRolling24h", section:"Sending limits", label:"Global 24-hour limit", help:"0 = unlimited. This is an optional global safety ceiling." },
   { key:"maxActiveQueued", section:"Sending limits", label:"Maximum active / queued messages", help:"Backpressure ceiling used to avoid releasing more work than the system can safely process." },
 
+  { key:"maxConcurrentCampaigns", section:"Multi-campaign delivery", label:"Maximum simultaneous campaigns", help:"How many campaigns may be in active sending state at once. Additional queued or scheduled campaigns wait for a free slot.", min:"1", max:"25" },
+  { key:"campaignBurstPerRound", section:"Multi-campaign delivery", label:"Messages per campaign turn", help:"Round-robin fairness. 1 alternates one message per campaign; higher values let each campaign send a small burst before rotating.", min:"1", max:"50" },
+
   { key:"retryMaxAttempts", section:"Retry policy", label:"Maximum delivery attempts", help:"Temporary delivery failures stop retrying after this many attempts." },
   { key:"retryInitialSeconds", section:"Retry policy", label:"Initial retry wait (seconds)", help:"Wait time before the first retry after a temporary transport failure." },
   { key:"retryMaxSeconds", section:"Retry policy", label:"Maximum retry wait (seconds)", help:"Upper cap for progressively increasing retry delays." },
@@ -32,6 +35,7 @@ const fields: Field[] = [
 const sections: Array<{name:Section; description:string}> = [
   { name:"Reputation protection", description:"Automatic safety rules that protect sender reputation and react to mailbox-provider pressure." },
   { name:"Sending limits", description:"Optional global ceilings. Keep volume limits at 0 when you do not want a platform-level cap." },
+  { name:"Multi-campaign delivery", description:"Run multiple campaigns together without allowing one large campaign to monopolize the queue. NexiMail rotates fairly across active campaigns." },
   { name:"Retry policy", description:"How NexiMail retries temporary delivery failures without creating uncontrolled retry loops." },
 ];
 
