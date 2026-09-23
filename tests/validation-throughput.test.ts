@@ -68,3 +68,39 @@ test("provider pre-recipient failures are distinguishable from recipient verdict
   assert.equal(validationIsPreRecipientFailure({ status: "unknown", detail: "smtp_rcpt_452_temporary_or_policy" }), false);
   assert.equal(validationIsPreRecipientFailure({ status: "accepted", detail: "smtp_rcpt_250_accepted" }), false);
 });
+
+
+test("provider hold stops the rest of that provider batch without blocking others", async () => {
+  const seen: string[] = [];
+  const items = [
+    { id: "g1", provider: "google" },
+    { id: "g2", provider: "google" },
+    { id: "g3", provider: "google" },
+    { id: "y1", provider: "yahoo" },
+    { id: "y2", provider: "yahoo" },
+  ];
+
+  const outcome = await runProviderAwarePool(
+    items,
+    (item) => item.provider,
+    async (item) => {
+      seen.push(item.id);
+      if (item.id === "g1") return { status: "unknown" as const, detail: "smtp_banner_550" };
+      return { status: "accepted" as const, detail: "smtp_rcpt_250_accepted" };
+    },
+    {
+      concurrency: 3,
+      lanesForProvider: (provider) => provider === "google" ? 1 : 1,
+      providerStartGapMs: 0,
+      backoffDelayMs: 0,
+      shouldHoldProvider: validationIsPreRecipientFailure,
+    },
+  );
+
+  assert.deepEqual(outcome.heldProviders, ["google"]);
+  assert.equal(seen.includes("g1"), true);
+  assert.equal(seen.includes("g2"), false);
+  assert.equal(seen.includes("g3"), false);
+  assert.equal(seen.includes("y1"), true);
+  assert.equal(seen.includes("y2"), true);
+});
