@@ -154,7 +154,7 @@ export function ValidationControls({
 
   const validationReady = true;
 
-  return <div className="grid gap-4 xl:grid-cols-[1.45fr_.7fr]">
+  return <div className="space-y-4">
     <section className="premium-panel overflow-hidden">
       <div className="section-header">
         <div>
@@ -173,7 +173,7 @@ export function ValidationControls({
       {activeJob ? <div className="border-b border-[var(--border)] bg-blue-500/[0.035] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500"/><b className="text-xs">Active validation job</b><span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-black uppercase text-blue-700 dark:text-blue-300">{paused ? "paused" : activeJob.status}</span><span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-black text-violet-700 dark:text-violet-300">{activeJob.validationMode==="hybrid"?"Smart hybrid":activeJob.validationMode==="supersend"?"SuperSend primary":"NexiMail internal"}</span></div><div className="mt-1 truncate font-mono text-[11px] text-[var(--muted)]">{activeJob.scope} · {activeJob.id.slice(0,8)}</div></div>
-          <div className="text-right"><div className="text-[11px] font-black text-[var(--foreground)]">{activeJob.totalRows ? (activeJob.processedRows/activeJob.totalRows*100).toFixed(2) : "0.00"}%</div><div className="text-[11px] font-bold text-[var(--muted)]">{activeJob.processedRows.toLocaleString()} / {activeJob.totalRows.toLocaleString()}</div></div>
+          <div className="text-right"><div className="text-xl font-black tracking-[-.04em] text-[var(--foreground)]">{activeJob.totalRows ? (activeJob.processedRows/activeJob.totalRows*100).toFixed(2) : "0.00"}%</div><div className="mt-0.5 text-[11px] font-bold text-[var(--muted)]">{activeJob.processedRows.toLocaleString()} / {activeJob.totalRows.toLocaleString()}</div></div>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-violet-500 transition-all" style={{width:(activeJob.totalRows ? Math.min(100, activeJob.processedRows / activeJob.totalRows * 100) : 0) + "%"}}/></div>
       </div> : null}
@@ -193,7 +193,7 @@ export function ValidationControls({
       {(notice||error)?<div className="border-t border-[var(--border)] px-4 py-3">{notice?<p role="status" className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">{notice}</p>:null}{error?<p role="alert" className="text-[11px] font-bold text-rose-600">{error}</p>:null}</div>:null}
     </section>
 
-    <aside className="space-y-4">
+    <aside className="grid gap-4 lg:grid-cols-2">
       <section className="premium-panel overflow-hidden">
         <div className="section-header"><div><p className="page-eyebrow">Live engine</p><h2 className="section-title mt-1">Fast validator</h2></div><SearchCheck className="h-5 w-5 text-violet-600"/></div>
         <div className="grid grid-cols-2 gap-px bg-[var(--border)]">
@@ -251,15 +251,15 @@ export function ValidationControls({
         </div>
       </section>
 
-      <section className="premium-panel overflow-hidden">
+      <section className="premium-panel overflow-hidden lg:col-span-2">
         <div className="section-header"><div><p className="page-eyebrow">How it works</p><h2 className="section-title mt-1">Current validator</h2></div><ShieldCheck className="h-5 w-5 text-violet-600"/></div>
-        <div className="divide-y divide-[var(--border)]">
+        <div className="grid divide-y divide-[var(--border)] md:grid-cols-2 md:divide-y-0 xl:grid-cols-4 xl:divide-x xl:divide-[var(--border)]">
           {[
             ["Method","Each job keeps the validation mode selected when it was created: NexiMail internal, Smart hybrid, or SuperSend primary."],
             ["Positive","A positive result means the selected validator accepted the address at validation time. It does not guarantee inbox placement."],
             ["Invalid","Only explicit mailbox-missing or invalid-domain responses become invalid. NexiMail adds an invalid suppression."],
             ["Unknown / Error","Temporary, policy, risky or ambiguous result. In Smart hybrid mode, NexiMail asks SuperSend only when the internal result is unresolved."],
-          ].map(([title,body])=><div key={title} className="px-4 py-3"><p className="text-[11px] font-black">{title}</p><p className="mt-1 text-[12px] leading-4 text-[var(--muted)]">{body}</p></div>)}
+          ].map(([title,body])=><div key={title} className="px-4 py-4"><p className="text-[11px] font-black">{title}</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--muted)]">{body}</p></div>)}
         </div>
       </section>
     </aside>
