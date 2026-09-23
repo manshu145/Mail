@@ -168,10 +168,22 @@ export async function getCampaignSendGuard(input: {
     {
       key: "sender_auth",
       label: "Sender authentication",
-      status: input.domain?.status === "ready" && input.domain.spfOk && input.domain.dkimOk && input.domain.dmarcOk ? "ready" : "blocked",
-      detail: input.domain?.status === "ready" && input.domain.spfOk && input.domain.dkimOk && input.domain.dmarcOk
-        ? `SPF, DKIM and DMARC pass for ${input.fromEmail.split("@")[1] || input.fromEmail}.`
-        : "Sending domain must pass SPF, DKIM and DMARC before launch.",
+      status: input.domain?.status === "ready"
+        && input.domain.spfOk
+        && input.domain.dkimOk
+        && input.domain.dmarcOk
+        && input.domain.bounceStatus !== "warning"
+          ? "ready"
+          : "blocked",
+      detail: input.domain?.status === "ready"
+        && input.domain.spfOk
+        && input.domain.dkimOk
+        && input.domain.dmarcOk
+        && input.domain.bounceStatus !== "warning"
+          ? `SPF, DKIM, DMARC and envelope-from/bounce DNS are ready for ${input.fromEmail.split("@")[1] || input.fromEmail}.`
+          : input.domain?.bounceStatus === "warning"
+            ? "Bounce/envelope-from domain must have valid SPF authorization and MX routing before launch."
+            : "Sending domain must pass SPF, DKIM and DMARC before launch.",
       metadata: input.domain ? { spf: input.domain.spfOk, dkim: input.domain.dkimOk, dmarc: input.domain.dmarcOk, bounceStatus: input.domain.bounceStatus || null } : {},
     },
     {
