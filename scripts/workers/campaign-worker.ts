@@ -38,7 +38,8 @@ async function recoverAbandonedClaims() {
   return result.rowCount || 0;
 }
 
-async function claimDueCampaigns() {
+async function claimDueCampaigns(limit: number) {
+  if (limit <= 0) return [];
   const result = await pool.query<{ id: string }>(`
     with due as (
       select id
@@ -54,7 +55,7 @@ async function claimDueCampaigns() {
     from due
     where c.id=due.id
     returning c.id::text
-  `, [claimBatch]);
+  `, [limit]);
   return result.rows.map((row) => row.id);
 }
 
@@ -77,7 +78,14 @@ async function runOnce() {
     runtimeLimit === null ? deliveryLimit :
     deliveryLimit === null ? runtimeLimit :
     Math.min(runtimeLimit, deliveryLimit);
-  const claimedIds = await claimDueCampaigns();
+  const activeResult = await pool.query<{ total: number }>(`
+    select count(*)::int as total
+    from campaigns
+    where status='sending'
+  `);
+  const activeCampaigns = Number(activeResult.rows[0]?.total || 0);
+  const availableCampaignSlots = Math.max(0, delivery.maxConcurrentCampaigns - activeCampaigns);
+  const claimedIds = await claimDueCampaigns(Math.min(claimBatch, availableCampaignSlots));
   let resolved = 0;
   let excluded = 0;
   let blocked = 0;
@@ -215,7 +223,22 @@ async function runOnce() {
     }
   }
 
-  await heartbeat({ state: "online", mode: policy.mode, claimed: claimedIds.length, resolved, excluded, blocked, recovered, maxRecipientsPerCampaign: campaignLimit, source: "database_control_plane" });
+  await heartbeat({
+    state: "online",
+    mode: policy.mode,
+    claimed: claimedIds.length,
+    resolved,
+    excluded,
+    blocked,
+    recovered,
+    activeCampaigns,
+    maxConcurrentCampaigns: delivery.maxConcurrentCampaigns,
+    availableCampaignSlots,
+    schedulingMode: "round_robin",
+    campaignBurstPerRound: delivery.campaignBurstPerRound,
+    maxRecipientsPerCampaign: campaignLimit,
+    source: "database_control_plane",
+  });
 }
 
 async function main() {
