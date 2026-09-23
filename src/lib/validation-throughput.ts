@@ -35,6 +35,7 @@ export async function runProviderAwarePool<T>(
     concurrency: number;
     lanesForProvider: (provider: string) => number;
     providerStartGapMs: number | ((provider: string) => number);
+    globalStartGapMs?: number;
     backoffDelayMs: number;
     shouldStop?: () => Promise<boolean>;
     shouldHoldProvider?: (verdict: ValidationVerdict) => boolean;
@@ -62,6 +63,7 @@ export async function runProviderAwarePool<T>(
   }
 
   const providerNextStart = new Map<string, number>();
+  let globalNextStart = 0;
   const heldProviders = new Set<string>();
   let cursor = 0;
   let completed = 0;
@@ -70,11 +72,14 @@ export async function runProviderAwarePool<T>(
 
   async function reserveProviderStart(provider: string) {
     const current = now();
-    const scheduled = Math.max(current, providerNextStart.get(provider) || 0);
+    const providerScheduled = Math.max(current, providerNextStart.get(provider) || 0);
+    const globalScheduled = Math.max(current, globalNextStart || 0);
+    const scheduled = Math.max(providerScheduled, globalScheduled);
     const configuredGap = typeof options.providerStartGapMs === "function"
       ? options.providerStartGapMs(provider)
       : options.providerStartGapMs;
     providerNextStart.set(provider, scheduled + Math.max(0, configuredGap));
+    globalNextStart = scheduled + Math.max(0, options.globalStartGapMs || 0);
     const wait = scheduled - current;
     if (wait > 0) await sleep(wait);
   }
