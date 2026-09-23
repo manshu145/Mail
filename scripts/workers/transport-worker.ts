@@ -294,9 +294,20 @@ async function runOnce() {
     }
     const envelopeFrom = bounceSigningEnabled && bounceDomain ? makeBounceAddress(message.id, bounceDomain) : fromEmail;
     const mime = buildMimeContent({ text, html, boundarySeed: message.id.replaceAll("-", ""), attachments });
+    // Gmail Postmaster Feedback Loop groups complaints by this stable campaign
+    // identifier. Keep it campaign-level (never message-level) and present
+    // before OpenDKIM signs the message.
+    const feedbackCampaign = campaign.id.replaceAll("-", "").slice(0, 16);
+    const feedbackAccount = account.id.replaceAll("-", "").slice(0, 16);
+    const feedbackId = `${feedbackCampaign}:${feedbackAccount}:marketing:neximail`;
+    const listId = campaign.listId && senderDomain
+      ? `<${campaign.listId.replaceAll("-", "")}.${senderDomain}>`
+      : null;
     const raw = [
       `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
       `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, "MIME-Version: 1.0",
+      `Feedback-ID: ${feedbackId}`,
+      ...(listId ? [`List-ID: ${listId}`] : []),
       `List-Unsubscribe: <${unsubscribeUrl}>`, "List-Unsubscribe-Post: List-Unsubscribe=One-Click", mime.contentTypeHeader, "", ...mime.bodyLines,
     ].join("\r\n");
 
