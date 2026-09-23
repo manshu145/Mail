@@ -221,7 +221,9 @@ async function runOnce() {
     return;
   }
   const settings = await readDeliverySettings();
-  const delayMs = Math.max(Math.ceil(1000 / settings.maxPerSecond), settings.providerIntervalMs);\n  const providerNextAt = new Map<string, number>();\n  let globalNextAt = 0;
+  const delayMs = Math.max(Math.ceil(1000 / settings.maxPerSecond), settings.providerIntervalMs);
+  const providerNextAt = new Map<string, number>();
+  let globalNextAt = 0;
   const claimed = await claimMessages(settings.campaignBurstPerRound);
   let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
@@ -259,7 +261,11 @@ async function runOnce() {
     const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
-    const provider = providerForEmail(contact.email);\n    const nextAt = providerNextAt.get(provider) || 0;\n    const waitMs = Math.max(0, nextAt - Date.now(), globalNextAt - Date.now());\n    if (waitMs) await sleep(waitMs);\n    const provider = providerForEmail(contact.email);
+    const provider = providerForEmail(contact.email);
+    const nextAt = providerNextAt.get(provider) || 0;
+    const waitMs = Math.max(0, nextAt - Date.now(), globalNextAt - Date.now());
+    if (waitMs) await sleep(waitMs);
+    const provider = providerForEmail(contact.email);
     const waitMs = Math.max(0, (providerNextAt.get(provider) || 0) - Date.now(), globalNextAt - Date.now());
     if (waitMs) await sleep(waitMs);
     const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
