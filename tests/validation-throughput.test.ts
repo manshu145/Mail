@@ -56,5 +56,7 @@ test("provider-aware scheduler caps total concurrency and respects configured pr
 
 test("temporary or policy SMTP results request provider backoff", () => {
   assert.equal(validationNeedsBackoff({ status: "unknown", detail: "smtp_rcpt_451_temporary_or_policy" }), true);
+  assert.equal(validationNeedsBackoff({ status: "unknown", detail: "supersend_http_429:" }), true);
+  assert.equal(validationNeedsBackoff({ status: "unknown", detail: "supersend_timeout" }), true);
   assert.equal(validationNeedsBackoff({ status: "accepted", detail: "smtp_rcpt_250_accepted" }), false);
 });
