@@ -31,6 +31,7 @@ function one(value:string|string[]|undefined){return Array.isArray(value)?value[
 function campaignErrorMessage(value:string|null|undefined){
   if(!value)return "";
   if(value==="campaign.delivery_safety_bounce_stop")return "Delivery paused automatically because the observed hard-bounce rate crossed the safety stop threshold. Clean or revalidate the audience before resuming.";
+  if(value==="campaign.delivery_safety_complaint_stop")return "Delivery paused automatically because the observed complaint rate crossed the sender-safety threshold. Review consent, targeting, frequency and content before resuming.";
   if(value==="campaign.preflight_blocked")return "Launch paused because Campaign Preflight found a blocking safety issue. Review the checks below before resuming.";
   if(value==="campaign.worker_missing_list"||value==="campaign.worker_list_not_found")return "Campaign paused because its audience list is missing or unavailable.";
   if(value==="campaign.worker_delivery_configuration_missing"||value==="campaign.worker_delivery_configuration_unavailable")return "Campaign paused because the sending account or template is unavailable.";
