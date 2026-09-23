@@ -31,6 +31,7 @@ export default async function ValidationPage() {
     providerStartGapMs:number;
     providerBackoffMs:number;
     hardTimeoutMs:number;
+    validationMode:string;
     validationsPerMinute:number;
     lastSeenAt:string|null;
   } | null = null;
@@ -89,6 +90,7 @@ export default async function ValidationPage() {
         providerStartGapMs:Number(metadata.providerStartGapMs || metadata.domainMinIntervalMs || 0),
         providerBackoffMs:Number(metadata.providerBackoffMs || metadata.domainBackoffMs || 0),
         hardTimeoutMs:Number(metadata.hardTimeoutMs || 0),
+        validationMode:String(metadata.validationMode || activeRows[0]?.validationMode || "internal"),
         validationsPerMinute:Number(speedRows.rows[0]?.per_minute || 0),
         lastSeenAt:engineRow.last_seen_at ? engineRow.last_seen_at.toISOString() : null,
       } : null;
@@ -116,7 +118,7 @@ export default async function ValidationPage() {
 
     {usable ? <ValidationControls
       paused={paused}
-      activeJob={activeJob ? { id:activeJob.id, scope:activeJob.scope, status:activeJob.status, processedRows:activeJob.processedRows, totalRows:activeJob.totalRows } : null}
+      activeJob={activeJob ? { id:activeJob.id, scope:activeJob.scope, status:activeJob.status, validationMode:activeJob.validationMode, processedRows:activeJob.processedRows, totalRows:activeJob.totalRows } : null}
       unresolved={unresolved}
       imports={imports}
       engine={engine}
@@ -128,7 +130,7 @@ export default async function ValidationPage() {
           <h2 className="font-black">Validation jobs</h2>
           <p className="mt-1 text-xs text-[var(--muted)]">Recent queued, active and completed runs.</p>
         </div>
-        {!usable ? <div className="p-6 text-center text-xs text-[var(--muted)]">Validation data unavailable.</div> : jobs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[11px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-5 py-3">Scope</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead><tbody className="divide-y divide-[var(--border)]">{jobs.map((job)=><tr key={job.id} className="interactive-row"><td className="px-5 py-3.5"><div className="font-bold">{job.scope.startsWith("import:") ? "CSV import" : job.scope.startsWith("contact:") ? "Single contact" : job.scope === "pending" ? "Unresolved contacts" : job.scope === "gmail:unresolved" ? "Legacy unresolved Gmail" : job.scope === "gmail:pending" ? "Legacy pending Gmail" : job.scope}</div><div className="mt-0.5 font-mono text-[11px] text-[var(--muted)]">{job.id.slice(0,8)}</div></td><td><span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold capitalize ${job.status==="completed"?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":job.status==="failed"?"bg-rose-500/10 text-rose-700 dark:text-rose-300":"bg-blue-500/10 text-blue-700 dark:text-blue-300"}`}>{paused && activeJob?.id===job.id ? "paused" : job.status}</span></td><td className="text-xs font-bold text-[var(--muted)]">{job.processedRows.toLocaleString()} / {job.totalRows.toLocaleString()}</td><td className="text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short", timeZone:"Asia/Kolkata"}).format(job.createdAt)}</td></tr>)}</tbody></table></div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation jobs yet.</div>}
+        {!usable ? <div className="p-6 text-center text-xs text-[var(--muted)]">Validation data unavailable.</div> : jobs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[11px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-5 py-3">Scope</th><th>Method</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead><tbody className="divide-y divide-[var(--border)]">{jobs.map((job)=><tr key={job.id} className="interactive-row"><td className="px-5 py-3.5"><div className="font-bold">{job.scope.startsWith("import:") ? "CSV import" : job.scope.startsWith("contact:") ? "Single contact" : job.scope === "pending" ? "Unresolved contacts" : job.scope === "gmail:unresolved" ? "Legacy unresolved Gmail" : job.scope === "gmail:pending" ? "Legacy pending Gmail" : job.scope}</div><div className="mt-0.5 font-mono text-[11px] text-[var(--muted)]">{job.id.slice(0,8)}</div></td><td><span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-[11px] font-extrabold text-violet-700 dark:text-violet-300">{job.validationMode==="hybrid"?"Smart hybrid":job.validationMode==="supersend"?"SuperSend primary":"NexiMail internal"}</span></td><td><span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold capitalize ${job.status==="completed"?"bg-emerald-500/10 text-emerald-700 dark:text-emerald-300":job.status==="failed"?"bg-rose-500/10 text-rose-700 dark:text-rose-300":"bg-blue-500/10 text-blue-700 dark:text-blue-300"}`}>{paused && activeJob?.id===job.id ? "paused" : job.status}</span></td><td className="text-xs font-bold text-[var(--muted)]">{job.processedRows.toLocaleString()} / {job.totalRows.toLocaleString()}</td><td className="text-xs text-[var(--muted)]">{new Intl.DateTimeFormat("en",{dateStyle:"medium",timeStyle:"short", timeZone:"Asia/Kolkata"}).format(job.createdAt)}</td></tr>)}</tbody></table></div> : <div className="p-8 text-center text-sm text-[var(--muted)]">No validation jobs yet.</div>}
       </section>
 
       <section className="section-card overflow-hidden">
