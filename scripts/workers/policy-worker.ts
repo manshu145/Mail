@@ -81,12 +81,22 @@ async function runOnce(){
   return
  }
  const queuedResult=await pool.query<{id:string;campaign_id:string;contact_id:string}>(`
-  select m.id::text,m.campaign_id::text,m.contact_id::text
-  from messages m join campaigns c on c.id=m.campaign_id
-  where m.status='queued' and c.status='sending'
-  order by m.queued_at asc
+  with ranked as (
+    select
+      m.id::text,
+      m.campaign_id::text,
+      m.contact_id::text,
+      row_number() over(partition by m.campaign_id order by m.queued_at asc,m.id asc) as campaign_rank,
+      coalesce(c.started_at,c.created_at) as campaign_started_at
+    from messages m
+    join campaigns c on c.id=m.campaign_id
+    where m.status='queued' and c.status='sending'
+  )
+  select id,campaign_id,contact_id
+  from ranked
+  order by ((campaign_rank-1)/$2::int) asc,campaign_started_at asc,campaign_rank asc
   limit $1
- `,[Math.min(500,available)]);
+ `,[Math.min(500,available),settings.campaignBurstPerRound]);
  const queued=queuedResult.rows;
  let ready=0,cancelled=0,canaryHeld=0;
  for(const message of queued){
@@ -105,7 +115,7 @@ async function runOnce(){
   }
   await db.update(messages).set({status:"ready_for_transport",lastError:null}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));ready++;safety.released++;safety.canRelease=safety.released<safety.releaseLimit
  }
- await heartbeat({state:"online",evaluated:queued.length,ready,cancelled,canaryHeld,safetyCampaigns:activeCampaigns.rowCount||0,safetyPaused,activeBefore:active,maxActiveQueued:settings.maxActiveQueued,canaryInitialBatch:settings.canaryInitialBatch,canarySecondBatch:settings.canarySecondBatch,canaryThirdBatch:settings.canaryThirdBatch,canaryBounceWarnRate:settings.canaryBounceWarnRate,bounceStopRate:settings.reputationBounceStopRate,complaintStopRate:settings.reputationComplaintStopRate,source:"database_control_plane"})
+ await heartbeat({state:"online",evaluated:queued.length,ready,cancelled,canaryHeld,safetyCampaigns:activeCampaigns.rowCount||0,safetyPaused,activeBefore:active,maxActiveQueued:settings.maxActiveQueued,schedulingMode:"round_robin",campaignBurstPerRound:settings.campaignBurstPerRound,maxConcurrentCampaigns:settings.maxConcurrentCampaigns,canaryInitialBatch:settings.canaryInitialBatch,canarySecondBatch:settings.canarySecondBatch,canaryThirdBatch:settings.canaryThirdBatch,canaryBounceWarnRate:settings.canaryBounceWarnRate,bounceStopRate:settings.reputationBounceStopRate,complaintStopRate:settings.reputationComplaintStopRate,source:"database_control_plane"})
 }
 async function main(){console.log("[policy-worker] started with database backpressure and adaptive delivery safety");while(true){
  const lock=await pool.connect();
