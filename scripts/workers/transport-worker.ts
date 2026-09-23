@@ -256,7 +256,7 @@ async function runOnce() {
     const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
-    const provider = providerForEmail(contact.email);\n    const nextAt = providerNextAt.get(provider) || 0;\n    const waitMs = Math.max(0, nextAt - Date.now(), globalNextAt - Date.now());\n    if (waitMs) await sleep(waitMs);\n    const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
+    const provider = providerForEmail(contact.email);\n    const nextAt = providerNextAt.get(provider) || 0;\n    const waitMs = Math.max(0, nextAt - Date.now(), globalNextAt - Date.now());\n    if (waitMs) await sleep(waitMs);\n    const provider = providerForEmail(contact.email);\n    const waitMs = Math.max(0, (providerNextAt.get(provider) || 0) - Date.now(), globalNextAt - Date.now());\n    if (waitMs) await sleep(waitMs);\n    const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
     if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.cooldownKey, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
     if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope,retryAt:gate.retryAt?.toISOString()}); }
 
