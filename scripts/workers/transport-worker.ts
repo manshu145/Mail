@@ -147,15 +147,15 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
     picked as (
       select e.id
       from eligible e
-      join messages m on m.id=e.id
       order by ((e.campaign_rank-1)/$2::int) asc,e.campaign_started_at asc,e.campaign_rank asc
-      for update of m skip locked
       limit $1
     )
     update messages m
     set status='sending',last_attempt_at=now(),attempt_count=m.attempt_count+1,last_error=null
     from picked
     where m.id=picked.id
+      and m.status in ('ready_for_transport','deferred')
+      and (m.next_attempt_at is null or m.next_attempt_at <= now())
     returning m.id,m.attempt_count`, [claimBatch,campaignBurstPerRound]);
   return result.rows;
 }
