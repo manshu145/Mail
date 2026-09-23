@@ -10,6 +10,17 @@ import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
 
 const intervalMs = Math.max(2000, Number(process.env.VALIDATION_INTERVAL_MS || "5000"));
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_API_TIMEOUT_MS || "10000"));
+const validationHardTimeoutMs = Math.max(timeoutMs, Math.min(120_000, Number(process.env.VALIDATION_HARD_TIMEOUT_MS || "45000")));
+
+async function validateMailboxWithDeadline(email: string): Promise<ValidationVerdict> {
+  return Promise.race([
+    validateMailboxInternally(email, timeoutMs),
+    new Promise<ValidationVerdict>((resolve) => setTimeout(
+      () => resolve({ status: "unknown", detail: "smtp_validation_hard_timeout" }),
+      validationHardTimeoutMs,
+    )),
+  ]);
+}
 const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v2/email-validation/verify").trim();
 const supersendFallbackEnabled = process.env.SUPERSEND_FALLBACK_ENABLED === "true";
 
@@ -320,6 +331,7 @@ async function runJob() {
       state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed,
       concurrency: validationConcurrency, scheduler: "provider_aware",
       providerStartGapMs: validationProviderStartGapMs, providerBackoffMs: validationProviderBackoffMs,
+      hardTimeoutMs: validationHardTimeoutMs,
     });
   };
 
@@ -327,7 +339,7 @@ async function runJob() {
     remaining,
     (contact) => recipientProvider(recipientDomain(contact.normalizedEmail)),
     async (contact) => {
-      let result = await validateMailboxInternally(contact.normalizedEmail, timeoutMs);
+      let result = await validateMailboxWithDeadline(contact.normalizedEmail);
 
       if (
         (result.status === "unknown" || result.status === "error") &&
