@@ -5,7 +5,7 @@ import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
 import { isDirectGmailAddress, type ValidationVerdict } from "../../src/lib/validation-policy";
 import { validateMailboxInternally } from "../../src/lib/mailbox-validator";
-import { recipientDomain, runDomainAwarePool } from "../../src/lib/validation-throughput";
+import { recipientDomain, recipientProvider, runProviderAwarePool } from "../../src/lib/validation-throughput";
 import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
 
 const intervalMs = Math.max(2000, Number(process.env.VALIDATION_INTERVAL_MS || "5000"));
@@ -96,9 +96,17 @@ async function validationPaused(force = false) {
 type ValidationContact = { id: string; email: string; normalizedEmail: string };
 
 const validationBatchSize = Math.max(25, Math.min(1000, Number(process.env.VALIDATION_BATCH_SIZE || "250")));
-const validationConcurrency = Math.max(1, Math.min(20, Number(process.env.VALIDATION_CONCURRENCY || "8")));
-const validationDomainMinIntervalMs = Math.max(250, Math.min(10_000, Number(process.env.VALIDATION_DOMAIN_MIN_INTERVAL_MS || "1000")));
-const validationDomainBackoffMs = Math.max(validationDomainMinIntervalMs, Math.min(120_000, Number(process.env.VALIDATION_DOMAIN_BACKOFF_MS || "15000")));
+const validationConcurrency = Math.max(1, Math.min(24, Number(process.env.VALIDATION_CONCURRENCY || "12")));
+const validationProviderStartGapMs = Math.max(250, Math.min(10_000, Number(process.env.VALIDATION_PROVIDER_START_GAP_MS || "750")));
+const validationProviderBackoffMs = Math.max(validationProviderStartGapMs, Math.min(120_000, Number(process.env.VALIDATION_PROVIDER_BACKOFF_MS || "15000")));
+
+function providerLaneCount(provider: string) {
+  if (provider === "google") return Math.max(1, Math.min(4, Number(process.env.VALIDATION_GOOGLE_LANES || "3")));
+  if (provider === "yahoo") return Math.max(1, Math.min(4, Number(process.env.VALIDATION_YAHOO_LANES || "2")));
+  if (provider === "microsoft") return Math.max(1, Math.min(3, Number(process.env.VALIDATION_MICROSOFT_LANES || "2")));
+  if (provider === "rediff") return Math.max(1, Math.min(3, Number(process.env.VALIDATION_REDIFF_LANES || "2")));
+  return 1;
+}
 
 async function contactsForJob(scope: string, jobId: string, limit = validationBatchSize): Promise<ValidationContact[]> {
   if (scope.startsWith("contact:")) {
@@ -282,7 +290,7 @@ async function runJob() {
   }
   const job = await selectWorkJob();
   if (!job) {
-    await heartbeat({ state: "idle", provider: "internal_smtp", supersendFallbackEnabled, concurrency: validationConcurrency });
+    await heartbeat({ state: "idle", provider: "internal_smtp", supersendFallbackEnabled, concurrency: validationConcurrency, scheduler: "provider_aware" });
     return;
   }
 
@@ -298,7 +306,8 @@ async function runJob() {
   await db.update(validationJobs).set({ totalRows: total, processedRows: processed }).where(eq(validationJobs.id, job.id));
   await heartbeat({
     state: resumed ? "resumed" : "processing", jobId: job.id, scope: job.scope, processed, total,
-    batch: remaining.length, concurrency: validationConcurrency, domainMinIntervalMs: validationDomainMinIntervalMs,
+    batch: remaining.length, concurrency: validationConcurrency, scheduler: "provider_aware",
+    providerStartGapMs: validationProviderStartGapMs,
   });
 
   let lastProgressPublish = 0;
@@ -309,13 +318,14 @@ async function runJob() {
     await pool.query(`update validation_jobs set processed_rows=greatest(processed_rows,$2), total_rows=greatest(total_rows,$3) where id=$1`, [job.id, processed, total]);
     await heartbeat({
       state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed,
-      concurrency: validationConcurrency, domainMinIntervalMs: validationDomainMinIntervalMs, domainBackoffMs: validationDomainBackoffMs,
+      concurrency: validationConcurrency, scheduler: "provider_aware",
+      providerStartGapMs: validationProviderStartGapMs, providerBackoffMs: validationProviderBackoffMs,
     });
   };
 
-  const outcome = await runDomainAwarePool(
+  const outcome = await runProviderAwarePool(
     remaining,
-    (contact) => recipientDomain(contact.normalizedEmail),
+    (contact) => recipientProvider(recipientDomain(contact.normalizedEmail)),
     async (contact) => {
       let result = await validateMailboxInternally(contact.normalizedEmail, timeoutMs);
 
@@ -342,8 +352,9 @@ async function runJob() {
     },
     {
       concurrency: job.scope.startsWith("contact:") ? 1 : validationConcurrency,
-      minDelayMs: job.scope.startsWith("contact:") ? 0 : validationDomainMinIntervalMs,
-      backoffDelayMs: validationDomainBackoffMs,
+      lanesForProvider: job.scope.startsWith("contact:") ? () => 1 : providerLaneCount,
+      providerStartGapMs: job.scope.startsWith("contact:") ? 0 : validationProviderStartGapMs,
+      backoffDelayMs: validationProviderBackoffMs,
       shouldStop: () => validationPaused(),
     },
   );
@@ -358,7 +369,7 @@ async function runJob() {
   if (hasMore) {
     await heartbeat({
       state: "processing", jobId: job.id, scope: job.scope, processed, total, batchComplete: true, resumed,
-      domains: outcome.domains, concurrency: outcome.concurrency,
+      providers: outcome.providers, lanes: outcome.lanes, concurrency: outcome.concurrency,
     });
     return;
   }
@@ -382,7 +393,7 @@ async function runWithWorkerLock() {
 }
 
 async function main() {
-  console.log(`[validation-worker] started; internal SMTP primary; domain-aware concurrency=${validationConcurrency}, per-domain-gap=${validationDomainMinIntervalMs}ms; SuperSend optional fallback`);
+  console.log(`[validation-worker] started; internal SMTP primary; provider-aware concurrency=${validationConcurrency}, provider-start-gap=${validationProviderStartGapMs}ms; SuperSend optional fallback`);
   while (true) {
     try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
