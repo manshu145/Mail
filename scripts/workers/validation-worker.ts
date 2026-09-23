@@ -114,11 +114,12 @@ type ValidationContact = { id: string; email: string; normalizedEmail: string };
 const validationBatchSize = Math.max(25, Math.min(1000, Number(process.env.VALIDATION_BATCH_SIZE || "250")));
 const validationConcurrency = Math.max(1, Math.min(32, Number(process.env.VALIDATION_CONCURRENCY || "20")));
 const validationTargetPerSecond = Math.max(1, Math.min(10, Number(process.env.VALIDATION_TARGET_PER_SECOND || "5")));
-const validationBasePerSecond = Math.max(1, Math.min(validationTargetPerSecond, Number(process.env.VALIDATION_BASE_PER_SECOND || "2")));
+const validationBasePerSecond = Math.max(1, Math.min(validationTargetPerSecond, Number(process.env.VALIDATION_BASE_PER_SECOND || "1")));
 const configuredProviderStartGapMs = Number(process.env.VALIDATION_PROVIDER_START_GAP_MS || "0");
 const validationProviderStartGapMs = configuredProviderStartGapMs > 0
   ? Math.max(100, Math.min(10_000, configuredProviderStartGapMs))
   : 0;
+const validationGlobalStartGapMs = Math.max(100, Math.ceil(1000 / validationTargetPerSecond));
 const defaultAdaptiveGapMs = Math.max(100, Math.ceil(1000 / validationBasePerSecond));
 const validationProviderBackoffMs = Math.max(defaultAdaptiveGapMs, Math.min(120_000, Number(process.env.VALIDATION_PROVIDER_BACKOFF_MS || "15000")));
 const validationProviderHoldMs = Math.max(validationProviderBackoffMs, Math.min(3_600_000, Number(process.env.VALIDATION_PROVIDER_HOLD_MS || "600000")));
@@ -423,6 +424,8 @@ async function runJob() {
       targetPerSecond: validationMode === "supersend" ? null : validationTargetPerSecond,
       basePerSecond: validationMode === "supersend" ? null : validationBasePerSecond,
       providerStartGapMs: validationMode === "supersend" ? 250 : validationProviderStartGapMs,
+      globalStartGapMs: validationMode === "supersend" ? 250 : validationGlobalStartGapMs,
+      globalStartGapMs: validationMode === "supersend" ? 250 : validationGlobalStartGapMs,
       providerRates: validationMode === "supersend" ? {} : Object.fromEntries(providerRatePerSecond),
       providerBackoffMs: validationProviderBackoffMs,
       providerHoldMs: validationProviderHoldMs,
@@ -482,6 +485,7 @@ async function runJob() {
           ? () => validationConcurrency
           : providerLaneCount,
       providerStartGapMs: job.scope.startsWith("contact:") ? 0 : validationMode === "supersend" ? 250 : (provider) => providerStartGapFor(provider),
+      globalStartGapMs: job.scope.startsWith("contact:") ? 0 : validationMode === "supersend" ? 250 : validationGlobalStartGapMs,
       backoffDelayMs: validationProviderBackoffMs,
       shouldHoldProvider: (verdict) => validationIsPreRecipientFailure(verdict) || verdict.detail === "provider_hold_active",
       shouldStop: () => validationPaused(),
@@ -534,7 +538,7 @@ async function runWithWorkerLock() {
 }
 
 async function main() {
-  console.log(`[validation-worker] started; selectable validation modes; provider-aware concurrency=${validationConcurrency}, adaptive=${validationBasePerSecond}->${validationTargetPerSecond}/s, provider-start-gap=${validationProviderStartGapMs || "adaptive"}`);
+  console.log(`[validation-worker] started; selectable validation modes; provider-aware concurrency=${validationConcurrency}, global-cap=${validationTargetPerSecond}/s, provider-ramp=${validationBasePerSecond}->${validationTargetPerSecond}/s, provider-start-gap=${validationProviderStartGapMs || "adaptive"}`);
   while (true) {
     try { await runWithWorkerLock(); }
     catch (error) { console.error("[validation-worker]", error); await heartbeat({ state: "error" }).catch(()=>{}); }
