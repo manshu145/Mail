@@ -21,8 +21,13 @@ async function cachedMxLookup(domain: string): Promise<MxLookup> {
 
   let value: MxLookup;
   let ttl = mxCacheTtlMs;
+  const dnsTimeoutMs = Math.max(1000, Math.min(30_000, Number(process.env.VALIDATION_DNS_TIMEOUT_MS || "5000")));
   try {
-    value = { records: await resolveMx(key), errorCode: null };
+    const records = await Promise.race([
+      resolveMx(key),
+      new Promise<never>((_, reject) => setTimeout(() => reject(Object.assign(new Error("MX lookup timeout"), { code: "ETIMEOUT" })), dnsTimeoutMs)),
+    ]);
+    value = { records, errorCode: null };
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error
       ? String((error as { code?: unknown }).code || "")
