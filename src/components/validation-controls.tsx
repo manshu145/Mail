@@ -68,7 +68,7 @@ export function ValidationControls({
   useEffect(() => { void loadProvider(); }, []);
 
   async function saveProviderKey() {
-    if (!providerKey.trim()) { setProviderMessage("Enter a Supersend API key."); return; }
+    if (!providerKey.trim()) { setProviderMessage("Enter a SuperSend API key."); return; }
     setProviderBusy(true); setProviderMessage("");
     try {
       const response = await fetch("/api/validation/provider", {
@@ -82,7 +82,7 @@ export function ValidationControls({
       setProviderConfigured(true);
       setProviderHint(data.hint || "Configured");
       setProviderSource("workspace");
-      setProviderMessage("Supersend API key saved securely.");
+      setProviderMessage("SuperSend API key saved securely.");
     } catch {
       setProviderMessage("Could not reach NexiMail.");
     } finally { setProviderBusy(false); }
@@ -114,16 +114,17 @@ export function ValidationControls({
   }
 
   async function removeProviderKey() {
-    if (!window.confirm("Remove the workspace Supersend API key?")) return;
+    if (!window.confirm("Remove the workspace SuperSend API key?")) return;
     setProviderBusy(true); setProviderMessage("");
     try {
       const response = await fetch("/api/validation/provider", { method: "DELETE" });
-      const data = await response.json().catch(() => ({})) as { error?: string; configured?: boolean; source?: "environment" | null };
+      const data = await response.json().catch(() => ({})) as { error?: string; configured?: boolean; source?: "environment" | null; mode?: ValidationMode };
       if (!response.ok) { setProviderMessage(data.error || "Could not remove API key."); return; }
       setProviderConfigured(Boolean(data.configured));
       setProviderSource(data.source || null);
       setProviderHint(data.configured ? "Environment key" : null);
-      setProviderMessage(data.configured ? "Workspace key removed. Environment fallback is still active." : "Supersend API key removed.");
+      if (data.mode) setProviderMode(data.mode);
+      setProviderMessage(data.configured ? "Workspace key removed. Environment fallback is still active." : "SuperSend API key removed. Validation default returned to NexiMail internal.");
     } catch {
       setProviderMessage("Could not reach NexiMail.");
     } finally { setProviderBusy(false); }
@@ -159,7 +160,7 @@ export function ValidationControls({
         <div>
           <p className="page-eyebrow">Validation control</p>
           <h2 className="section-title mt-1">Mailbox checks</h2>
-          <p className="section-subtitle">Internal syntax, MX and SMTP recipient checks across email domains. Supersend is optional.</p>
+          <p className="section-subtitle">Internal syntax, MX and SMTP recipient checks across email domains. SuperSend is optional.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           {paused
@@ -238,10 +239,10 @@ export function ValidationControls({
           {providerConfigured && providerHint ? <p className="mb-3 rounded-lg bg-[var(--surface-soft)] px-3 py-2 font-mono text-[12px] text-[var(--muted)]">Saved key: {providerHint}</p> : null}
 
           {providerManage ? <div className="space-y-2">
-            <input type="password" autoComplete="new-password" value={providerKey} onChange={(e)=>setProviderKey(e.target.value)} placeholder={providerConfigured?"Paste a new key to replace current":"Paste Supersend API key"} className="form-control"/>
+            <input type="password" autoComplete="new-password" value={providerKey} onChange={(e)=>setProviderKey(e.target.value)} placeholder={providerConfigured?"Paste a new key to replace current":"Paste SuperSend API key"} className="form-control"/>
             <div className="flex gap-2">
               <button type="button" disabled={providerBusy || !providerKey.trim()} onClick={()=>void saveProviderKey()} className="btn-primary !min-h-9 flex-1 !px-3">{providerBusy?"Saving…":providerConfigured?"Replace key":"Save key"}</button>
-              {providerSource==="workspace"?<button type="button" disabled={providerBusy} onClick={()=>void removeProviderKey()} className="btn-danger !min-h-9 !px-3" aria-label="Remove Supersend API key"><Trash2 className="h-3.5 w-3.5"/></button>:null}
+              {providerSource==="workspace"?<button type="button" disabled={providerBusy} onClick={()=>void removeProviderKey()} className="btn-danger !min-h-9 !px-3" aria-label="Remove SuperSend API key"><Trash2 className="h-3.5 w-3.5"/></button>:null}
             </div>
           </div> : <p className="text-[12px] leading-4 text-[var(--muted)]">Owner access is required to manage the provider key.</p>}
 
