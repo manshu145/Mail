@@ -9,6 +9,8 @@ export type DeliverySettings = {
   maxRollingHour: number;
   maxRolling24h: number;
   maxActiveQueued: number;
+  maxConcurrentCampaigns: number;
+  campaignBurstPerRound: number;
   retryMaxAttempts: number;
   retryInitialSeconds: number;
   retryMaxSeconds: number;
@@ -29,6 +31,8 @@ export const DELIVERY_SETTING_KEYS = {
   maxRollingHour: "delivery.max_rolling_hour",
   maxRolling24h: "delivery.max_rolling_24h",
   maxActiveQueued: "delivery.max_active_queued",
+  maxConcurrentCampaigns: "delivery.max_concurrent_campaigns",
+  campaignBurstPerRound: "delivery.campaign_burst_per_round",
   retryMaxAttempts: "delivery.retry_max_attempts",
   retryInitialSeconds: "delivery.retry_initial_seconds",
   retryMaxSeconds: "delivery.retry_max_seconds",
@@ -57,6 +61,8 @@ export function defaultDeliverySettings(env: Readonly<Record<string,string|undef
     maxRollingHour: int(env.MAX_ROLLING_HOUR, 0, 0, 10_000_000),
     maxRolling24h: int(env.MAX_ROLLING_24H, 0, 0, 100_000_000),
     maxActiveQueued: int(env.MAX_ACTIVE_QUEUED, 15_000, 100, 10_000_000),
+    maxConcurrentCampaigns: int(env.MAX_CONCURRENT_CAMPAIGNS, 5, 1, 25),
+    campaignBurstPerRound: int(env.CAMPAIGN_BURST_PER_ROUND, 1, 1, 50),
     retryMaxAttempts: int(env.TRANSPORT_MAX_ATTEMPTS, 5, 1, 20),
     retryInitialSeconds: int(env.TRANSPORT_RETRY_INITIAL_SECONDS, 30, 10, 86_400),
     retryMaxSeconds: int(env.TRANSPORT_RETRY_MAX_SECONDS, 3600, 30, 604_800),
@@ -82,6 +88,8 @@ export async function readDeliverySettings(): Promise<DeliverySettings> {
     maxRollingHour: int(values.get(DELIVERY_SETTING_KEYS.maxRollingHour), defaults.maxRollingHour, 0, 10_000_000),
     maxRolling24h: int(values.get(DELIVERY_SETTING_KEYS.maxRolling24h), defaults.maxRolling24h, 0, 100_000_000),
     maxActiveQueued: int(values.get(DELIVERY_SETTING_KEYS.maxActiveQueued), defaults.maxActiveQueued, 100, 10_000_000),
+    maxConcurrentCampaigns: int(values.get(DELIVERY_SETTING_KEYS.maxConcurrentCampaigns), defaults.maxConcurrentCampaigns, 1, 25),
+    campaignBurstPerRound: int(values.get(DELIVERY_SETTING_KEYS.campaignBurstPerRound), defaults.campaignBurstPerRound, 1, 50),
     retryMaxAttempts: int(values.get(DELIVERY_SETTING_KEYS.retryMaxAttempts), defaults.retryMaxAttempts, 1, 20),
     retryInitialSeconds: int(values.get(DELIVERY_SETTING_KEYS.retryInitialSeconds), defaults.retryInitialSeconds, 10, 86_400),
     retryMaxSeconds: int(values.get(DELIVERY_SETTING_KEYS.retryMaxSeconds), defaults.retryMaxSeconds, 30, 604_800),
