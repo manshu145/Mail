@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { recipientProvider, runProviderAwarePool, validationNeedsBackoff } from "../src/lib/validation-throughput";
+import { recipientProvider, runProviderAwarePool, validationIsPreRecipientFailure, validationNeedsBackoff } from "../src/lib/validation-throughput";
 
 test("provider mapping groups major mailbox brands", () => {
   assert.equal(recipientProvider("gmail.com"), "google");
@@ -59,4 +59,12 @@ test("temporary or policy SMTP results request provider backoff", () => {
   assert.equal(validationNeedsBackoff({ status: "unknown", detail: "supersend_http_429:" }), true);
   assert.equal(validationNeedsBackoff({ status: "unknown", detail: "supersend_timeout" }), true);
   assert.equal(validationNeedsBackoff({ status: "accepted", detail: "smtp_rcpt_250_accepted" }), false);
+});
+
+test("provider pre-recipient failures are distinguishable from recipient verdicts", () => {
+  assert.equal(validationIsPreRecipientFailure({ status: "unknown", detail: "smtp_banner_550" }), true);
+  assert.equal(validationIsPreRecipientFailure({ status: "unknown", detail: "smtp_helo_550" }), true);
+  assert.equal(validationIsPreRecipientFailure({ status: "unknown", detail: "smtp_validation_connection_failed" }), true);
+  assert.equal(validationIsPreRecipientFailure({ status: "unknown", detail: "smtp_rcpt_452_temporary_or_policy" }), false);
+  assert.equal(validationIsPreRecipientFailure({ status: "accepted", detail: "smtp_rcpt_250_accepted" }), false);
 });
