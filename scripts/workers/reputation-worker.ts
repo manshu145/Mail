@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { db } from "../../src/db";
+import { db, pool } from "../../src/db";
 import { sendingAccounts } from "../../src/db/schema";
 import { reputationSnapshots, workerHeartbeats } from "../../src/db/operations-schema";
 import { readDeliverySettings } from "../../src/lib/delivery-settings";
@@ -23,4 +23,4 @@ async function run(){
  await heartbeat({accounts:accounts.length,atRisk,bounceStop,complaintStop,minSample,source:"database_control_plane",action:"telemetry_only"});
 }
 async function main(){while(true){try{await run()}catch(e){console.error("[reputation-worker]",e);await heartbeat({state:"error"}).catch(()=>{})}await new Promise(r=>setTimeout(r,intervalMs))}}
-main().catch(console.error);process.on("SIGTERM",async()=>{await db.close?.();process.exit(0)});
+main().catch(console.error);process.on("SIGTERM",async()=>{await pool.end();process.exit(0)});
