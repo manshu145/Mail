@@ -7,7 +7,7 @@ import { CampaignAttachments } from "@/components/campaign-attachments";
 
 type Option = { id: string; name: string };
 type AccountOption = Option & { fromName: string; fromEmail: string; replyTo: string | null };
-type Campaign = { id: string; name: string; subject: string; preheader: string | null; fromName: string | null; fromEmail: string | null; listId: string | null; templateId: string | null; sendingAccountId: string | null; trackOpens: boolean; trackClicks: boolean; scheduledAt: string | null; status: string };
+type Campaign = { id: string; name: string; subject: string; preheader: string | null; fromName: string | null; fromEmail: string | null; listId: string | null; templateId: string | null; sendingAccountId: string | null; sendOnlyValidated: boolean; trackOpens: boolean; trackClicks: boolean; scheduledAt: string | null; status: string };
 type RuntimePolicyView = { mode: "staging" | "production"; sendingEnabled: boolean; maxRecipientsPerCampaign: number | null };
 type CampaignAction = "save" | "send_now" | "schedule";
 type PreviewData = {
@@ -59,6 +59,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const [listId, setListId] = useState(campaign.listId || "");
   const [templateId, setTemplateId] = useState(campaign.templateId || "");
   const [accountId, setAccountId] = useState(campaign.sendingAccountId || "");
+  const [sendOnlyValidated, setSendOnlyValidated] = useState(campaign.sendOnlyValidated);
   const [subject, setSubject] = useState(campaign.subject);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop"|"mobile">("desktop");
@@ -90,7 +91,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
       name: formData.get("name"), subject: formData.get("subject"), preheader: formData.get("preheader"),
       fromName: formData.get("fromName"), fromEmail: formData.get("fromEmail"), listId: formData.get("listId"),
       templateId: formData.get("templateId"), sendingAccountId: formData.get("sendingAccountId"), scheduledAt: action === "send_now" ? null : scheduledValue(formData),
-      trackOpens: formData.get("trackOpens") === "on", trackClicks: formData.get("trackClicks") === "on", action,
+      sendOnlyValidated: formData.get("sendOnlyValidated") === "on", trackOpens: formData.get("trackOpens") === "on", trackClicks: formData.get("trackClicks") === "on", action,
     };
   }
 
@@ -281,6 +282,8 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
       </div>
       {selectedAccount ? <p className="mt-3 text-xs text-[var(--muted)]">Identity: {selectedAccount.fromName} &lt;{selectedAccount.fromEmail}&gt;{selectedAccount.replyTo ? ` · Reply-to: ${selectedAccount.replyTo}` : ""}</p> : null}
     </div>
+
+    <div className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.045] p-4"><label className="flex cursor-pointer items-start gap-3"><input className="mt-1 h-4 w-4 accent-violet-600" type="checkbox" name="sendOnlyValidated" checked={sendOnlyValidated} onChange={(e)=>setSendOnlyValidated(e.target.checked)} /><span><span className="block text-sm font-black">Send only to validated recipients</span><span className="mt-1 block text-xs font-medium leading-5 text-[var(--muted)]">Only contacts with a current <strong>VALID</strong> validation result will enter the delivery queue. Invalid, unknown, pending and failed validation results are skipped.</span></span></label>{sendOnlyValidated && preview ? <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-xl bg-emerald-500/[.07] p-3"><p className="text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-300">Will send</p><p className="mt-1 text-lg font-black">{preview.audience.validCount.toLocaleString()}</p></div><div className="rounded-xl bg-rose-500/[.06] p-3"><p className="text-[10px] font-black uppercase text-rose-700 dark:text-rose-300">Invalid</p><p className="mt-1 text-lg font-black">{preview.audience.invalidCount.toLocaleString()}</p></div><div className="rounded-xl bg-amber-500/[.06] p-3"><p className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-300">Pending</p><p className="mt-1 text-lg font-black">{preview.audience.pendingCount.toLocaleString()}</p></div><div className="rounded-xl bg-zinc-500/[.06] p-3"><p className="text-[10px] font-black uppercase text-[var(--muted)]">Skipped</p><p className="mt-1 text-lg font-black">{Math.max(0, preview.audience.rawCount-preview.audience.validCount).toLocaleString()}</p></div></div>:null}</div>
 
     <div className="flex flex-wrap gap-5 rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4 text-sm font-bold"><label className="flex items-center gap-2"><input className="accent-violet-600" type="checkbox" name="trackOpens" defaultChecked={campaign.trackOpens} /> Track opens</label><label className="flex items-center gap-2"><input className="accent-violet-600" type="checkbox" name="trackClicks" defaultChecked={campaign.trackClicks} /> Track clicks</label></div>
     <p className="text-xs text-[var(--muted)]">NexiMail automatically adds a visible unsubscribe link and one-click unsubscribe headers at send time.</p>
