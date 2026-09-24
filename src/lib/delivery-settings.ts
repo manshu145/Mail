@@ -31,6 +31,7 @@ export type DeliverySettings = {
   adaptivePacingIncreasePercent: number;
   adaptivePacingPressureMultiplier: number;
   adaptivePacingMinimumPerSecond: number;
+  validationDailyLimit: number;
 };
 
 export const DELIVERY_SETTING_KEYS = {
@@ -100,6 +101,7 @@ export function defaultDeliverySettings(env: Readonly<Record<string,string|undef
     adaptivePacingIncreasePercent: num(env.ADAPTIVE_PACING_INCREASE_PERCENT, 25, 1, 100),
     adaptivePacingPressureMultiplier: num(env.ADAPTIVE_PACING_PRESSURE_MULTIPLIER, 0.5, 0.1, 0.95),
     adaptivePacingMinimumPerSecond: num(env.ADAPTIVE_PACING_MINIMUM_PER_SECOND, 0.25, 0.1, 1000),
+    validationDailyLimit: int(env.VALIDATION_DAILY_LIMIT, 5000, 1, 10_000_000),
   };
 }
 
@@ -135,5 +137,6 @@ export async function readDeliverySettings(): Promise<DeliverySettings> {
     adaptivePacingIncreasePercent: num(values.get(DELIVERY_SETTING_KEYS.adaptivePacingIncreasePercent), defaults.adaptivePacingIncreasePercent, 1, 100),
     adaptivePacingPressureMultiplier: num(values.get(DELIVERY_SETTING_KEYS.adaptivePacingPressureMultiplier), defaults.adaptivePacingPressureMultiplier, 0.1, 0.95),
     adaptivePacingMinimumPerSecond: num(values.get(DELIVERY_SETTING_KEYS.adaptivePacingMinimumPerSecond), defaults.adaptivePacingMinimumPerSecond, 0.1, 1000),
+    validationDailyLimit: int(values.get(DELIVERY_SETTING_KEYS.validationDailyLimit), defaults.validationDailyLimit, 1, 10_000_000),
   };
 }
