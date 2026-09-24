@@ -9,7 +9,7 @@ import { UPSTREAM_COOLDOWN_KEY } from "@/lib/provider";
 import { providerCooldownEvents } from "@/db/provider-cooldown-event-schema";
 import type { AudiencePreflightResult } from "@/lib/audience-preflight";
 
-const CRITICAL_WORKERS = ["campaign", "policy", "transport"] as const;
+const CRITICAL_WORKERS = ["campaign", "policy", "transport", "postfix-events", "event"] as const;
 
 export type CampaignPreflight = {
   ok: boolean;
