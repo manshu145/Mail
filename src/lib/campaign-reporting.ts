@@ -14,6 +14,7 @@ export type CampaignMetrics = {
   delivered: number;
   bounced: number;
   failed: number;
+  retryableFailed: number;
   cancelled: number;
   uniqueOpens: number;
   totalOpens: number;
@@ -56,6 +57,17 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
         count(*) filter(where status='delivered')::int delivered,
         count(*) filter(where status='bounced')::int bounced,
         count(*) filter(where status='failed')::int failed,
+        count(*) filter(where status='failed'
+          and accepted_at is null
+          and provider_message_id is null
+          and coalesce(last_error,'') not in ('transport_submission_uncertain','transport_state_uncertain_after_worker_restart')
+          and coalesce((
+            select (e.payload->>'retryable')::boolean
+            from message_events e
+            where e.message_id=messages.id and e.type='transport_failed'
+            order by e.created_at desc limit 1
+          ),false)=true
+        )::int retryable_failed,
         count(*) filter(where status='cancelled')::int cancelled
       from messages where campaign_id=${campaignId}
     ), e as (
@@ -85,7 +97,7 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
   return {
     campaignId: String(row.campaign_id), campaignName: String(row.campaign_name), campaignStatus: String(row.campaign_status),
     targeted, queued:n(row.queued), ready:n(row.ready), sending:n(row.sending), accepted:n(row.accepted), deferred:n(row.deferred),
-    delivered, bounced, failed, cancelled:n(row.cancelled), uniqueOpens:opens, totalOpens:n(row.total_opens), uniqueClicks:clicks, totalClicks:n(row.total_clicks), automatedOpens:n(row.automated_opens), automatedClicks:n(row.automated_clicks),
+    delivered, bounced, failed, retryableFailed:n(row.retryable_failed), cancelled:n(row.cancelled), uniqueOpens:opens, totalOpens:n(row.total_opens), uniqueClicks:clicks, totalClicks:n(row.total_clicks), automatedOpens:n(row.automated_opens), automatedClicks:n(row.automated_clicks),
     unsubscribes:n(row.unsubscribes), complaints:n(row.complaints), deliveryRate:rates.deliveryRate, deliveryProgressRate:pct(delivered,targeted), bounceRate:rates.bounceRate,
     openRate:pct(opens,delivered), clickRate:pct(clicks,delivered), ctor:pct(clicks,opens),
   };
@@ -103,6 +115,17 @@ export async function getCampaignMetricsList(limit = 50): Promise<CampaignMetric
       count(distinct m.id) filter(where m.status='delivered')::int delivered,
       count(distinct m.id) filter(where m.status='bounced')::int bounced,
       count(distinct m.id) filter(where m.status='failed')::int failed,
+      count(distinct m.id) filter(where m.status='failed'
+        and m.accepted_at is null
+        and m.provider_message_id is null
+        and coalesce(m.last_error,'') not in ('transport_submission_uncertain','transport_state_uncertain_after_worker_restart')
+        and coalesce((
+          select (re.payload->>'retryable')::boolean
+          from message_events re
+          where re.message_id=m.id and re.type='transport_failed'
+          order by re.created_at desc limit 1
+        ),false)=true
+      )::int retryable_failed,
       count(distinct m.id) filter(where m.status='cancelled')::int cancelled,
       count(distinct case when e.type='open' and coalesce((e.payload->>'qualified')::boolean,coalesce((e.payload->>'automated')::boolean,false)=false)=true then e.message_id end)::int unique_opens,
       count(distinct (
@@ -128,7 +151,7 @@ export async function getCampaignMetricsList(limit = 50): Promise<CampaignMetric
     const targeted=n(row.targeted), delivered=n(row.delivered), bounced=n(row.bounced), failed=n(row.failed), opens=n(row.unique_opens), clicks=n(row.unique_clicks);
     const rates=outcomeRates(delivered,bounced,failed);
     return { campaignId:String(row.campaign_id),campaignName:String(row.campaign_name),campaignStatus:String(row.campaign_status),targeted,
-      queued:n(row.queued),ready:n(row.ready),sending:n(row.sending),accepted:n(row.accepted),deferred:n(row.deferred),delivered,bounced,failed,cancelled:n(row.cancelled),
+      queued:n(row.queued),ready:n(row.ready),sending:n(row.sending),accepted:n(row.accepted),deferred:n(row.deferred),delivered,bounced,failed,retryableFailed:n(row.retryable_failed),cancelled:n(row.cancelled),
       uniqueOpens:opens,totalOpens:n(row.total_opens),uniqueClicks:clicks,totalClicks:n(row.total_clicks),automatedOpens:n(row.automated_opens),automatedClicks:n(row.automated_clicks),unsubscribes:n(row.unsubscribes),complaints:n(row.complaints),deliveryRate:rates.deliveryRate,deliveryProgressRate:pct(delivered,targeted),bounceRate:rates.bounceRate,openRate:pct(opens,delivered),clickRate:pct(clicks,delivered),ctor:pct(clicks,opens)};
   });
 }
