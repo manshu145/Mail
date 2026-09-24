@@ -128,12 +128,12 @@ async function releaseProviderCooldown(id: string, cooldownKey: string | null, r
   await event(id,"provider_cooldown",{cooldownKey:key,retryAt:next.toISOString()});
 }
 
-async function activateTransportRestriction(accountId: string, recipientEmail: string, response: string, scope: "provider" | "sender" | "upstream", reason: string, cooldownMinutes: number) {
+async function activateTransportRestriction(accountId: string, recipientEmail: string, response: string, scope: "provider" | "sender" | "upstream", reason: string, cooldownMinutes: number, inferredProvider?: MailboxProvider) {
   const provider = scope === "upstream"
     ? UPSTREAM_COOLDOWN_KEY
     : scope === "sender"
       ? SENDER_COOLDOWN_KEY
-      : providerForDelivery(recipientEmail, response);
+      : inferredProvider || providerForDelivery(recipientEmail, response);
   const now = new Date();
   const nextProbeAt = new Date(now.getTime() + cooldownMinutes * 60_000);
   const clipped = response.slice(0, 1000);
@@ -437,6 +437,7 @@ async function runOnce() {
             restriction.scope,
             restriction.reason,
             settings.providerCooldownMinutes,
+            provider,
           );
           await releaseProviderCooldown(message.id, cooldown.provider, cooldown.nextProbeAt, settings.providerCooldownMinutes);
           providerHeld++;
