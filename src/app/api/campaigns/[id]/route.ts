@@ -47,6 +47,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const action = String(body.action || "save");
   if (!["save", "send_now", "schedule", "queue"].includes(action)) return NextResponse.json({ error: "Unknown campaign action." }, { status: 400 });
   const wantsDelivery = action === "send_now" || action === "schedule" || action === "queue";
+  const sendOnlyValidated = body.sendOnlyValidated === true;
   const scheduledRaw = value(body.scheduledAt);
   const scheduledAt = action === "send_now" ? null : scheduledRaw ? new Date(scheduledRaw) : null;
   if (scheduledAt && Number.isNaN(scheduledAt.getTime())) return NextResponse.json({ error: "Invalid schedule time." }, { status: 400 });
@@ -73,7 +74,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!domainRow || domainRow.status !== "ready" || !domainRow.spfOk || !domainRow.dkimOk || !domainRow.dmarcOk) return NextResponse.json({ error: `Sending domain ${domain} must pass SPF, DKIM and DMARC checks before sending.` }, { status: 409 });
 
     audiencePreflight = await preflightAudience(list);
-    audienceSize = audiencePreflight.eligibleCount;
+    audienceSize = sendOnlyValidated ? audiencePreflight.validCount : audiencePreflight.eligibleCount;
     const [campaignAttachments, templateAttachments] = await Promise.all([
       listCampaignAttachments(id),
       listTemplateAttachments(template.id),
@@ -118,7 +119,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }});
 
     if (sendGuard.status === "blocked") return NextResponse.json({ error: `Campaign preflight blocked launch: ${sendGuard.blockingIssues.join(" ")}`, audiencePreflight, sendGuard }, { status: 409 });
-    if (audienceSize === 0) return NextResponse.json({ error: "Selected audience has no eligible recipients after suppression and validation checks.", audiencePreflight }, { status: 409 });
+    if (audienceSize === 0) return NextResponse.json({ error: "Selected audience has no recipients matching the selected validation rule.", audiencePreflight }, { status: 409 });
     if (policy.maxRecipientsPerCampaign !== null && audienceSize > policy.maxRecipientsPerCampaign) return NextResponse.json({ error: `This runtime allows up to ${policy.maxRecipientsPerCampaign.toLocaleString()} eligible recipients per campaign. This audience currently has ${audienceSize.toLocaleString()}.`, audiencePreflight }, { status: 409 });
   }
 
@@ -130,6 +131,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     fromName: account?.fromName || null,
     fromEmail: normalizedFromEmail,
     listId, templateId, sendingAccountId,
+    sendOnlyValidated,
     trackOpens: body.trackOpens !== false,
     trackClicks: body.trackClicks !== false,
     scheduledAt,
@@ -140,6 +142,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }).where(eq(campaigns.id, id));
 
   const auditAction = action === "send_now" ? "campaign.send_now_queued" : action === "schedule" ? "campaign.scheduled" : action === "queue" ? "campaign.queued" : "campaign.updated";
-  await audit(auditAction, session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount } : null, runtimeMode: policy.mode });
+  await audit(auditAction, session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, sendOnlyValidated, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount } : null, runtimeMode: policy.mode });
   return NextResponse.json({ ok: true, status: nextStatus, audienceSize, sendGuard, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount, validCount: audiencePreflight.validCount, pendingCount: audiencePreflight.pendingCount, unknownCount: audiencePreflight.unknownCount, awaitingValidationCount: audiencePreflight.awaitingValidationCount, domainInvalidCount: audiencePreflight.domainInvalidCount, domainHealthPendingCount: audiencePreflight.domainHealthPendingCount, checkedDomainCount: audiencePreflight.checkedDomainCount } : null });
 }
