@@ -41,7 +41,7 @@ async function campaignSafety(campaignId:string,settings:Awaited<ReturnType<type
   config:{initialBatch:settings.canaryInitialBatch,secondBatch:settings.canarySecondBatch,thirdBatch:settings.canaryThirdBatch,bounceWarnRate:settings.canaryBounceWarnRate,bounceStopRate:settings.reputationBounceStopRate,reputationMinSample:settings.reputationMinSample},
  });
  let{phase,releaseLimit,state,bounceRate,paused,reason}=decision;
- const complaintStop=sample>=settings.reputationMinSample&&complaintRate>=settings.reputationComplaintStopRate;
+ const complaintStop=settings.reputationComplaintStopRate>0&&sample>=settings.reputationMinSample&&complaintRate>=settings.reputationComplaintStopRate;
  if(complaintStop){
   state="paused";
   paused=true;
