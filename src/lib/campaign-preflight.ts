@@ -129,7 +129,7 @@ export async function getCampaignSendGuard(input: {
       update messages set next_attempt_at=${now},last_error=null
       where campaign_id in (select id from campaigns where sending_account_id=${input.sendingAccountId})
         and status='ready_for_transport'
-        and (last_error in ('sender_cooldown','upstream_cooldown','provider_cooldown:__sender__','provider_cooldown:__upstream__') or last_error like 'provider_cooldown:%')
+        and last_error in ('sender_cooldown','upstream_cooldown','provider_cooldown:__sender__','provider_cooldown:__upstream__')
     `);
     await db.insert(providerCooldownEvents).values({
       cooldownId: upstream.id,
