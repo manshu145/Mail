@@ -279,7 +279,7 @@ export async function handlePostfixEvent(db: EventDb, line: string, mappedMessag
         provider,
         line: detail,
         bounceKind: classification.kind,
-        suppressRecipient: true,
+        suppressRecipient: classification.suppressRecipient,
         restrictionScope: restriction.scope,
         restrictionReason: restriction.reason,
         providerCooldown: Boolean(cooldown),
@@ -300,7 +300,7 @@ export async function handlePostfixEvent(db: EventDb, line: string, mappedMessag
     await emitWebhookEvent("message.bounced", {
       ...base,
       bounceKind: classification.kind,
-      suppressRecipient: true,
+      suppressRecipient: classification.suppressRecipient,
       restrictionScope: restriction.scope,
       restrictionReason: restriction.reason,
       providerCooldown: Boolean(cooldown),
