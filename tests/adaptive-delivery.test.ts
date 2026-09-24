@@ -22,14 +22,20 @@ test("warning bounce rate permits only a small next batch", () => {
   assert.equal(result.state, "slowed");
 });
 
-test("unsafe early bounce rate pauses before the full list is released", () => {
+test("small early bounce sample does not pause before the configured minimum sample", () => {
   const result = decideAdaptiveDelivery({ total: 3000, released: 100, sample: 20, bounced: 2, phase: 0, releaseLimit: 100, config });
+  assert.equal(result.paused, false);
+  assert.equal(result.releaseLimit, 100);
+});
+
+test("five hard bounces in the first hundred terminal outcomes pauses the campaign", () => {
+  const result = decideAdaptiveDelivery({ total: 3000, released: 100, sample: 100, bounced: 5, phase: 0, releaseLimit: 100, config });
   assert.equal(result.paused, true);
   assert.equal(result.releaseLimit, 100);
 });
 
-test("small campaign is still paused when enough terminal outcomes prove a dangerous bounce rate", () => {
-  const result = decideAdaptiveDelivery({ total: 94, released: 94, sample: 47, bounced: 25, phase: 3, releaseLimit: 94, config });
+test("small campaign is still paused when all terminal outcomes prove a dangerous bounce rate", () => {
+  const result = decideAdaptiveDelivery({ total: 94, released: 94, sample: 94, bounced: 25, phase: 3, releaseLimit: 94, config });
   assert.equal(result.paused, true);
   assert.equal(result.state, "paused");
   assert.equal(result.reason, "hard_bounce_rate_stop");
