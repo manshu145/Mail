@@ -16,6 +16,7 @@ import { readDeliverySettings, type DeliverySettings } from "../../src/lib/deliv
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
 import { buildBulkDeliverabilityHeaders } from "../../src/lib/deliverability-headers";
+import { AdaptivePacingController } from "../../src/lib/adaptive-pacing";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -24,6 +25,8 @@ const smtpTimeoutMs = Math.max(3000, Number(process.env.MTA_SMTP_TIMEOUT_MS || "
 const intervalMs = Math.max(1000, Number(process.env.TRANSPORT_WORKER_INTERVAL_MS || "3000"));
 const claimBatch = Math.min(200, Math.max(1, Number(process.env.TRANSPORT_BATCH_SIZE || "50")));
 const bounceSigningEnabled = Boolean(process.env.BOUNCE_SECRET?.trim());
+let adaptivePacing: AdaptivePacingController | null = null;
+let adaptivePacingConfigKey = "";
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
@@ -275,7 +278,22 @@ async function runOnce() {
     return;
   }
   const settings = await readDeliverySettings();
-  const delayMs = Math.max(Math.ceil(1000 / settings.maxPerSecond), settings.providerIntervalMs);
+  const adaptiveKey = [settings.adaptivePacingEnabled, settings.adaptivePacingBasePerSecond, settings.adaptivePacingTargetPerSecond, settings.adaptivePacingHealthyRounds, settings.adaptivePacingIncreasePercent, settings.adaptivePacingPressureMultiplier, settings.adaptivePacingMinimumPerSecond].join(":");
+  if (!adaptivePacing || adaptivePacingConfigKey !== adaptiveKey) {
+    adaptivePacing = new AdaptivePacingController({
+      enabled: settings.adaptivePacingEnabled,
+      basePerSecond: settings.adaptivePacingBasePerSecond,
+      targetPerSecond: Math.min(settings.adaptivePacingTargetPerSecond, settings.maxPerSecond),
+      maxPerSecond: settings.maxPerSecond,
+      healthyRounds: settings.adaptivePacingHealthyRounds,
+      increasePercent: settings.adaptivePacingIncreasePercent,
+      pressureMultiplier: settings.adaptivePacingPressureMultiplier,
+      minimumPerSecond: Math.min(settings.adaptivePacingMinimumPerSecond, settings.maxPerSecond),
+    });
+    adaptivePacingConfigKey = adaptiveKey;
+  }
+  const activeRatePerSecond = adaptivePacing.currentRate;
+  const delayMs = Math.max(Math.ceil(1000 / activeRatePerSecond), settings.providerIntervalMs);
   const providerNextAt = new Map<string, number>();
   let globalNextAt = 0;
   const claimed = await claimMessages(settings.campaignBurstPerRound);
@@ -450,10 +468,11 @@ async function runOnce() {
     }
     const sentAt = Date.now();
     providerNextAt.set(provider, sentAt + settings.providerIntervalMs);
-    globalNextAt = sentAt + (1000 / settings.maxPerSecond);
+    globalNextAt = sentAt + (1000 / activeRatePerSecond);
   }
 
-  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, providerIntervalMs: settings.providerIntervalMs, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "round_robin", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
+  const nextAdaptiveRate = adaptivePacing.observe({ accepted, deferred, failed, providerHeld });
+  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, adaptivePacingEnabled: settings.adaptivePacingEnabled, adaptiveRatePerSecond: activeRatePerSecond, nextAdaptiveRatePerSecond: nextAdaptiveRate, providerIntervalMs: settings.providerIntervalMs, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "round_robin", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
 }
 
 async function main() {
