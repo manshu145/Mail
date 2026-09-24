@@ -143,10 +143,7 @@ async function clearCooldownByKey(db: EventDb, campaignId: string, cooldownKey: 
         select id from campaigns where sending_account_id=${sendingAccountId}
       )
         and status='ready_for_transport'
-        and (
-          last_error in ('sender_cooldown','upstream_cooldown','provider_cooldown:__sender__','provider_cooldown:__upstream__')
-          or last_error like 'provider_cooldown:%'
-        )
+        and last_error in ('sender_cooldown','upstream_cooldown','provider_cooldown:__sender__','provider_cooldown:__upstream__')
     `);
   } else {
     await db.execute(sql`
