@@ -1,8 +1,9 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
-import { contacts, suppressions, systemSettings, validationJobs, validationResults } from "../../src/db/schema";
+import { contacts, lists, suppressions, systemSettings, validationJobs, validationResults } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
+import { audienceSelection } from "../../src/lib/audience";
 import type { ValidationVerdict } from "../../src/lib/validation-policy";
 import { validateMailboxInternally } from "../../src/lib/mailbox-validator";
 import { recipientDomain, recipientProvider, runProviderAwarePool, validationIsPreRecipientFailure, validationNeedsBackoff } from "../../src/lib/validation-throughput";
@@ -196,6 +197,23 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
     return result.rows;
   }
 
+  if (scope.startsWith("list:")) {
+    const listId = scope.slice("list:".length);
+    if (!/^[0-9a-f-]{36}$/i.test(listId)) return [];
+    const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+    if (!list) return [];
+    const audience = await audienceSelection(list);
+    const result = await pool.query<ValidationContact>(`
+      select a.contact_id::text as id,a.email,a.normalized_email as "normalizedEmail"
+      from (${audience}) a
+      where a.validation_status in ('pending','unknown','error')
+        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=a.contact_id)
+      order by a.contact_id
+      limit $2
+    `, [jobId, limit]);
+    return result.rows;
+  }
+
   if (scope.startsWith("import:")) {
     const importId = scope.slice("import:".length);
     if (!/^[0-9a-f-]{36}$/i.test(importId)) return [];
@@ -267,6 +285,21 @@ async function remainingCountForJob(scope: string, jobId: string) {
         and c.validation_status in ('pending','unknown','error')
         and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id)
     `, [contactId, jobId]);
+    return Number(result.rows[0]?.total || 0);
+  }
+
+  if (scope.startsWith("list:")) {
+    const listId = scope.slice("list:".length);
+    if (!/^[0-9a-f-]{36}$/i.test(listId)) return 0;
+    const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+    if (!list) return 0;
+    const audience = await audienceSelection(list);
+    const result = await pool.query<{ total: number }>(`
+      select count(*)::int as total
+      from (${audience}) a
+      where a.validation_status in ('pending','unknown','error')
+        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=a.contact_id)
+    `, [jobId]);
     return Number(result.rows[0]?.total || 0);
   }
 
