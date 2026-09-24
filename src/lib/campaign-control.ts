@@ -3,7 +3,15 @@ import { pool } from "@/db";
 export class CampaignControlError extends Error {}
 
 export const retryableMessageSql = `accepted_at is null and provider_message_id is null
-  and coalesce(last_error,'') not in ('transport_submission_uncertain','transport_state_uncertain_after_worker_restart')`;
+  and coalesce(last_error,'') not in ('transport_submission_uncertain','transport_state_uncertain_after_worker_restart')
+  and coalesce((
+    select (e.payload->>'retryable')::boolean
+    from message_events e
+    where e.message_id=messages.id
+      and e.type='transport_failed'
+    order by e.created_at desc
+    limit 1
+  ),false)=true`;
 
 export async function controlCampaign(id: string, action: string, connectionPool: Pick<typeof pool, "connect"> = pool) {
   const client = await connectionPool.connect();
