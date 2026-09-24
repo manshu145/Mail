@@ -41,7 +41,7 @@ export async function audienceSelection(list: typeof lists.$inferSelect, executo
       when exists(
         select 1 from recipient_domain_health rdh
         where rdh.domain=lower(split_part(${contacts.normalizedEmail},'@',2))
-          and rdh.status in ('no_mx','null_mx')
+          and rdh.status <> 'valid'
       ) then false
       else true
     end as send_eligible,
