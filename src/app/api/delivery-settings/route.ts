@@ -5,7 +5,9 @@ import { audit } from "@/lib/audit";
 import { canManageInfrastructure, getSession } from "@/lib/auth";
 import { DELIVERY_SETTING_KEYS, MAX_PROVIDER_COOLDOWN_MINUTES, readDeliverySettings, type DeliverySettings } from "@/lib/delivery-settings";
 
-const numericKeys = (Object.keys(DELIVERY_SETTING_KEYS).filter((key) => key !== "adaptivePacingEnabled")) as Array<Exclude<keyof DeliverySettings, "adaptivePacingEnabled">>;
+type NumericDeliveryKey = Exclude<keyof DeliverySettings, "adaptivePacingEnabled">;
+
+const numericKeys = Object.keys(DELIVERY_SETTING_KEYS).filter((key): key is NumericDeliveryKey => key !== "adaptivePacingEnabled");
 
 export async function GET() {
   const session = await getSession();
@@ -29,10 +31,10 @@ export async function PATCH(request: NextRequest) {
     if (!(key in body)) continue;
     const value = Number(body[key]);
     if (!Number.isFinite(value)) return NextResponse.json({ error: `${key} must be numeric.` }, { status: 400 });
-    (next[key] as number) = value;
+    next[key] = value;
   }
 
-  const constraints: Array<[keyof DeliverySettings, number, number]> = [
+  const constraints: Array<[NumericDeliveryKey, number, number]> = [
     ["maxPerSecond",1,1000],["maxRecipientsPerCampaign",0,10_000_000],["maxRollingHour",0,10_000_000],["maxRolling24h",0,100_000_000],["maxActiveQueued",100,10_000_000],
     ["maxConcurrentCampaigns",0,10_000],["campaignBurstPerRound",1,50],
     ["retryMaxAttempts",1,20],["retryInitialSeconds",10,86_400],["retryMaxSeconds",30,604_800],["retryBackoffMultiplier",1,10],["providerCooldownMinutes",1,MAX_PROVIDER_COOLDOWN_MINUTES],
