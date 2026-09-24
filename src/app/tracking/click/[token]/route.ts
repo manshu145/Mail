@@ -1,6 +1,7 @@
+import { sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db, databaseConfigured } from "@/db";
-import { eq } from "drizzle-orm";
 import { messageEvents, messages } from "@/db/schema";
 import { verifyPublicToken } from "@/lib/public-tokens";
 import { emitWebhookEvent } from "@/lib/webhooks";
@@ -17,12 +18,31 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
     if (databaseConfigured && messageId && /^[0-9a-f-]{36}$/i.test(messageId)) {
       const requestClassification = classifyTrackingRequest(request);
       const [message] = await db.select({ deliveredAt: messages.deliveredAt }).from(messages).where(eq(messages.id, messageId)).limit(1);
+
+      const recentIpRecipients = requestClassification.ipHash
+        ? await db.execute(sql`select count(distinct message_id)::int count
+            from message_events
+            where type='click'
+              and message_id<>${messageId}::uuid
+              and created_at >= now()-interval '10 minutes'
+              and payload->>'ipHash'=${requestClassification.ipHash}`)
+        : { rows: [{ count: 0 }] };
+
+      const sameIpDistinctRecipients = Number((recentIpRecipients.rows[0] as Record<string, unknown> | undefined)?.count || 0) + 1;
       const classification = qualifyClickEvent(requestClassification, {
         deliveredAt: message?.deliveredAt || null,
-        sameIpDistinctRecipients: 1,
+        sameIpDistinctRecipients,
       });
-      await db.insert(messageEvents).values({ messageId, type: "click", payload: { url: target, source: "tracking_click", ...classification } });
-      if (classification.qualified) await emitWebhookEvent("message.clicked", { messageId, url: target }).catch((error) => console.error("[tracking.click.webhook]", error));
+
+      await db.insert(messageEvents).values({
+        messageId,
+        type: "click",
+        payload: { url: target, source: "tracking_click", ...classification },
+      });
+
+      if (classification.qualified) {
+        await emitWebhookEvent("message.clicked", { messageId, url: target }).catch((error) => console.error("[tracking.click.webhook]", error));
+      }
     }
     return NextResponse.redirect(target, 302);
   } catch {
