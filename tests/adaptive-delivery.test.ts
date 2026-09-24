@@ -34,10 +34,16 @@ test("five hard bounces in the first hundred terminal outcomes pauses the campai
   assert.equal(result.releaseLimit, 100);
 });
 
-test("small campaign is still paused when all terminal outcomes prove a dangerous bounce rate", () => {
+test("small campaign does not pause after every recipient has already been released", () => {
   const result = decideAdaptiveDelivery({ total: 94, released: 94, sample: 94, bounced: 25, phase: 3, releaseLimit: 94, config });
+  assert.equal(result.paused, false);
+  assert.equal(result.state, "open");
+  assert.equal(result.releaseLimit, 94);
+});
+
+test("small campaign can still stop while recipients remain unsent", () => {
+  const result = decideAdaptiveDelivery({ total: 94, released: 80, sample: 47, bounced: 3, phase: 0, releaseLimit: 94, config });
   assert.equal(result.paused, true);
   assert.equal(result.state, "paused");
   assert.equal(result.reason, "hard_bounce_rate_stop");
-  assert.equal(result.releaseLimit, 94);
 });
