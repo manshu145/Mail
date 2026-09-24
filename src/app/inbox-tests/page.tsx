@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { InboxTestsClient } from "@/components/inbox-tests-client";
@@ -19,7 +19,7 @@ export default async function InboxTestsPage() {
     db.select({ id: campaigns.id, name: campaigns.name, status: campaigns.status, templateId: campaigns.templateId, sendingAccountId: campaigns.sendingAccountId }).from(campaigns).orderBy(desc(campaigns.createdAt)).limit(100),
     db.select().from(inboxTests).orderBy(desc(inboxTests.createdAt)).limit(50),
   ]);
-  const results = tests.length ? await db.select().from(inboxTestResults).where((await import("drizzle-orm")).inArray(inboxTestResults.testId, tests.map((test) => test.id))) : [];
+  const results = tests.length ? await db.select().from(inboxTestResults).where(inArray(inboxTestResults.testId, tests.map((test) => test.id))) : [];
 
   return <AppShell session={session}>
     <div className="page-intro">
