@@ -61,6 +61,7 @@ type AcceptedQueueMessage = {
   last_error: string | null;
   sending_account_id: string;
   provider_probe: boolean;
+  accepted_provider: string | null;
 };
 
 async function evacuateActiveCooldownQueues() {
@@ -84,7 +85,14 @@ async function evacuateActiveCooldownQueues() {
         where me.message_id=m.id and me.type='mta_accepted'
         order by me.created_at desc
         limit 1
-      ),false) as provider_probe
+      ),false) as provider_probe,
+      (
+        select me.payload->>'provider'
+        from message_events me
+        where me.message_id=m.id and me.type='mta_accepted'
+        order by me.created_at desc
+        limit 1
+      ) as accepted_provider
     from messages m
     join campaigns c on c.id=m.campaign_id
     where m.status='mta_accepted'
@@ -97,7 +105,12 @@ async function evacuateActiveCooldownQueues() {
     const provider = providerForDelivery(message.recipient_email, message.last_error);
     const cooldown = cooldowns.rows.find((row) =>
       row.sending_account_id === message.sending_account_id
-      && (row.provider === UPSTREAM_COOLDOWN_KEY || row.provider === SENDER_COOLDOWN_KEY || row.provider === provider)
+      && (
+        row.provider === UPSTREAM_COOLDOWN_KEY
+        || row.provider === SENDER_COOLDOWN_KEY
+        || row.provider === provider
+        || row.provider === message.accepted_provider
+      )
     );
     if (!cooldown) continue;
 
