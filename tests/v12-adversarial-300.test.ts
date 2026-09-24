@@ -125,8 +125,9 @@ for (let i = 211; i <= 250; i++) {
   test(`AUDIT-${String(i).padStart(3, "0")} adaptive delivery boundary ${i}`, () => {
     const total = [20, 94, 99, 100, 101, 300, 301, 600, 601, 5000][i % 10];
     const unhealthy = i % 4 === 0;
-    const released = Math.min(total, Math.max(20, Math.min(100, total)));
-    const sample = Math.min(released, unhealthy ? Math.max(20, Math.ceil(released * 0.2)) : Math.max(20, Math.ceil(released * 0.9)));
+    const released = Math.min(total, 100);
+    const minimumSafetySample = Math.min(total, 100);
+    const sample = unhealthy ? minimumSafetySample : Math.min(released, Math.max(20, Math.ceil(released * 0.9)));
     const bounced = unhealthy ? Math.ceil(sample * 0.10) : Math.min(1, Math.floor(sample * 0.01));
     const result = decideAdaptiveDelivery({
       total,
