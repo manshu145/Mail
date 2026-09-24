@@ -15,7 +15,7 @@ async function campaignSafety(campaignId:string,settings:Awaited<ReturnType<type
  const aggregate=await pool.query<{total:number;released:number;sample:number;bounced:number;complaints:number}>(`
   select count(*)::int total,
     count(*) filter(where status in ('ready_for_transport','sending','mta_accepted','deferred','delivered','bounced','failed'))::int released,
-    count(*) filter(where status in ('delivered','bounced','failed'))::int sample,
+    count(*) filter(where status in ('delivered','bounced'))::int sample,
     count(*) filter(where status='bounced')::int bounced,
     count(*) filter(where exists(
       select 1 from message_events e
