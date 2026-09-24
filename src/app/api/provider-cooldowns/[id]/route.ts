@@ -30,7 +30,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         select m.id from messages m join campaigns c on c.id=m.campaign_id
         where c.sending_account_id=${cooldown.sendingAccountId} and c.status='sending'
           and m.status='ready_for_transport'
-          and (m.last_error in ('sender_cooldown','upstream_cooldown','provider_cooldown:__sender__','provider_cooldown:__upstream__') or m.last_error like 'provider_cooldown:%')
+          and m.last_error in ('sender_cooldown','upstream_cooldown','provider_cooldown:__sender__','provider_cooldown:__upstream__')
         order by m.queued_at asc limit 1
       )`
     : sql`update messages set next_attempt_at=${now} where id=(
