@@ -3,7 +3,7 @@ import { db, pool } from "../../src/db";
 import { contacts, lists, suppressions, systemSettings, validationJobs, validationResults } from "../../src/db/schema";
 import { workerHeartbeats } from "../../src/db/operations-schema";
 import { normalizeEmail } from "../../src/lib/contact-utils";
-import { audienceSelection } from "../../src/lib/audience";
+import { validationAudienceSelection } from "../../src/lib/audience";
 import type { ValidationVerdict } from "../../src/lib/validation-policy";
 import { validateMailboxInternally } from "../../src/lib/mailbox-validator";
 import { recipientDomain, recipientProvider, runProviderAwarePool, validationIsPreRecipientFailure, validationNeedsBackoff } from "../../src/lib/validation-throughput";
