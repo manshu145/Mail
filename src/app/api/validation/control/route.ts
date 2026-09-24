@@ -5,7 +5,7 @@ import { contacts, importJobs, lists, systemSettings, validationJobs } from "@/d
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { isValidEmail, normalizeEmail } from "@/lib/contact-utils";
-import { audienceSelection } from "@/lib/audience";
+import { validationAudienceSelection } from "@/lib/audience";
 import { DEFAULT_VALIDATION_MODE, normalizeValidationMode, VALIDATION_MODE_KEY, validationModeNeedsSupersend } from "@/lib/validation-provider";
 
 const unresolved = inArray(contacts.validationStatus, ["pending","unknown","error"]);
@@ -45,7 +45,7 @@ export async function GET() {
   const options: Array<{ id: string; name: string; isDynamic: boolean; unresolved: number }> = [];
   for (const list of rows) {
     try {
-      const audience = await audienceSelection(list);
+      const audience = await validationAudienceSelection(list);
       const result = await pool.query<{ total: number }>(`
         select count(*)::int as total
         from (${audience}) a
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
     const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
     if (!list) return NextResponse.json({ error: "List or segment not found." }, { status: 404 });
 
-    const audience = await audienceSelection(list);
+    const audience = await validationAudienceSelection(list);
     const result = await pool.query<{ total: number }>(`
       select count(*)::int as total
       from (${audience}) a
