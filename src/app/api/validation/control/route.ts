@@ -134,15 +134,16 @@ export async function POST(request: NextRequest) {
     const [imp] = await db.select({ id: importJobs.id }).from(importJobs).where(eq(importJobs.id, importId)).limit(1);
     if (!imp) return NextResponse.json({ error: "Import not found." }, { status: 404 });
 
-    const result = await pool.query<{ total: number }>(`
+    const result = await db.execute(sql`
       select count(distinct c.id)::int as total
       from import_staging_rows s
       join contacts c on c.id=s.contact_id
-      where s.job_id=$1
+      where s.job_id=${importId}
         and c.status='active'
         and c.validation_status in ('pending','unknown','error')
-    `, [importId]);
-    const total = Number(result.rows[0]?.total || 0);
+    `);
+    const rows = Array.isArray(result) ? result : result.rows;
+    const total = Number((rows as Array<{ total?: number | string }>)[0]?.total || 0);
     if (!total) return NextResponse.json({ error: "This import has no unresolved contacts to validate." }, { status: 409 });
 
     const [job] = await db.insert(validationJobs).values({ scope: `import:${importId}`, validationMode, totalRows: total }).returning({ id: validationJobs.id });
