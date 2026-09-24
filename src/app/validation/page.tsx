@@ -54,6 +54,7 @@ function validationModeLabel(mode: string) {
 
 function jobScopeLabel(scope: string) {
   if (scope.startsWith("import:")) return "CSV import";
+  if (scope.startsWith("list:")) return "List / segment";
   if (scope.startsWith("contact:")) return "Single contact";
   if (scope === "pending") return "Unresolved contacts";
   if (scope === "gmail:unresolved") return "Legacy unresolved Gmail";
