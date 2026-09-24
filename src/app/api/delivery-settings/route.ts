@@ -41,7 +41,12 @@ export async function PATCH(request: NextRequest) {
   ];
   for (const [key,min,max] of constraints) if (next[key] < min || next[key] > max) return NextResponse.json({ error: `${key} must be between ${min} and ${max}.` }, { status: 400 });
   if (next.retryMaxSeconds < next.retryInitialSeconds) return NextResponse.json({ error: "Maximum retry wait must be at least the initial retry wait." }, { status: 400 });
-  if (next.canaryBounceWarnRate >= next.reputationBounceStopRate) return NextResponse.json({ error: "Canary warning rate must be lower than the bounce stop rate." }, { status: 400 });
+  if (next.reputationBounceStopRate === 0 && next.canaryBounceWarnRate !== 0) {
+    return NextResponse.json({ error: "Canary warning rate must also be 0 when bounce stop automation is disabled." }, { status: 400 });
+  }
+  if (next.reputationBounceStopRate > 0 && next.canaryBounceWarnRate >= next.reputationBounceStopRate) {
+    return NextResponse.json({ error: "Canary warning rate must be lower than the bounce stop rate." }, { status: 400 });
+  }
 
   await db.transaction(async (tx) => {
     for (const key of numericKeys) {
