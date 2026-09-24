@@ -90,10 +90,10 @@ export function ResourceCreate({
       <Plus className="h-4 w-4" />{buttonLabel}
     </button>
     {open ? <ModalPortal><div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black/55 p-3 py-4 backdrop-blur-sm sm:items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="resource-create-title" className="premium-panel flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden sm:max-h-[calc(100dvh-3rem)]">
+      <section role="dialog" aria-modal="true" aria-labelledby="resource-create-title" aria-describedby="resource-create-description" className="premium-panel flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden sm:max-h-[calc(100dvh-3rem)]">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-4 sm:px-6 sm:py-5">
           <div>
-            <p className="text-xs font-extrabold uppercase tracking-[.16em] text-zinc-400">NexiMail</p>
+            <p id="resource-create-description" className="text-xs font-extrabold uppercase tracking-[.16em] text-[var(--muted)]">NexiMail</p>
             <h2 id="resource-create-title" className="mt-1 text-2xl font-black tracking-tight">{title}</h2>
           </div>
           <button type="button" aria-label="Close dialog" disabled={busy} className="btn-secondary !min-h-0 !p-2" onClick={close}>
@@ -102,13 +102,13 @@ export function ResourceCreate({
         </div>
         <form action={submit} className="flex min-h-0 flex-1 flex-col">
           <div className="modal-scroll min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5">
-            {fields.map((field) => <label className="block" key={field.name}>
+            {fields.map((field, index) => <label className="block" key={field.name}>
               <span className="mb-1.5 block text-sm font-bold">{field.label}</span>
-              {field.type === "textarea" ? <textarea name={field.name} required={field.required} placeholder={field.placeholder} rows={5} className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-3 text-sm outline-none focus:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900" />
-                : field.type === "select" ? <select name={field.name} required={field.required} className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-3 text-sm outline-none dark:border-zinc-800 dark:bg-zinc-900">
+              {field.type === "textarea" ? <textarea name={field.name} required={field.required} placeholder={field.placeholder} rows={5} autoFocus={index === 0} className="form-control" />
+                : field.type === "select" ? <select name={field.name} required={field.required} autoFocus={index === 0} className="form-control">
                   {field.options?.map((option) => { const x = typeof option === "string" ? { label: option, value: option } : option; return <option value={x.value} key={x.value}>{x.label}</option>; })}
                 </select>
-                : <input name={field.name} required={field.required} placeholder={field.placeholder} type={field.type || "text"} autoComplete={field.type === "password" ? "new-password" : undefined} className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-3 text-sm outline-none focus:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900" />}
+                : <input name={field.name} required={field.required} placeholder={field.placeholder} type={field.type || "text"} autoFocus={index === 0} autoComplete={field.type === "password" ? "new-password" : undefined} className="form-control" />}
             </label>)}
             {error ? <p role="alert" aria-live="polite" className="text-sm font-semibold text-rose-600">{error}</p> : null}
           </div>
