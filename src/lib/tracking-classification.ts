@@ -65,7 +65,12 @@ export function qualifyOpenEvent(
   let qualified = classification.qualified;
   let qualificationReason = classification.qualificationReason;
 
-  if (deliveryToOpenMs !== null && deliveryToOpenMs < 0) {
+  if (deliveryToOpenMs === null) {
+    automated = true;
+    qualified = false;
+    automationReason = "delivery_not_confirmed";
+    qualificationReason = automationReason;
+  } else if (deliveryToOpenMs < 0) {
     automated = true;
     qualified = false;
     automationReason = "impossible_timing:before_delivery";
@@ -83,4 +88,41 @@ export function qualifyOpenEvent(
   }
 
   return { ...classification, automated, automationReason, qualified, qualificationReason, deliveryToOpenMs, sameIpDistinctRecipients: context.sameIpDistinctRecipients };
+}
+
+export function qualifyClickEvent(
+  classification: TrackingClassification,
+  context: { deliveredAt: Date | string | null; eventAt?: Date; sameIpDistinctRecipients: number },
+): TrackingClassification & { deliveryToClickMs: number | null; sameIpDistinctRecipients: number } {
+  const eventAt = context.eventAt || new Date();
+  const deliveredAt = context.deliveredAt ? new Date(context.deliveredAt) : null;
+  const deliveryToClickMs = deliveredAt && !Number.isNaN(deliveredAt.getTime()) ? eventAt.getTime() - deliveredAt.getTime() : null;
+  let automated = classification.automated;
+  let automationReason = classification.automationReason;
+  let qualified = classification.qualified;
+  let qualificationReason = classification.qualificationReason;
+
+  if (deliveryToClickMs === null) {
+    automated = true;
+    qualified = false;
+    automationReason = "delivery_not_confirmed";
+    qualificationReason = automationReason;
+  } else if (deliveryToClickMs < 0) {
+    automated = true;
+    qualified = false;
+    automationReason = "impossible_timing:before_delivery";
+    qualificationReason = automationReason;
+  } else if (!classification.proxyProvider && context.sameIpDistinctRecipients >= 10) {
+    automated = true;
+    qualified = false;
+    automationReason = "shared_ip_recipient_burst";
+    qualificationReason = automationReason;
+  } else if (!classification.proxyProvider && deliveryToClickMs < 2_000 && context.sameIpDistinctRecipients >= 3) {
+    automated = true;
+    qualified = false;
+    automationReason = "rapid_shared_ip_click";
+    qualificationReason = automationReason;
+  }
+
+  return { ...classification, automated, automationReason, qualified, qualificationReason, deliveryToClickMs, sameIpDistinctRecipients: context.sameIpDistinctRecipients };
 }
