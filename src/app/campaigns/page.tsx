@@ -122,7 +122,7 @@ export default async function CampaignsPage() {
             <p className="text-sm font-extrabold">Campaign workspace</p>
             <p className="mt-1 text-xs text-[var(--muted)]">{rows.length ? `${rows.length} recent campaign${rows.length === 1 ? "" : "s"}` : "No campaigns yet"}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2"><span className="status-pill"><span className="live-dot"/>Live 5s</span><span className="status-pill"><Radio className="h-3.5 w-3.5"/>Delivery status</span></div>
+          <div className="flex flex-wrap items-center gap-2"><span className="status-pill"><Radio className="h-3.5 w-3.5"/>Delivery status</span><span className="status-pill">Refresh page for latest</span></div>
         </div>
 
         {rows.length ? (
