@@ -38,6 +38,10 @@ export async function audienceSelection(list: typeof lists.$inferSelect, executo
     ${contacts.validationStatus} as validation_status,
     case
       when ${contacts.validationStatus}::text in ('invalid','pending','unknown','error') then false
+      when not exists(
+        select 1 from recipient_domain_health rdh
+        where rdh.domain=lower(split_part(${contacts.normalizedEmail},'@',2))
+      ) then false
       when exists(
         select 1 from recipient_domain_health rdh
         where rdh.domain=lower(split_part(${contacts.normalizedEmail},'@',2))
