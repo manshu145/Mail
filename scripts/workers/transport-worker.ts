@@ -11,7 +11,7 @@ import { makeBounceAddress } from "../../src/lib/bounce-address";
 import { injectPreheader } from "../../src/lib/email-preheader";
 import { hasConfirmedConsent } from "../../src/lib/consent-policy";
 import { getRuntimePolicy } from "../../src/lib/runtime-policy";
-import { providerForEmail, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY } from "../../src/lib/provider";
+import { classifyDeliveryRestriction, providerForDelivery, providerForEmail, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
@@ -128,6 +128,40 @@ async function releaseProviderCooldown(id: string, cooldownKey: string | null, r
   await event(id,"provider_cooldown",{cooldownKey:key,retryAt:next.toISOString()});
 }
 
+async function activateTransportRestriction(accountId: string, recipientEmail: string, response: string, scope: "provider" | "sender" | "upstream", reason: string, cooldownMinutes: number) {
+  const provider = scope === "upstream"
+    ? UPSTREAM_COOLDOWN_KEY
+    : scope === "sender"
+      ? SENDER_COOLDOWN_KEY
+      : providerForDelivery(recipientEmail, response);
+  const now = new Date();
+  const nextProbeAt = new Date(now.getTime() + cooldownMinutes * 60_000);
+  const clipped = response.slice(0, 1000);
+  const result = await pool.query<{ id: string }>(`
+    insert into provider_cooldowns(
+      sending_account_id,provider,active,reason,last_response,detected_at,next_probe_at,cleared_at,updated_at
+    ) values($1,$2,true,$3,$4,$5,$6,null,$5)
+    on conflict(sending_account_id,provider)
+    do update set
+      active=true,
+      reason=$3,
+      last_response=$4,
+      detected_at=$5,
+      next_probe_at=$6,
+      cleared_at=null,
+      updated_at=$5
+    returning id
+  `, [accountId, provider, reason, clipped, now, nextProbeAt]);
+  if (result.rowCount) {
+    await pool.query(
+      `insert into provider_cooldown_events(cooldown_id,sending_account_id,provider,event_type,reason,response,metadata)
+       values($1,$2,$3,'detected_transport',$4,$5,$6::jsonb)`,
+      [result.rows[0].id, accountId, provider, reason, clipped, JSON.stringify({ recipientEmail, scope, nextProbeAt: nextProbeAt.toISOString(), source: "transport_worker" })],
+    );
+  }
+  return { provider, nextProbeAt };
+}
+
 type Claimed = { id: string; attempt_count: number; recipient_email: string };
 async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> {
   const result = await pool.query<Claimed>(`
@@ -164,9 +198,10 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
 }
 async function markDeferred(id: string, attempt: number, error: unknown, settings: DeliverySettings) {
   const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error";
-  if ((error instanceof SmtpResponseError && error.code >= 500) || attempt >= settings.retryMaxAttempts) {
+  const permanent = error instanceof SmtpResponseError && error.code >= 500;
+  if (permanent || attempt >= settings.retryMaxAttempts) {
     await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [id, detail]);
-    await event(id,"transport_failed",{attempt,error:detail});
+    await event(id,"transport_failed",{attempt,error:detail,retryable:!permanent,reason:permanent?"permanent_smtp_failure":"retry_exhausted"});
     return "failed" as const;
   }
   const delaySeconds = retryDelaySeconds(attempt, settings);
@@ -243,7 +278,7 @@ async function runOnce() {
     }
     if (!campaign || !contact || !campaign.sendingAccountId || !campaign.templateId) {
       await pool.query(`update messages set status='failed',last_error='campaign_transport_configuration_incomplete',next_attempt_at=null where id=$1 and status='sending'`, [message.id]);
-      await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"campaign_transport_configuration_incomplete"});
+      await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"campaign_transport_configuration_incomplete",retryable:true});
       failed++; continue;
     }
 
@@ -251,7 +286,7 @@ async function runOnce() {
     const [template] = await db.select().from(templates).where(eq(templates.id, campaign.templateId)).limit(1);
     if (!account || account.status !== "active" || !template) {
       await pool.query(`update messages set status='failed',last_error='sending_account_or_template_unavailable',next_attempt_at=null where id=$1 and status='sending'`, [message.id]);
-      await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"sending_account_or_template_unavailable"});
+      await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"sending_account_or_template_unavailable",retryable:true});
       failed++; continue;
     }
 
@@ -276,7 +311,7 @@ async function runOnce() {
     const attachmentError = combinedAttachmentLimitError(attachments);
     if (attachmentError) {
       await pool.query(`update messages set status='failed',last_error=$2,next_attempt_at=null where id=$1 and status='sending'`, [message.id, attachmentError]);
-      await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"combined_attachment_limit",detail:attachmentError});
+      await event(message.id,"transport_failed",{attempt:claim.attempt_count,error:"combined_attachment_limit",detail:attachmentError,retryable:true});
       failed++; continue;
     }
 
@@ -358,10 +393,29 @@ async function runOnce() {
         // Never resubmit mail which may already be in Postfix. Delivery events can
         // still reconcile its final outcome using X-NexiMail-Message-ID.
         await pool.query(`update messages set status='failed',next_attempt_at=null,last_error='transport_submission_uncertain' where id=$1 and status='sending'`, [message.id]);
-        await event(message.id, "transport_submission_uncertain", { attempt: claim.attempt_count, error: error instanceof Error ? error.message.slice(0, 1000) : "unknown_error" });
+        await event(message.id, "transport_submission_uncertain", { attempt: claim.attempt_count, error: error instanceof Error ? error.message.slice(0, 1000) : "unknown_error", retryable: false });
         failed++;
         continue;
       }
+
+      if (error instanceof SmtpResponseError) {
+        const responseText = error.message.slice(0, 1000);
+        const restriction = classifyDeliveryRestriction(responseText, String(error.code));
+        if (restriction.scope !== "none") {
+          const cooldown = await activateTransportRestriction(
+            account.id,
+            contact.email,
+            responseText,
+            restriction.scope,
+            restriction.reason,
+            settings.providerCooldownMinutes,
+          );
+          await releaseProviderCooldown(message.id, cooldown.provider, cooldown.nextProbeAt, settings.providerCooldownMinutes);
+          providerHeld++;
+          continue;
+        }
+      }
+
       const state = await markDeferred(message.id, claim.attempt_count, error, settings);
       if (state === "deferred") deferred++; else failed++;
     }
