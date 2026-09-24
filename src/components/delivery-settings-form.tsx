@@ -23,6 +23,7 @@ const fields: Field[] = [
   { key:"adaptivePacingIncreasePercent", section:"Reputation protection", label:"Healthy ramp increase (%)", help:"Percentage increase after each healthy ramp decision." , step:"1" },
   { key:"adaptivePacingPressureMultiplier", section:"Reputation protection", label:"Pressure rate multiplier", help:"Rate multiplier applied after provider pressure or temporary delivery failures. Lower is more conservative.", step:"0.05" },
   { key:"adaptivePacingMinimumPerSecond", section:"Reputation protection", label:"Adaptive minimum / sec", help:"Lowest rate the feedback controller will use while recovering from pressure." },
+  { key:"validationDailyLimit", section:"Reputation protection", label:"Email validation daily limit", help:"Maximum mailbox validations NexiMail will perform per workspace calendar day. Default: 5,000. Larger jobs automatically pause at the limit and resume on the next day." },
 
   { key:"maxPerSecond", section:"Sending limits", label:"Maximum sends per second", help:"Global release speed. Lower values are gentler; higher values require stronger reputation and capacity." },
   { key:"maxRecipientsPerCampaign", section:"Sending limits", label:"Recipients per campaign", help:"0 = unlimited. Use a value only when you want a hard campaign-size ceiling." },
