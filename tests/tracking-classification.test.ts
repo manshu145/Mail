@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyTrackingRequest, qualifyOpenEvent } from "../src/lib/tracking-classification";
+import { classifyTrackingRequest, qualifyClickEvent, qualifyOpenEvent } from "../src/lib/tracking-classification";
 
 function req(headers: Record<string,string>) {
   return new Request("https://mail.example.com/tracking/open/token", { headers });
@@ -61,4 +61,26 @@ test("Gmail image proxy is not disqualified by shared proxy IP alone", () => {
   });
   assert.equal(result.proxyProvider, "google_image_proxy");
   assert.equal(result.qualified, true);
+});
+
+test("an open before delivery is not qualified when delivery is not yet recorded", () => {
+  const result = qualifyOpenEvent(classifyTrackingRequest(req({ "user-agent": "Mozilla/5.0" })), {
+    deliveredAt: null,
+    eventAt: new Date("2026-09-22T10:00:00Z"),
+    sameIpDistinctRecipients: 1,
+  });
+  assert.equal(result.qualified, false);
+  assert.equal(result.automated, true);
+  assert.equal(result.automationReason, "delivery_not_confirmed");
+});
+
+test("a click before delivery is not qualified when delivery is not yet recorded", () => {
+  const result = qualifyClickEvent(classifyTrackingRequest(req({ "user-agent": "Mozilla/5.0" })), {
+    deliveredAt: null,
+    eventAt: new Date("2026-09-22T10:00:00Z"),
+    sameIpDistinctRecipients: 1,
+  });
+  assert.equal(result.qualified, false);
+  assert.equal(result.automated, true);
+  assert.equal(result.automationReason, "delivery_not_confirmed");
 });
