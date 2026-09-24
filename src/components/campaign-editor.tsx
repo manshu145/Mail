@@ -70,7 +70,8 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const [fromEmail, setFromEmail] = useState(initialAccount?.fromEmail || "");
   const [schedule, setSchedule] = useState(toKolkataDateTimeInput(campaign.scheduledAt));
   const deliveryReady = Boolean(listId && templateId && accountId && runtimePolicy.sendingEnabled);
-  const reviewReady = Boolean(preview && preview.sendGuard && preview.sendGuard.status !== "blocked" && preview.audience.eligibleCount > 0 && (runtimePolicy.maxRecipientsPerCampaign === null || preview.audience.eligibleCount <= runtimePolicy.maxRecipientsPerCampaign));
+  const targetAudienceCount = sendOnlyValidated ? (preview?.audience.validCount ?? 0) : (preview?.audience.eligibleCount ?? 0);
+  const reviewReady = Boolean(preview && preview.sendGuard && preview.sendGuard.status !== "blocked" && targetAudienceCount > 0 && (runtimePolicy.maxRecipientsPerCampaign === null || targetAudienceCount <= runtimePolicy.maxRecipientsPerCampaign));
   const testReady = Boolean(templateId && accountId && runtimePolicy.sendingEnabled);
   const readinessSteps=[
     {label:"Audience",ready:Boolean(listId)},
@@ -295,7 +296,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
 
     <div className="sticky bottom-2 z-20 grid grid-cols-2 gap-2 rounded-2xl border border-[var(--border)] bg-[color:var(--header-bg)] p-3 shadow-[0_18px_50px_rgba(20,28,45,.14)] backdrop-blur-xl sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
       <div className="contents sm:flex sm:flex-wrap sm:gap-2"><button disabled={busy} className="btn-secondary w-full sm:w-auto" type="submit">Save draft</button><button disabled={busy || !testReady} className="btn-secondary w-full sm:w-auto" type="button" onClick={()=>setShowTest(true)}>Send test</button></div>
-      <div className="contents sm:flex sm:flex-wrap sm:gap-2"><button disabled={busy || !deliveryReady || !reviewReady || !schedule} className="btn-secondary w-full sm:w-auto" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"schedule")}}>Schedule</button><button disabled={busy || !deliveryReady || !reviewReady} className="btn-primary col-span-2 w-full sm:w-auto" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"send_now")}}>{busy ? "Working…" : preview ? `Send to ~${preview.audience.eligibleCount.toLocaleString()}` : "Send now"}</button></div>
+      <div className="contents sm:flex sm:flex-wrap sm:gap-2"><button disabled={busy || !deliveryReady || !reviewReady || !schedule} className="btn-secondary w-full sm:w-auto" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"schedule")}}>Schedule</button><button disabled={busy || !deliveryReady || !reviewReady} className="btn-primary col-span-2 w-full sm:w-auto" type="button" onClick={(event)=>{const form=event.currentTarget.form;if(form)void submit(new FormData(form),"send_now")}}>{busy ? "Working…" : preview ? `Send to ~${targetAudienceCount.toLocaleString()}` : "Send now"}</button></div>
     </div>
 
     {fullPreview && preview ? <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-2 backdrop-blur-sm sm:p-5">
