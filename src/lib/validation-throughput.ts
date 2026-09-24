@@ -66,7 +66,7 @@ export async function runProviderAwarePool<T>(
   const providerNextStart = new Map<string, number>();
   let globalNextStart = 0;
   const heldProviders = new Set<string>();
-  let cursor = 0;
+  const laneState = lanes.map((lane) => ({ ...lane, nextIndex: 0, active: false }));
   let completed = 0;
   let stopped = false;
   const workerCount = Math.max(1, Math.min(Math.floor(options.concurrency || 1), lanes.length || 1));
@@ -85,43 +85,67 @@ export async function runProviderAwarePool<T>(
     if (wait > 0) await sleep(wait);
   }
 
+  function claimAvailableLane() {
+    const current = now();
+    let nextWakeAt = Number.POSITIVE_INFINITY;
+
+    for (const lane of laneState) {
+      if (lane.active || lane.nextIndex >= lane.items.length) continue;
+
+      const holdUntil = options.providerHoldUntil?.(lane.provider) || 0;
+      if (holdUntil > current) {
+        nextWakeAt = Math.min(nextWakeAt, holdUntil);
+        continue;
+      }
+
+      lane.active = true;
+      return lane;
+    }
+
+    return { nextWakeAt };
+  }
+
   const worker = async () => {
     while (!stopped) {
-      const index = cursor++;
-      if (index >= lanes.length) return;
-      const lane = lanes[index];
-
-      for (const item of lane.items) {
-        if (options.shouldStop && await options.shouldStop()) {
-          stopped = true;
-          return;
-        }
-
-        while (true) {
-          if (options.shouldStop && await options.shouldStop()) {
-            stopped = true;
-            return;
-          }
-          const holdUntil = options.providerHoldUntil?.(lane.provider) || 0;
-          const waitMs = holdUntil - now();
-          if (waitMs <= 0) break;
-          await sleep(Math.min(waitMs, 1000));
-        }
-
-        await reserveProviderStart(lane.provider);
-        const verdict = await task(item);
-        completed++;
-
-        if (options.shouldHoldProvider?.(verdict)) {
-          heldProviders.add(lane.provider);
-          continue;
-        }
-
-        if (validationNeedsBackoff(verdict)) {
-          const until = now() + Math.max(0, options.backoffDelayMs);
-          providerNextStart.set(lane.provider, Math.max(providerNextStart.get(lane.provider) || 0, until));
-        }
+      if (options.shouldStop && await options.shouldStop()) {
+        stopped = true;
+        return;
       }
+
+      const claimed = claimAvailableLane();
+      if ("items" in claimed) {
+        const lane = claimed;
+
+        try {
+          const item = lane.items[lane.nextIndex];
+          if (!item) continue;
+          lane.nextIndex += 1;
+
+          await reserveProviderStart(lane.provider);
+          const verdict = await task(item);
+          completed++;
+
+          if (options.shouldHoldProvider?.(verdict)) {
+            heldProviders.add(lane.provider);
+          } else if (validationNeedsBackoff(verdict)) {
+            const until = now() + Math.max(0, options.backoffDelayMs);
+            providerNextStart.set(lane.provider, Math.max(providerNextStart.get(lane.provider) || 0, until));
+          }
+        } finally {
+          lane.active = false;
+        }
+
+        continue;
+      }
+
+      const hasRemaining = laneState.some((lane) => lane.nextIndex < lane.items.length);
+      if (!hasRemaining) return;
+
+      const waitMs = Number.isFinite(claimed.nextWakeAt)
+        ? Math.max(25, Math.min(claimed.nextWakeAt - now(), 1000))
+        : 100;
+
+      await sleep(waitMs);
     }
   };
 
