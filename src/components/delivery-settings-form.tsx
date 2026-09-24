@@ -16,6 +16,12 @@ const fields: Field[] = [
   { key:"canarySecondBatch", section:"Reputation protection", label:"Second ramp batch", help:"Additional recipients released after the first batch has healthy outcomes." },
   { key:"canaryThirdBatch", section:"Reputation protection", label:"Third ramp batch", help:"Additional recipients released before the remaining audience is opened." },
   { key:"canaryBounceWarnRate", section:"Reputation protection", label:"Canary slowdown bounce rate (%)", help:"Slow the next ramp when observed hard-bounce rate reaches this internal safety threshold. 0 = disabled.", step:"0.01", display:"percent" },
+  { key:"adaptivePacingBasePerSecond", section:"Reputation protection", label:"Adaptive pacing start / sec", help:"Starting transport rate for a cold sender. The controller increases only after healthy rounds." },
+  { key:"adaptivePacingTargetPerSecond", section:"Reputation protection", label:"Adaptive pacing target / sec", help:"Upper adaptive target. Provider pressure or temporary failures immediately reduce the active rate." },
+  { key:"adaptivePacingHealthyRounds", section:"Reputation protection", label:"Healthy rounds before ramp", help:"Number of clean worker rounds required before increasing the active transport rate." },
+  { key:"adaptivePacingIncreasePercent", section:"Reputation protection", label:"Healthy ramp increase (%)", help:"Percentage increase after each healthy ramp decision." , step:"1" },
+  { key:"adaptivePacingPressureMultiplier", section:"Reputation protection", label:"Pressure rate multiplier", help:"Rate multiplier applied after provider pressure or temporary delivery failures. Lower is more conservative.", step:"0.05" },
+  { key:"adaptivePacingMinimumPerSecond", section:"Reputation protection", label:"Adaptive minimum / sec", help:"Lowest rate the feedback controller will use while recovering from pressure." },
 
   { key:"maxPerSecond", section:"Sending limits", label:"Maximum sends per second", help:"Global release speed. Lower values are gentler; higher values require stronger reputation and capacity." },
   { key:"maxRecipientsPerCampaign", section:"Sending limits", label:"Recipients per campaign", help:"0 = unlimited. Use a value only when you want a hard campaign-size ceiling." },
@@ -33,7 +39,7 @@ const fields: Field[] = [
 ];
 
 const sections: Array<{name:Section; description:string}> = [
-  { name:"Reputation protection", description:"Automatic safety rules that protect sender reputation and react to mailbox-provider pressure." },
+  { name:"Reputation protection", description:"Automatic safety rules that protect sender reputation, react to mailbox-provider pressure and adapt transport speed from observed delivery feedback." },
   { name:"Sending limits", description:"Optional global ceilings. Keep volume limits at 0 when you do not want a platform-level cap." },
   { name:"Multi-campaign delivery", description:"Run multiple campaigns together without allowing one large campaign to monopolize the queue. NexiMail rotates fairly across active campaigns." },
   { name:"Retry policy", description:"How NexiMail retries temporary delivery failures without creating uncontrolled retry loops." },
