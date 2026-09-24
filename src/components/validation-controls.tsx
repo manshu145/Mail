@@ -148,7 +148,7 @@ export function ValidationControls({
     } finally { setProviderBusy(false); }
   }
 
-  async function act(action: "start_pending"|"start_import"|"start_single"|"pause"|"resume") {
+  async function act(action: "start_pending"|"start_import"|"start_list"|"start_single"|"pause"|"resume") {
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch("/api/validation/control", {
