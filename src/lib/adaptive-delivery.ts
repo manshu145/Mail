@@ -35,8 +35,8 @@ export function decideAdaptiveDelivery(input: {
   // the configured initial canary. A small campaign can still produce enough
   // terminal outcomes to prove the list is unsafe while unsent messages remain.
   const earlySample = Math.min(
+    total,
     input.config.reputationMinSample,
-    Math.max(20, Math.ceil(Math.max(1, releaseLimit) * 0.2)),
   );
   if (input.sample >= earlySample && bounceRate >= input.config.bounceStopRate) {
     return { phase, releaseLimit, state: "paused", bounceRate, paused: true, reason: "hard_bounce_rate_stop" };
