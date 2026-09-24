@@ -13,12 +13,16 @@ export function classifyGmailRcptResponse(code: number, line: string): Validatio
   return { status: "unknown", detail: `gmail_rcpt_${code || "ambiguous"}` };
 }
 
-
 export function isDirectGmailAddress(email: string) {
   const domain = String(email || "").trim().toLowerCase().split("@")[1] || "";
   return domain === "gmail.com" || domain === "googlemail.com";
 }
 
+/**
+ * Only positively verified mailbox states may enter the transport pipeline.
+ * "unknown" and "error" are inconclusive, not proof of deliverability, so
+ * they remain held until a later validation pass establishes a sendable state.
+ */
 export function validationAllowsSend(_email: string, status: string) {
-  return status !== "invalid" && status !== "pending";
+  return status === "accepted" || status === "valid";
 }
