@@ -1,12 +1,12 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { campaigns, messageEvents, messages, suppressions, systemSettings } from "@/db/schema";
-import { providerCooldowns } from "@/db/operations-schema";
+import { providerCooldowns, recipientDomainHealth } from "@/db/operations-schema";
 import { providerCooldownEvents } from "@/db/provider-cooldown-event-schema";
 import { normalizeEmail } from "@/lib/contact-utils";
 import { emitWebhookEvent } from "@/lib/webhooks";
 import { classifyBounce } from "@/lib/bounce-classification";
-import { classifyDeliveryRestriction, providerForDelivery, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY, type DeliveryRestrictionScope } from "@/lib/provider";
+import { classifyDeliveryRestriction, providerForDelivery, providerForEmail, providerFromMxHosts, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY, type DeliveryRestrictionScope } from "@/lib/provider";
 import { DELIVERY_SETTING_KEYS, MAX_PROVIDER_COOLDOWN_MINUTES, defaultDeliverySettings } from "@/lib/delivery-settings";
 
 const terminalStatuses = new Set(["delivered", "bounced", "failed", "cancelled"]);
@@ -24,6 +24,17 @@ async function sendingAccountForMessage(db: EventDb, campaignId: string) {
   return campaign?.sendingAccountId || null;
 }
 
+async function providerForRecipient(db: EventDb, recipientEmail: string, response: string) {
+  const fromResponse = providerForDelivery(recipientEmail, response);
+  if (!fromResponse.startsWith("domain:")) return fromResponse;
+  const domain = recipientEmail.trim().toLowerCase().split("@").pop() || "";
+  const [health] = await db.select({ mxHosts: recipientDomainHealth.mxHosts })
+    .from(recipientDomainHealth)
+    .where(eq(recipientDomainHealth.domain, domain))
+    .limit(1);
+  return providerFromMxHosts(health?.mxHosts) || providerForEmail(recipientEmail);
+}
+
 async function activateProviderCooldown(db: EventDb, params: {
   campaignId: string;
   recipientEmail: string;
@@ -38,7 +49,7 @@ async function activateProviderCooldown(db: EventDb, params: {
     ? UPSTREAM_COOLDOWN_KEY
     : params.scope === "sender"
       ? SENDER_COOLDOWN_KEY
-      : providerForDelivery(params.recipientEmail, params.response);
+      : await providerForRecipient(db, params.recipientEmail, params.response);
   const minutes = await cooldownMinutes(db);
   const nextProbeAt = new Date(Date.now() + minutes * 60_000);
   const reason = params.restrictionReason;
