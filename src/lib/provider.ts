@@ -45,16 +45,16 @@ export function providerFromResponse(response: string): MailboxProvider | null {
 export function providerFromMxHosts(mxHosts: string[] | null | undefined): MailboxProvider | null {
   for (const host of mxHosts || []) {
     const value = String(host || "").toLowerCase();
-    if (/(^|\\.)google\\.com$|(^|\\.)googlemail\\.com$/i.test(value)) return "gmail";
-    if (/(^|\\.)yahoodns\\.net$|(^|\\.)yahoo\\.com$|(^|\\.)aol\\.com$/i.test(value)) return "yahoo";
-    if (/(^|\\.)outlook\\.com$|(^|\\.)protection\\.outlook\\.com$|(^|\\.)hotmail\\.com$/i.test(value)) return "microsoft";
-    if (/(^|\\.)protonmail\\./i.test(value) || /(^|\\.)proton\\.me$/i.test(value)) return "proton";
-    if (/\\.zoho\\./i.test(value) || /(^|\\.)zoho\\./i.test(value)) return "zoho";
+    if (/(^|\.)google\.com$|(^|\.)googlemail\.com$/i.test(value)) return "gmail";
+    if (/(^|\.)yahoodns\.net$|(^|\.)yahoo\.com$|(^|\.)aol\.com$/i.test(value)) return "yahoo";
+    if (/(^|\.)outlook\.com$|(^|\.)protection\.outlook\.com$|(^|\.)hotmail\.com$/i.test(value)) return "microsoft";
+    if (/(^|\.)protonmail\./i.test(value) || /(^|\.)proton\.me$/i.test(value)) return "proton";
+    if (/\.zoho\./i.test(value) || /(^|\.)zoho\./i.test(value)) return "zoho";
     if (/rediffmail/i.test(value)) return "rediff";
     if (/mailhostbox/i.test(value)) return "mailhostbox";
-    if (/(^|\\.)titan\\.email$/i.test(value)) return "titan";
-    if (/secureserver\\.net$/i.test(value)) return "godaddy";
-    if (/mailcore\\.net$/i.test(value)) return "mailcore";
+    if (/(^|\.)titan\.email$/i.test(value)) return "titan";
+    if (/secureserver\.net$/i.test(value)) return "godaddy";
+    if (/mailcore\.net$/i.test(value)) return "mailcore";
     if (/netcore/i.test(value)) return "netcore";
   }
   return null;
