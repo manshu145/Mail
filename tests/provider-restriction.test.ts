@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyDeliveryRestriction, providerForEmail, UPSTREAM_COOLDOWN_KEY } from "../src/lib/provider";
+import { classifyDeliveryRestriction, providerForEmail, providerFromMxHosts, UPSTREAM_COOLDOWN_KEY } from "../src/lib/provider";
 
 test("generic SMTP 4.x does not create provider cooldown", () => {
   assert.deepEqual(
@@ -59,4 +59,16 @@ test("ordinary provider-local policy signals remain provider scoped", () => {
 test("Zoho mailbox domains map to Zoho provider", () => {
   assert.equal(providerForEmail(["person","zohomail.in"].join("@")), "zoho");
   assert.equal(providerForEmail(["person","zoho.com"].join("@")), "zoho");
+});
+
+test("custom Google Workspace MX hosts map to Gmail", () => {
+  assert.equal(providerFromMxHosts(["aspmx.l.google.com"]), "gmail");
+});
+
+test("custom Microsoft MX hosts map to Microsoft", () => {
+  assert.equal(providerFromMxHosts(["example-com.mail.protection.outlook.com"]), "microsoft");
+});
+
+test("unknown MX hosts do not invent a provider", () => {
+  assert.equal(providerFromMxHosts(["mx.custom.example"]), null);
 });
