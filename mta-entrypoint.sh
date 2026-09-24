@@ -20,7 +20,7 @@ cat > /etc/opendkim.conf <<EOF
 Syslog                  yes
 SyslogSuccess           yes
 LogWhy                   no
-Canonicalization        relaxed/simple
+Canonicalization        relaxed/relaxed
 Mode                    sv
 SubDomains              no
 OversignHeaders         From
@@ -72,6 +72,8 @@ postconf -e "smtp_tls_loglevel = 1"
 postconf -e "smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt"
 postconf -e "smtp_tls_session_cache_database = btree:/var/lib/postfix/smtp_scache"
 postconf -e "smtp_tls_note_starttls_offer = yes"
+postconf -e "smtp_helo_name = \$myhostname"
+postconf -e "smtp_always_send_ehlo = yes"
 
 if [ -s "${TLS_DIR}/fullchain.pem" ] && [ -s "${TLS_DIR}/privkey.pem" ]; then
   postconf -e "smtpd_tls_cert_file = ${TLS_DIR}/fullchain.pem"
