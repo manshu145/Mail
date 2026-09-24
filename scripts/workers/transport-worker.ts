@@ -15,6 +15,8 @@ import { classifyDeliveryRestriction, providerForDelivery, providerForEmail, pro
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
+import { emailContentBlockReason } from "../../src/lib/email-content-policy";
+import { sendingDomainBlockReason } from "../../src/lib/sending-domain-policy";
 import { buildBulkDeliverabilityHeaders } from "../../src/lib/deliverability-headers";
 import { AdaptivePacingController } from "../../src/lib/adaptive-pacing";
 
@@ -31,6 +33,17 @@ let adaptivePacingConfigKey = "";
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function personalize(value: string, contact: typeof contacts.$inferSelect) { return personalizeContactText(value, contact); }
 function headerValue(value: string) { return value.replace(/[\r\n]+/g, " ").trim(); }
+function encodeHeaderText(value: string) {
+  const clean = headerValue(value);
+  if (!clean) return "";
+  return /^[\x20-\x7e]*$/.test(clean) ? clean : `=?UTF-8?B?${Buffer.from(clean, "utf8").toString("base64")}?=`;
+}
+function formatDisplayName(value: string) {
+  const clean = headerValue(value);
+  if (!clean) return "";
+  if (!/^[\x20-\x7e]*$/.test(clean)) return encodeHeaderText(clean);
+  return `"${clean.replace(/([\\"])/g, "\\$1")}"`;
+}
 function retryDelaySeconds(attempt: number, settings: DeliverySettings) { return Math.min(settings.retryMaxSeconds, Math.max(settings.retryInitialSeconds, Math.round(settings.retryInitialSeconds * settings.retryBackoffMultiplier ** Math.max(0, attempt - 1)))); }
 function ensureUnsubscribe(html: string, text: string, unsubscribeUrl: string) {
   let nextHtml = html;
@@ -301,6 +314,7 @@ async function runOnce() {
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
   const templateAttachmentCache = new Map<string, CampaignAttachment[]>();
   const bounceDomainCache = new Map<string, string | null>();
+  const domainHealthCache = new Map<string, typeof sendingDomains.$inferSelect | null>();
 
   for (const claim of claimed) {
     const [message] = await db.select().from(messages).where(eq(messages.id, claim.id)).limit(1);
@@ -330,6 +344,24 @@ async function runOnce() {
     // Check owner-configured sender/global capacity before reserving a cooldown
     // probe slot. Otherwise a rate-limited sender could consume the next probe
     // time without actually sending the probe.
+    const accountSenderDomain = headerValue(account.fromEmail).toLowerCase().split("@")[1] || "";
+    let senderDomainHealth = domainHealthCache.get(accountSenderDomain);
+    if (!domainHealthCache.has(accountSenderDomain)) {
+      const [row] = accountSenderDomain
+        ? await db.select().from(sendingDomains).where(eq(sendingDomains.domain, accountSenderDomain)).limit(1)
+        : [];
+      senderDomainHealth = row || null;
+      domainHealthCache.set(accountSenderDomain, senderDomainHealth);
+    }
+    const senderDomainBlock = sendingDomainBlockReason(senderDomainHealth, { bounceSigningEnabled });
+    if (senderDomainBlock) {
+      await pool.query("update campaigns set status='paused',last_error=$2,updated_at=now() where id=$1 and status='sending'", [campaign.id, `deliverability_blocked:${senderDomainBlock}`]);
+      await pool.query("update messages set status='ready_for_transport',next_attempt_at=null,last_error=$2,attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'", [message.id, `deliverability_blocked:${senderDomainBlock}`]);
+      await event(message.id,"deliverability_blocked",{reason:senderDomainBlock,campaignId:campaign.id});
+      deliverabilityBlocked++;
+      continue;
+    }
+
     const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
@@ -370,7 +402,16 @@ async function runOnce() {
     }
 
     const subject = headerValue(personalize(campaign.subject || template.subject || "", contact));
-    const fromName = headerValue(account.fromName);
+    const encodedSubject = encodeHeaderText(subject);
+    const contentBlock = emailContentBlockReason({ subject, html, text });
+    if (contentBlock) {
+      await pool.query("update campaigns set status='paused',last_error=$2,updated_at=now() where id=$1 and status='sending'", [campaign.id, `deliverability_blocked:${contentBlock}`]);
+      await pool.query("update messages set status='ready_for_transport',next_attempt_at=null,last_error=$2,attempt_count=greatest(attempt_count-1,0) where id=$1 and status='sending'", [message.id, `deliverability_blocked:${contentBlock}`]);
+      await event(message.id,"deliverability_blocked",{reason:contentBlock,campaignId:campaign.id});
+      deliverabilityBlocked++;
+      continue;
+    }
+    const fromName = formatDisplayName(account.fromName);
     const fromEmail = headerValue(account.fromEmail).toLowerCase();
     const replyTo = headerValue(account.replyTo || account.fromEmail);
     const recipient = headerValue(contact.email);
@@ -380,7 +421,7 @@ async function runOnce() {
       bounceDomain = bounceDomainCache.get(senderDomain) ?? null;
     } else {
       const [domainRow] = senderDomain
-        ? await db.select({ bounceDomain: sendingDomains.bounceDomain }).from(sendingDomains).where(eq(sendingDomains.domain, senderDomain)).limit(1)
+        ? [senderDomainHealth]
         : [];
       const dynamicDomain = domainRow?.bounceDomain?.trim().toLowerCase() || null;
       const legacyDomain = process.env.BOUNCE_DOMAIN?.trim().toLowerCase() || null;
@@ -397,7 +438,7 @@ async function runOnce() {
       unsubscribeUrl,
     });
     const raw = [
-      `From: ${fromName} <${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${subject}`, `Date: ${new Date().toUTCString()}`,
+      `From: ${fromName ? `${fromName} ` : ""}<${fromEmail}>`, `To: ${recipient}`, `Reply-To: ${replyTo}`, `Subject: ${encodedSubject}`, `Date: ${new Date().toUTCString()}`,
       `Message-ID: <${message.id}@${fromEmail.split("@")[1] || "neximail.local"}>`, `X-NexiMail-Message-ID: ${message.id}`, "MIME-Version: 1.0",
       ...deliverabilityHeaders, mime.contentTypeHeader, "", ...mime.bodyLines,
     ].join("\r\n");
@@ -472,7 +513,7 @@ async function runOnce() {
   }
 
   const nextAdaptiveRate = adaptivePacing.observe({ accepted, deferred, failed, providerHeld });
-  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, adaptivePacingEnabled: settings.adaptivePacingEnabled, adaptiveRatePerSecond: activeRatePerSecond, nextAdaptiveRatePerSecond: nextAdaptiveRate, providerIntervalMs: settings.providerIntervalMs, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "round_robin", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, adaptivePacingEnabled: settings.adaptivePacingEnabled, adaptiveRatePerSecond: activeRatePerSecond, nextAdaptiveRatePerSecond: nextAdaptiveRate, providerIntervalMs: settings.providerIntervalMs, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "round_robin", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, deliverabilityBlocked, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
 }
 
 async function main() {
