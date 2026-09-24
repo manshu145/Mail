@@ -56,6 +56,15 @@ function initials(name: string) {
   return parts.slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
+function sectionForPathname(pathname: string) {
+  if (pathname === "/dashboard" || pathname === "/") return "overview";
+  if (["/contacts", "/lists", "/segments", "/imports", "/validation"].some((path) => pathname === path || pathname.startsWith(path + "/"))) return "audience";
+  if (["/campaigns", "/templates"].some((path) => pathname === path || pathname.startsWith(path + "/"))) return "campaigns";
+  if (["/reports", "/messages"].some((path) => pathname === path || pathname.startsWith(path + "/"))) return "delivery";
+  if (["/inbox-tests", "/domains", "/sender-identities", "/suppressions", "/unsubscribers", "/provider-cooldowns"].some((path) => pathname === path || pathname.startsWith(path + "/"))) return "deliverability";
+  return "workspace";
+}
+
 export function AppShell({ session, children }: { session: SessionView; children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -115,15 +124,15 @@ export function AppShell({ session, children }: { session: SessionView; children
     </div>
   );
 
-  return <div className="min-h-dvh bg-[var(--background)] text-[var(--foreground)]"><a href="#main-content" className="sr-only fixed left-3 top-3 z-[300] rounded-lg bg-[var(--surface)] px-3 py-2 text-xs font-black text-[var(--foreground)] shadow-lg focus:not-sr-only focus:outline-none focus:ring-2 focus:ring-[var(--accent)]">Skip to main content</a>
+  return <div data-section={sectionForPathname(pathname)} className="min-h-dvh bg-[var(--background)] text-[var(--foreground)]"><a href="#main-content" className="sr-only fixed left-3 top-3 z-[300] rounded-lg bg-[var(--surface)] px-3 py-2 text-xs font-black text-[var(--foreground)] shadow-lg focus:not-sr-only focus:outline-none focus:ring-2 focus:ring-[var(--accent)]">Skip to main content</a>
     <aside className={`fixed inset-y-0 left-0 z-30 hidden border-r border-[var(--sidebar-border)] transition-[width] duration-200 lg:block ${collapsed?"w-[76px]":"w-[248px]"}`}>{sidebar(collapsed)}</aside>
     {mobileOpen&&<div className="fixed inset-0 z-50 lg:hidden reveal"><button aria-label="Close navigation" className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={()=>setMobileOpen(false)}/><aside className="relative h-full w-[286px] max-w-[88vw] border-r border-[var(--sidebar-border)] shadow-2xl"><button aria-label="Close navigation" className="absolute right-3 top-4 z-10 rounded-xl border border-[var(--sidebar-border)] bg-[var(--sidebar-hover)] p-2 text-[var(--sidebar-fg)]" onClick={()=>setMobileOpen(false)}><X className="h-4.5 w-4.5"/></button>{sidebar(false)}</aside></div>}
     <div className={`transition-[padding] duration-200 ${collapsed?"lg:pl-[76px]":"lg:pl-[248px]"}`}>
-      <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-[var(--border)] bg-[color:var(--header-bg)] px-4 shadow-[0_1px_0_rgba(255,255,255,.35)_inset] backdrop-blur-xl sm:px-6 lg:px-8">
-        <div className="flex min-w-0 items-center gap-3"><button className="icon-button grid lg:hidden" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu className="h-[18px] w-[18px]"/></button><button className="icon-button hidden lg:grid" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"} onClick={()=>setCollapsed(v=>{const next=!v;try{window.localStorage.setItem("neximail.sidebar.collapsed",next?"1":"0")}catch{}return next})}>{collapsed?<PanelLeftOpen className="h-[17px] w-[17px]"/>:<PanelLeftClose className="h-[17px] w-[17px]"/>}</button><div className="hidden h-9 w-9 shrink-0 place-items-center rounded-xl border border-[var(--border)] bg-[linear-gradient(145deg,var(--surface),var(--accent-soft))] text-[var(--accent)] shadow-sm sm:grid"><CurrentIcon className="h-4 w-4" strokeWidth={2}/></div><div className="min-w-0"><p className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-[var(--muted)]">Workspace</p><p className="truncate text-[14px] font-extrabold tracking-[-0.01em]">{current.label}</p></div></div>
+      <header className="app-shell-header sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-[var(--border)] bg-[color:var(--header-bg)] px-4 shadow-[0_1px_0_rgba(255,255,255,.35)_inset] backdrop-blur-xl sm:px-6 lg:px-8">
+        <div className="flex min-w-0 items-center gap-3"><button className="icon-button grid lg:hidden" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu className="h-[18px] w-[18px]"/></button><button className="icon-button hidden lg:grid" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"} onClick={()=>setCollapsed(v=>{const next=!v;try{window.localStorage.setItem("neximail.sidebar.collapsed",next?"1":"0")}catch{}return next})}>{collapsed?<PanelLeftOpen className="h-[17px] w-[17px]"/>:<PanelLeftClose className="h-[17px] w-[17px]"/>}</button><div className="section-nav-icon hidden h-9 w-9 shrink-0 place-items-center rounded-xl border shadow-sm sm:grid"><CurrentIcon className="h-4 w-4" strokeWidth={2}/></div><div className="min-w-0"><p className="section-nav-kicker truncate text-[10px] font-black uppercase tracking-[0.15em]">Workspace</p><p className="truncate text-[14px] font-extrabold tracking-[-0.01em]">{current.label}</p></div></div>
         <div className="flex items-center gap-2"><LiveRefresh intervalMs={5000} label="Live 5s"/><PwaStatus/><ThemeToggle/></div>
       </header>
-      <main id="main-content" tabIndex={-1} className="app-content mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8"><div key={pathname} className="reveal">{children}</div></main>
+      <main id="main-content" tabIndex={-1} aria-label={current.label} className="app-content mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8"><div key={pathname} className="reveal">{children}</div></main>
     </div>
   </div>;
 }
