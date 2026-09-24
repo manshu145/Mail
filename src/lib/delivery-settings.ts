@@ -62,6 +62,7 @@ export const DELIVERY_SETTING_KEYS = {
   adaptivePacingIncreasePercent: "delivery.adaptive_pacing_increase_percent",
   adaptivePacingPressureMultiplier: "delivery.adaptive_pacing_pressure_multiplier",
   adaptivePacingMinimumPerSecond: "delivery.adaptive_pacing_minimum_per_second",
+  validationDailyLimit: "reputation.validation_daily_limit",
 } as const;
 
 function finite(value: unknown, fallback: number) {
