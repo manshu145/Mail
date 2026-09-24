@@ -310,7 +310,7 @@ async function runOnce() {
   const providerNextAt = new Map<string, number>();
   let globalNextAt = 0;
   const claimed = await claimMessages(settings.campaignBurstPerRound);
-  let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0;
+  let accepted = 0, deferred = 0, failed = 0, throttled = 0, providerHeld = 0, providerProbes = 0, deliverabilityBlocked = 0;
   const campaignAttachmentCache = new Map<string, CampaignAttachment[]>();
   const templateAttachmentCache = new Map<string, CampaignAttachment[]>();
   const bounceDomainCache = new Map<string, string | null>();
