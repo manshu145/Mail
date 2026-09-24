@@ -17,7 +17,7 @@ export type CampaignPreflight = {
   workers: Array<{ name: string; online: boolean; ageSeconds: number | null; state: string | null }>;
 };
 
-export async function getCampaignPreflight(maxAgeSeconds = 120): Promise<CampaignPreflight> {
+export async function getCampaignPreflight(maxAgeSeconds = 600): Promise<CampaignPreflight> {
   const rows = await db.select().from(workerHeartbeats).where(inArray(workerHeartbeats.workerName, [...CRITICAL_WORKERS]));
   const byName = new Map(rows.map((row) => [row.workerName, row]));
   const now = Date.now();
