@@ -97,7 +97,7 @@ export default async function CampaignsPage() {
         {[
           [Clock3,"Drafts",draftCount,"Campaigns still being prepared"],
           [Radio,"Live / scheduled",activeCount,"Queued, sending or scheduled"],
-          [Shuffle,"Sending now",sendingCount,`${deliverySettings.maxConcurrentCampaigns} simultaneous slot${deliverySettings.maxConcurrentCampaigns===1?"":"s"}`],
+          [Shuffle,"Sending now",sendingCount,"Active campaigns; queue-backed scheduling"],
           [CheckCircle2,"Completed",completedCount,"Campaigns with finished delivery"],
         ].map(([Icon,label,value,copy],index)=>{const C=Icon as typeof Clock3;return <article key={String(label)} className={`metric-card surface-lift p-4 reveal reveal-delay-${index+1}`}><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[.1em] text-[var(--muted)]">{String(label)}</p><p className="metric-value mt-2 text-2xl font-black">{Number(value).toLocaleString()}</p></div><div className="grid h-9 w-9 place-items-center rounded-xl bg-violet-500/[.08] text-[var(--accent)]"><C className="h-4 w-4"/></div></div><p className="mt-2 text-[10px] leading-4 text-[var(--muted)]">{String(copy)}</p></article>})}
       </section>
@@ -110,7 +110,7 @@ export default async function CampaignsPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <span className="status-pill">Round-robin</span>
-            <span className="status-pill">{sendingCount}/{deliverySettings.maxConcurrentCampaigns} slots active</span>
+            <span className="status-pill">{sendingCount} active campaigns</span>
             <span className="status-pill">{deliverySettings.campaignBurstPerRound} message{deliverySettings.campaignBurstPerRound===1?"":"s"} / turn</span>
           </div>
         </div>
