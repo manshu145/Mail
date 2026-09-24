@@ -8,16 +8,26 @@ async function main() {
     select
       m.recipient_email,
       lower(trim(m.recipient_email)),
-      'bounce'::suppression_reason,
+      'hard_bounce'::suppression_reason,
       'bounce_backfill',
       m.contact_id,
-      coalesce(m.last_error,'Backfilled from terminal bounced message'),
+      coalesce(m.last_error,'Backfilled from confirmed hard-bounce evidence'),
       coalesce(m.bounced_at,now())
     from messages m
     where m.status='bounced'
+      and (
+        exists (
+          select 1
+          from message_events e
+          where e.message_id=m.id
+            and e.type='postfix_bounced'
+            and coalesce((e.payload->>'suppressRecipient')::boolean,false)=true
+        )
+        or lower(coalesce(m.last_error,'')) ~ '5\\.1\\.1|user unknown|unknown user|no such (user|mailbox)|mailbox (does not exist|not found)|recipient (does not exist|not found)'
+      )
     on conflict(normalized_email) do nothing
   `);
-  console.log(`[backfill-bounced-suppressions] inserted ${result.rowCount || 0} missing suppressions`);
+  console.log(`[backfill-bounced-suppressions] inserted ${result.rowCount || 0} confirmed hard-bounce suppressions`);
 }
 
 main()
