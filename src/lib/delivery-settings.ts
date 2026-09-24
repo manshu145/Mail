@@ -24,6 +24,13 @@ export type DeliverySettings = {
   canarySecondBatch: number;
   canaryThirdBatch: number;
   canaryBounceWarnRate: number;
+  adaptivePacingEnabled: boolean;
+  adaptivePacingBasePerSecond: number;
+  adaptivePacingTargetPerSecond: number;
+  adaptivePacingHealthyRounds: number;
+  adaptivePacingIncreasePercent: number;
+  adaptivePacingPressureMultiplier: number;
+  adaptivePacingMinimumPerSecond: number;
 };
 
 export const DELIVERY_SETTING_KEYS = {
@@ -47,6 +54,13 @@ export const DELIVERY_SETTING_KEYS = {
   canarySecondBatch: "delivery.canary_second_batch",
   canaryThirdBatch: "delivery.canary_third_batch",
   canaryBounceWarnRate: "delivery.canary_bounce_warn_rate",
+  adaptivePacingEnabled: "delivery.adaptive_pacing_enabled",
+  adaptivePacingBasePerSecond: "delivery.adaptive_pacing_base_per_second",
+  adaptivePacingTargetPerSecond: "delivery.adaptive_pacing_target_per_second",
+  adaptivePacingHealthyRounds: "delivery.adaptive_pacing_healthy_rounds",
+  adaptivePacingIncreasePercent: "delivery.adaptive_pacing_increase_percent",
+  adaptivePacingPressureMultiplier: "delivery.adaptive_pacing_pressure_multiplier",
+  adaptivePacingMinimumPerSecond: "delivery.adaptive_pacing_minimum_per_second",
 } as const;
 
 function finite(value: unknown, fallback: number) {
@@ -55,6 +69,7 @@ function finite(value: unknown, fallback: number) {
 }
 function int(value: unknown, fallback: number, min: number, max: number) { return Math.min(max, Math.max(min, Math.floor(finite(value, fallback)))); }
 function num(value: unknown, fallback: number, min: number, max: number) { return Math.min(max, Math.max(min, finite(value, fallback))); }
+function bool(value: unknown, fallback: boolean) { if (typeof value === "boolean") return value; if (typeof value === "string") return value.toLowerCase() === "true" ? true : value.toLowerCase() === "false" ? false : fallback; return fallback; }
 
 export function defaultDeliverySettings(env: Readonly<Record<string,string|undefined>> = process.env): DeliverySettings {
   return {
@@ -78,6 +93,13 @@ export function defaultDeliverySettings(env: Readonly<Record<string,string|undef
     canarySecondBatch: int(env.CANARY_SECOND_BATCH, 300, 10, 1_000_000),
     canaryThirdBatch: int(env.CANARY_THIRD_BATCH, 600, 10, 5_000_000),
     canaryBounceWarnRate: num(env.CANARY_BOUNCE_WARN_RATE, 0.03, 0, 1),
+    adaptivePacingEnabled: bool(env.ADAPTIVE_PACING_ENABLED, true),
+    adaptivePacingBasePerSecond: num(env.ADAPTIVE_PACING_BASE_PER_SECOND, 1, 0.1, 1000),
+    adaptivePacingTargetPerSecond: num(env.ADAPTIVE_PACING_TARGET_PER_SECOND, 5, 0.1, 1000),
+    adaptivePacingHealthyRounds: int(env.ADAPTIVE_PACING_HEALTHY_ROUNDS, 3, 1, 100),
+    adaptivePacingIncreasePercent: num(env.ADAPTIVE_PACING_INCREASE_PERCENT, 25, 1, 100),
+    adaptivePacingPressureMultiplier: num(env.ADAPTIVE_PACING_PRESSURE_MULTIPLIER, 0.5, 0.1, 0.95),
+    adaptivePacingMinimumPerSecond: num(env.ADAPTIVE_PACING_MINIMUM_PER_SECOND, 0.25, 0.1, 1000),
   };
 }
 
@@ -106,5 +128,12 @@ export async function readDeliverySettings(): Promise<DeliverySettings> {
     canarySecondBatch: int(values.get(DELIVERY_SETTING_KEYS.canarySecondBatch), defaults.canarySecondBatch, 10, 1_000_000),
     canaryThirdBatch: int(values.get(DELIVERY_SETTING_KEYS.canaryThirdBatch), defaults.canaryThirdBatch, 10, 5_000_000),
     canaryBounceWarnRate: num(values.get(DELIVERY_SETTING_KEYS.canaryBounceWarnRate), defaults.canaryBounceWarnRate, 0, 1),
+    adaptivePacingEnabled: bool(values.get(DELIVERY_SETTING_KEYS.adaptivePacingEnabled), defaults.adaptivePacingEnabled),
+    adaptivePacingBasePerSecond: num(values.get(DELIVERY_SETTING_KEYS.adaptivePacingBasePerSecond), defaults.adaptivePacingBasePerSecond, 0.1, 1000),
+    adaptivePacingTargetPerSecond: num(values.get(DELIVERY_SETTING_KEYS.adaptivePacingTargetPerSecond), defaults.adaptivePacingTargetPerSecond, 0.1, 1000),
+    adaptivePacingHealthyRounds: int(values.get(DELIVERY_SETTING_KEYS.adaptivePacingHealthyRounds), defaults.adaptivePacingHealthyRounds, 1, 100),
+    adaptivePacingIncreasePercent: num(values.get(DELIVERY_SETTING_KEYS.adaptivePacingIncreasePercent), defaults.adaptivePacingIncreasePercent, 1, 100),
+    adaptivePacingPressureMultiplier: num(values.get(DELIVERY_SETTING_KEYS.adaptivePacingPressureMultiplier), defaults.adaptivePacingPressureMultiplier, 0.1, 0.95),
+    adaptivePacingMinimumPerSecond: num(values.get(DELIVERY_SETTING_KEYS.adaptivePacingMinimumPerSecond), defaults.adaptivePacingMinimumPerSecond, 0.1, 1000),
   };
 }
