@@ -43,7 +43,7 @@ export async function GET() {
     .from(lists)
     .orderBy(lists.name)
     .limit(200);
-  const options = [];
+  const options: Array<{ id: string; name: string; isDynamic: boolean; unresolved: number }> = [];
   for (const list of rows) {
     try {
       const audience = await audienceSelection(list);
