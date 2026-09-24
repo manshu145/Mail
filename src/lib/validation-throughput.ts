@@ -39,6 +39,7 @@ export async function runProviderAwarePool<T>(
     backoffDelayMs: number;
     shouldStop?: () => Promise<boolean>;
     shouldHoldProvider?: (verdict: ValidationVerdict) => boolean;
+    providerHoldUntil?: (provider: string) => number;
     sleep?: (ms: number) => Promise<void>;
     now?: () => number;
   },
@@ -91,10 +92,20 @@ export async function runProviderAwarePool<T>(
       const lane = lanes[index];
 
       for (const item of lane.items) {
-        if (heldProviders.has(lane.provider)) break;
         if (options.shouldStop && await options.shouldStop()) {
           stopped = true;
           return;
+        }
+
+        while (true) {
+          if (options.shouldStop && await options.shouldStop()) {
+            stopped = true;
+            return;
+          }
+          const holdUntil = options.providerHoldUntil?.(lane.provider) || 0;
+          const waitMs = holdUntil - now();
+          if (waitMs <= 0) break;
+          await sleep(Math.min(waitMs, 1000));
         }
 
         await reserveProviderStart(lane.provider);
