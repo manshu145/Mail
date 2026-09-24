@@ -175,7 +175,8 @@ export function ValidationControls({
   const remaining = activeJob ? Math.max(0, activeJob.totalRows - activeJob.processedRows) : 0;
   const currentPerSecond = engine ? engine.validationsPerMinute / 60 : 0;
   const modeLabel = (mode: string) => mode === "hybrid" ? "Smart Hybrid" : mode === "supersend" ? "SuperSend Primary" : "NexiMail Internal";
-  const engineState = paused ? "Paused" : activeJob ? "Processing" : engine?.state === "error" ? "Attention" : "Ready";
+  const quotaReached = engine?.state === "daily_quota_exhausted";
+  const engineState = quotaReached ? "Daily limit reached" : paused ? "Paused" : activeJob ? "Processing" : engine?.state === "error" ? "Attention" : "Ready";
 
   return <div className="space-y-4 sm:space-y-5">
     <section className="premium-panel overflow-hidden">
@@ -188,7 +189,7 @@ export function ValidationControls({
         <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           {paused
             ? <button disabled={busy} type="button" onClick={() => act("resume")} className="btn-secondary !min-h-10 !px-3"><Play className="h-3.5 w-3.5"/> Resume</button>
-            : <button disabled={busy} type="button" onClick={() => act("pause")} className="btn-secondary !min-h-10 !px-3"><Pause className="h-3.5 w-3.5"/> Pause</button>}
+            : <button disabled={busy || quotaReached} type="button" onClick={() => act("pause")} className="btn-secondary !min-h-10 !px-3"><Pause className="h-3.5 w-3.5"/> Pause</button>}
           <button disabled={busy || !!activeJob || unresolved === 0 || !validationReady} type="button" onClick={() => act("start_pending")} className="btn-primary !min-h-10 !px-3"><RotateCcw className="h-3.5 w-3.5"/> Validate unresolved</button>
         </div>
       </div>
@@ -270,7 +271,7 @@ export function ValidationControls({
             ["Provider holds",engine ? String(engine.providerHolds || 0) : "—"],
           ].map(([label,value])=><div key={label} className="bg-[var(--surface)] px-3 py-3 sm:px-4"><p className="text-[9px] font-black uppercase tracking-[.1em] text-[var(--muted)]">{label}</p><p className="mt-1 truncate text-[12px] font-black sm:text-sm">{value}</p></div>)}
         </div>
-        <div className="border-t border-[var(--border)] px-4 py-3 text-[10.5px] leading-5 text-[var(--muted)]">Provider-aware lanes raise throughput while shared pacing, temporary-error backoff and provider holds protect result quality. A provider block pauses that provider instead of converting untouched mailboxes into false verdicts.</div>
+        <div className="border-t border-[var(--border)] px-4 py-3 text-[10.5px] leading-5 text-[var(--muted)]">{quotaReached ? "The workspace daily validation quota has been reached. The active job remains queued and will automatically continue when the daily quota resets." : "Provider-aware lanes raise throughput while shared pacing, temporary-error backoff and provider holds protect result quality."} A provider block pauses that provider instead of converting untouched mailboxes into false verdicts.</div>
       </section>
     </div>
 
