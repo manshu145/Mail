@@ -162,7 +162,8 @@ export default async function ValidationPage() {
   }
 
   const usable = databaseConfigured && !dbError;
-  const engineRunning = usable && !paused && Boolean(activeJob);
+  const quotaReached = engine?.state === "daily_quota_exhausted";
+  const engineRunning = usable && !paused && !quotaReached && Boolean(activeJob);
   const engineRatePerSecond = engine ? engine.validationsPerMinute / 60 : 0;
 
   return <AppShell session={session}>
@@ -175,7 +176,7 @@ export default async function ValidationPage() {
       {usable ? <div className="flex flex-wrap items-center gap-2">
         <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-black ${paused ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300" : engineRunning ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "border-[var(--border)] bg-[var(--surface-soft)] text-[var(--muted)]"}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${paused ? "bg-amber-500" : engineRunning ? "bg-emerald-500" : "bg-[var(--muted)]"}`} />
-          {paused ? "Paused" : engineRunning ? "Validation running" : "Ready"}
+          {paused ? "Paused" : quotaReached ? "Daily limit reached" : engineRunning ? "Validation running" : "Ready"}
         </span>
         {engine ? <span className="rounded-full border border-[var(--border)] bg-[var(--surface-soft)] px-3 py-1.5 text-[11px] font-extrabold text-[var(--muted)]">{validationModeLabel(engine.validationMode)}</span> : null}
         {engine ? <span className="rounded-full border border-violet-500/15 bg-violet-500/[.06] px-3 py-1.5 text-[11px] font-extrabold text-violet-700 dark:text-violet-300">{engineRatePerSecond.toFixed(2)}/s live</span> : null}
