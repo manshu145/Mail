@@ -202,7 +202,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
     if (!/^[0-9a-f-]{36}$/i.test(listId)) return [];
     const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
     if (!list) return [];
-    const audience = await audienceSelection(list);
+    const audience = await validationAudienceSelection(list);
     const result = await pool.query<ValidationContact>(`
       select a.contact_id::text as id,a.email,a.normalized_email as "normalizedEmail"
       from (${audience}) a
@@ -293,7 +293,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
     if (!/^[0-9a-f-]{36}$/i.test(listId)) return 0;
     const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
     if (!list) return 0;
-    const audience = await audienceSelection(list);
+    const audience = await validationAudienceSelection(list);
     const result = await pool.query<{ total: number }>(`
       select count(*)::int as total
       from (${audience}) a
