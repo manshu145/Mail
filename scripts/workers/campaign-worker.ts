@@ -78,13 +78,21 @@ async function runOnce() {
     runtimeLimit === null ? deliveryLimit :
     deliveryLimit === null ? runtimeLimit :
     Math.min(runtimeLimit, deliveryLimit);
+  // maxConcurrentCampaigns is retained only as a backwards-compatible
+  // configuration key. A value of 0 means no campaign-count cap. Scheduling
+  // fairness and queue backpressure are enforced by claimBatch and the
+  // round-robin message claim order, so a held campaign never consumes a
+  // permanent customer-visible scheduler slot.
   const activeResult = await pool.query<{ total: number }>(`
     select count(*)::int as total
     from campaigns
     where status='sending'
   `);
   const activeCampaigns = Number(activeResult.rows[0]?.total || 0);
-  const availableCampaignSlots = Math.max(0, delivery.maxConcurrentCampaigns - activeCampaigns);
+  const schedulerCap = delivery.maxConcurrentCampaigns > 0 ? delivery.maxConcurrentCampaigns : null;
+  const availableCampaignSlots = schedulerCap === null
+    ? claimBatch
+    : Math.max(0, schedulerCap - activeCampaigns);
   const claimedIds = await claimDueCampaigns(Math.min(claimBatch, availableCampaignSlots));
   let resolved = 0;
   let excluded = 0;
@@ -233,6 +241,7 @@ async function runOnce() {
     recovered,
     activeCampaigns,
     maxConcurrentCampaigns: delivery.maxConcurrentCampaigns,
+    schedulerCampaignCap: schedulerCap,
     availableCampaignSlots,
     schedulingMode: "round_robin",
     campaignBurstPerRound: delivery.campaignBurstPerRound,
