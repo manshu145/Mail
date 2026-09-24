@@ -138,7 +138,7 @@ for (let i = 211; i <= 250; i++) {
       releaseLimit: Math.min(total, 100),
       config,
     });
-    if (unhealthy && sample >= 20) {
+    if (unhealthy && released < total) {
       assert.equal(result.paused, true);
       assert.equal(result.reason, "hard_bounce_rate_stop");
     } else {
