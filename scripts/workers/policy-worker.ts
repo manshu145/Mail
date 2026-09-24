@@ -16,7 +16,12 @@ async function campaignSafety(campaignId:string,settings:Awaited<ReturnType<type
   select count(*)::int total,
     count(*) filter(where status in ('ready_for_transport','sending','mta_accepted','deferred','delivered','bounced','failed'))::int released,
     count(*) filter(where status in ('delivered','bounced'))::int sample,
-    count(*) filter(where status='bounced')::int bounced,
+    count(*) filter(where status='bounced' and exists(
+      select 1 from message_events bounce_events
+      where bounce_events.message_id=messages.id
+        and bounce_events.type='postfix_bounced'
+        and coalesce((bounce_events.payload->>'suppressRecipient')::boolean,false)=true
+    ))::int bounced,
     count(*) filter(where exists(
       select 1 from message_events e
       where e.message_id=messages.id and e.type='complaint'
@@ -105,12 +110,20 @@ async function runOnce(){
   if(safety.paused){continue}
   if(!safety.canRelease){canaryHeld++;continue}
   const [contact]=await db.select().from(contacts).where(eq(contacts.id,message.contact_id)).limit(1);
+  const domainHealth=contact?.normalizedEmail?.includes("@")
+    ? await db.execute(sql`select status from recipient_domain_health where domain=lower(split_part(${contact.normalizedEmail},'@',2)) limit 1`)
+    : { rows: [] as Array<{status:string}> };
+  const domainStatus=(domainHealth.rows[0] as {status?:string}|undefined)?.status;
   if(!contact||contact.status!=="active"){await db.update(messages).set({status:"cancelled",lastError:"contact_not_active"}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
   if(!hasConfirmedConsent(contact)){await db.update(messages).set({status:"cancelled",lastError:"marketing_consent_missing"}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
   const [suppressed]=await db.select({id:suppressions.id,reason:suppressions.reason}).from(suppressions).where(eq(suppressions.normalizedEmail,contact.normalizedEmail)).limit(1);
   if(suppressed){await db.update(messages).set({status:"cancelled",lastError:`suppressed:${suppressed.reason}`}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue}
-  if(!validationAllowsSend(contact.normalizedEmail, contact.validationStatus)){
-   const reason=contact.validationStatus==="invalid"?"validation_invalid":"awaiting_mailbox_validation";
+  if(!validationAllowsSend(contact.normalizedEmail, contact.validationStatus) || domainStatus !== "valid"){
+   const reason=contact.validationStatus==="invalid"
+    ? "validation_invalid"
+    : domainStatus !== "valid"
+      ? "recipient_domain_not_verified"
+      : "awaiting_mailbox_validation";
    await db.update(messages).set({status:"cancelled",lastError:reason}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));cancelled++;continue
   }
   await db.update(messages).set({status:"ready_for_transport",lastError:null}).where(and(eq(messages.id,message.id),eq(messages.status,"queued")));ready++;safety.released++;safety.canRelease=safety.released<safety.releaseLimit
