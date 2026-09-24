@@ -40,7 +40,7 @@ export async function PATCH(request: NextRequest) {
     ["retryMaxAttempts",1,20],["retryInitialSeconds",10,86_400],["retryMaxSeconds",30,604_800],["retryBackoffMultiplier",1,10],["providerCooldownMinutes",1,MAX_PROVIDER_COOLDOWN_MINUTES],
     ["reputationBounceStopRate",0,1],["reputationComplaintStopRate",0,1],["reputationMinSample",1,10_000_000],
     ["canaryInitialBatch",10,100_000],["canarySecondBatch",10,1_000_000],["canaryThirdBatch",10,5_000_000],["canaryBounceWarnRate",0,1],
-    ["adaptivePacingBasePerSecond",0.1,1000],["adaptivePacingTargetPerSecond",0.1,1000],["adaptivePacingHealthyRounds",1,100],["adaptivePacingIncreasePercent",1,100],["adaptivePacingPressureMultiplier",0.1,0.95],["adaptivePacingMinimumPerSecond",0.1,1000],
+    ["adaptivePacingBasePerSecond",0.1,1000],["adaptivePacingTargetPerSecond",0.1,1000],["adaptivePacingHealthyRounds",1,100],["adaptivePacingIncreasePercent",1,100],["adaptivePacingPressureMultiplier",0.1,0.95],["adaptivePacingMinimumPerSecond",0.1,1000],["validationDailyLimit",1,10_000_000],
   ];
   for (const [key,min,max] of constraints) if (next[key] < min || next[key] > max) return NextResponse.json({ error: `${key} must be between ${min} and ${max}.` }, { status: 400 });
   if (next.retryMaxSeconds < next.retryInitialSeconds) return NextResponse.json({ error: "Maximum retry wait must be at least the initial retry wait." }, { status: 400 });
