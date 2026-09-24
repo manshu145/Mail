@@ -550,7 +550,8 @@ async function runJob() {
       providerStartGapMs: job.scope.startsWith("contact:") ? 0 : validationMode === "supersend" ? 250 : (provider) => providerStartGapFor(provider),
       globalStartGapMs: job.scope.startsWith("contact:") ? 0 : validationMode === "supersend" ? 250 : validationGlobalStartGapMs,
       backoffDelayMs: validationProviderBackoffMs,
-      shouldHoldProvider: (verdict) => validationIsPreRecipientFailure(verdict) || verdict.detail === "provider_hold_active",
+      shouldHoldProvider: (verdict) => validationIsPreRecipientFailure(verdict),
+      providerHoldUntil: (provider) => providerHoldUntil.get(provider) || 0,
       shouldStop: async () => (await validationPaused()) || dailyCompleted >= dailyRemaining,
     },
   );
