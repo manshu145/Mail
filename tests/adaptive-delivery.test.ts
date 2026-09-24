@@ -58,7 +58,7 @@ test("zero bounce stop threshold disables automatic hard-bounce pause", () => {
 
 test("zero canary warning threshold disables slowdown", () => {
   const result = decideAdaptiveDelivery({
-    total: 3000, released: 100, sample: 100, bounced: 10, phase: 0, releaseLimit: 100,
+    total: 3000, released: 100, sample: 100, bounced: 3, phase: 0, releaseLimit: 100,
     config: { ...config, bounceWarnRate: 0 },
   });
   assert.equal(result.paused, false);
