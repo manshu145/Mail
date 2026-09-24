@@ -196,15 +196,15 @@ export async function getCampaignSendGuard(input: {
     {
       key: "audience",
       label: "Audience health",
-      status: input.audience.eligibleCount === 0 || input.audience.domainHealthPendingCount > 0 || input.audience.pendingCount > 0
+      status: input.audience.eligibleCount === 0
         ? "blocked"
         : input.audience.unknownCount > 0 || input.audience.invalidCount > 0 || input.audience.domainInvalidCount > 0
           ? "warning"
           : "ready",
       detail: input.audience.domainHealthPendingCount > 0
-        ? `Recipient-domain DNS checks are incomplete for ${input.audience.domainHealthPendingCount.toLocaleString()} domain${input.audience.domainHealthPendingCount === 1 ? "" : "s"}; launch is blocked until they complete.`
+        ? `Recipient-domain DNS checks are incomplete for ${input.audience.domainHealthPendingCount.toLocaleString()} domain${input.audience.domainHealthPendingCount === 1 ? "" : "s"}; affected recipients remain on hold while eligible recipients can continue.`
         : input.audience.pendingCount > 0
-          ? `${input.audience.pendingCount.toLocaleString()} recipient${input.audience.pendingCount === 1 ? "" : "s"} have not completed NexiMail mailbox validation; launch is blocked until validation runs.`
+          ? `${input.audience.pendingCount.toLocaleString()} recipient${input.audience.pendingCount === 1 ? "" : "s"} have not completed NexiMail mailbox validation; those recipients remain on hold until validation completes.`
           : `${input.audience.eligibleCount.toLocaleString()} eligible · ${input.audience.suppressedCount.toLocaleString()} suppressed · ${input.audience.invalidCount.toLocaleString()} address-invalid · ${input.audience.domainInvalidCount.toLocaleString()} domain-invalid · ${input.audience.unknownCount.toLocaleString()} inconclusive`,
       metadata: input.audience,
     },
