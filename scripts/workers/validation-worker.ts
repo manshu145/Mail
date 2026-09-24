@@ -355,6 +355,27 @@ async function selectWorkJob() {
   return job;
 }
 
+async function validationDailyLimit() {
+  const [row] = await db.select({ value: systemSettings.value })
+    .from(systemSettings)
+    .where(eq(systemSettings.key, "reputation.validation_daily_limit"))
+    .limit(1);
+  const parsed = Number(row?.value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 5000;
+}
+
+async function validationDailyUsage() {
+  const result = await pool.query<{ total: number }>(`
+    select count(*)::int as total
+    from validation_results
+    where created_at >= (
+      date_trunc('day', timezone('Asia/Kolkata', now()))
+      at time zone 'Asia/Kolkata'
+    )
+  `);
+  return Number(result.rows[0]?.total || 0);
+}
+
 async function runJob() {
   if (await validationPaused(true)) {
     await heartbeat({ state: "paused" });
@@ -363,6 +384,14 @@ async function runJob() {
   const job = await selectWorkJob();
   if (!job) {
     await heartbeat({ state: "idle", provider: "selectable", concurrency: validationConcurrency, scheduler: "provider_aware" });
+    return;
+  }
+
+  const dailyLimit = await validationDailyLimit();
+  const dailyUsage = await validationDailyUsage();
+  const dailyRemaining = Math.max(0, dailyLimit - dailyUsage);
+  if (dailyRemaining <= 0) {
+    await heartbeat({ state: "daily_quota_exhausted", jobId: job.id, scope: job.scope, dailyLimit, dailyUsage, nextResumeAt: new Date(Date.now() + Math.max(0, new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour12: false })) ? 0 : 0)).toISOString() });
     return;
   }
 
@@ -398,7 +427,8 @@ async function runJob() {
 
   let processed = await existingResultCount(job.id);
   const remainingCount = await remainingCountForJob(job.scope, job.id);
-  const remaining = await contactsForJob(job.scope, job.id);
+  const remaining = await contactsForJob(job.scope, job.id, Math.min(validationBatchSize, dailyRemaining));
+  let dailyCompleted = 0;
   const total = processed + remainingCount;
 
   await db.update(validationJobs).set({ totalRows: total, processedRows: processed }).where(eq(validationJobs.id, job.id));
@@ -473,6 +503,7 @@ async function runJob() {
       await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
       if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
       processed++;
+      dailyCompleted++;
       await publishProgress(false);
       return result;
     },
@@ -487,13 +518,14 @@ async function runJob() {
       globalStartGapMs: job.scope.startsWith("contact:") ? 0 : validationMode === "supersend" ? 250 : validationGlobalStartGapMs,
       backoffDelayMs: validationProviderBackoffMs,
       shouldHoldProvider: (verdict) => validationIsPreRecipientFailure(verdict) || verdict.detail === "provider_hold_active",
-      shouldStop: () => validationPaused(),
+      shouldStop: async () => (await validationPaused()) || dailyCompleted >= dailyRemaining,
     },
   );
 
   await publishProgress(true);
   if (outcome.stopped) {
-    await heartbeat({ state: "paused", jobId: job.id, scope: job.scope, processed, total, remaining: Math.max(0, total - processed) });
+    const quotaReached = dailyCompleted >= dailyRemaining;
+    await heartbeat({ state: quotaReached ? "daily_quota_exhausted" : "paused", jobId: job.id, scope: job.scope, processed, total, remaining: Math.max(0, total - processed), dailyLimit, dailyUsage: dailyUsage + dailyCompleted });
     return;
   }
 
