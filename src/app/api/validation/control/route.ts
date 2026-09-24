@@ -39,8 +39,7 @@ export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
-  const rows = await db.select({ id: lists.id, name: lists.name, isDynamic: lists.isDynamic })
-    .from(lists)
+  const rows = await db.select().from(lists)
     .orderBy(lists.name)
     .limit(200);
   const options: Array<{ id: string; name: string; isDynamic: boolean; unresolved: number }> = [];
