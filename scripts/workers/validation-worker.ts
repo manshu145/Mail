@@ -391,7 +391,7 @@ async function runJob() {
   const dailyUsage = await validationDailyUsage();
   const dailyRemaining = Math.max(0, dailyLimit - dailyUsage);
   if (dailyRemaining <= 0) {
-    await heartbeat({ state: "daily_quota_exhausted", jobId: job.id, scope: job.scope, dailyLimit, dailyUsage, nextResumeAt: new Date(Date.now() + Math.max(0, new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour12: false })) ? 0 : 0)).toISOString() });
+    await heartbeat({ state: "daily_quota_exhausted", jobId: job.id, scope: job.scope, dailyLimit, dailyUsage });
     return;
   }
 
