@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 type ImportOption = { id: string; filename: string; unresolved: number };
+type ListOption = { id: string; name: string; isDynamic: boolean; unresolved: number };
 type ValidationMode = "internal" | "hybrid" | "supersend";
 
 export function ValidationControls({
@@ -37,6 +38,8 @@ export function ValidationControls({
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState("");
   const [importId, setImportId] = useState(imports[0]?.id || "");
+  const [lists, setLists] = useState<ListOption[]>([]);
+  const [listId, setListId] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [providerConfigured, setProviderConfigured] = useState<boolean | null>(null);
@@ -68,7 +71,19 @@ export function ValidationControls({
     } catch {}
   }
 
-  useEffect(() => { void loadProvider(); }, []);
+  useEffect(() => {
+    void loadProvider();
+    void (async () => {
+      try {
+        const response = await fetch("/api/validation/control", { cache: "no-store" });
+        const data = await response.json().catch(() => ({})) as { lists?: ListOption[] };
+        if (response.ok && Array.isArray(data.lists)) {
+          setLists(data.lists);
+          setListId((current) => current || data.lists?.[0]?.id || "");
+        }
+      } catch {}
+    })();
+  }, []);
 
   async function saveProviderKey() {
     if (!providerKey.trim()) { setProviderMessage("Enter a SuperSend API key."); return; }
@@ -139,7 +154,7 @@ export function ValidationControls({
       const response = await fetch("/api/validation/control", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, email: email.trim(), importId }),
+        body: JSON.stringify({ action, email: email.trim(), importId, listId }),
       });
       const data = await response.json().catch(() => ({})) as { error?: string; total?: number };
       if (!response.ok) { setError(data.error || "Validation action failed."); return; }
@@ -208,6 +223,11 @@ export function ValidationControls({
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-3.5 sm:p-4">
           <div className="mb-3 flex items-start gap-3"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-blue-500/10 text-blue-700 dark:text-blue-300"><UploadCloud className="h-4 w-4"/></div><div className="min-w-0"><h3 className="text-[12px] font-black">Validate recent import</h3><p className="mt-0.5 text-[11px] leading-4 text-[var(--muted)]">Start a job for unresolved contacts from a CSV import.</p></div></div>
           <div className="flex flex-col gap-2 sm:flex-row"><select value={importId} onChange={(e)=>setImportId(e.target.value)} className="form-control min-w-0 flex-1">{imports.length ? imports.map((item)=><option key={item.id} value={item.id}>{item.filename} · {item.unresolved.toLocaleString()}</option>) : <option value="">No imports need validation</option>}</select><button type="button" disabled={busy || !!activeJob || !importId || !validationReady} onClick={()=>act("start_import")} className="btn-secondary !min-h-10 shrink-0 !px-4">Validate import</button></div>
+        </div>
+
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-3.5 sm:p-4 lg:col-span-2">
+          <div className="mb-3 flex items-start gap-3"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"><SearchCheck className="h-4 w-4"/></div><div className="min-w-0"><h3 className="text-[12px] font-black">Validate a list or segment</h3><p className="mt-0.5 text-[11px] leading-4 text-[var(--muted)]">Select a saved audience. Large audiences are automatically processed within the daily validation quota and continue on the next day.</p></div></div>
+          <div className="flex flex-col gap-2 sm:flex-row"><select value={listId} onChange={(e)=>setListId(e.target.value)} className="form-control min-w-0 flex-1">{lists.length ? lists.map((item)=><option key={item.id} value={item.id}>{item.name} · {item.isDynamic ? "segment" : "list"} · {item.unresolved.toLocaleString()} pending</option>) : <option value="">No lists or segments need validation</option>}</select><button type="button" disabled={busy || !!activeJob || !listId || !validationReady} onClick={()=>act("start_list")} className="btn-secondary !min-h-10 shrink-0 !px-4">Validate audience</button></div>
         </div>
       </div>
 
