@@ -147,8 +147,19 @@ function registerProviderPressure(provider: string, verdict: ValidationVerdict) 
   providerSuccessStreak.set(provider, 0);
   const level = Math.min(5, (providerFailureLevel.get(provider) || 0) + 1);
   providerFailureLevel.set(provider, level);
-  const holdMs = Math.min(validationProviderHoldMs, validationProviderHoldFloorMs * (2 ** (level - 1)));
-  const until = Date.now() + holdMs;
+  // A pre-recipient SMTP banner/connection rejection is a provider-level
+  // condition, not a mailbox-level verdict. Defer that provider for the
+  // remainder of the current validation day so the job keeps moving through
+  // other providers instead of retrying the same blocked MX every 60-600s.
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setUTCHours(18, 30, 0, 0); // 00:00 Asia/Kolkata
+  if (tomorrow.getTime() <= now.getTime()) tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  const holdMs = Math.max(
+    validationProviderHoldFloorMs,
+    tomorrow.getTime() - now.getTime(),
+  );
+  const until = tomorrow.getTime();
   providerHoldUntil.set(provider, until);
   providerHoldReason.set(provider, String(verdict.detail || verdict.status || "unknown"));
   providerLastPressureAt.set(provider, new Date().toISOString());
