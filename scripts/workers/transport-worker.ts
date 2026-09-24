@@ -2,7 +2,7 @@ import { submitToMta, SmtpSubmissionUncertainError, SmtpResponseError } from "..
 import { and, eq, sql } from "drizzle-orm";
 import { db, pool } from "../../src/db";
 import { campaigns, contacts, messageEvents, messages, sendingAccounts, templates } from "../../src/db/schema";
-import { providerCooldowns, sendingAccountWarmups, sendingDomains, workerHeartbeats } from "../../src/db/operations-schema";
+import { providerCooldowns, recipientDomainHealth, sendingAccountWarmups, sendingDomains, workerHeartbeats } from "../../src/db/operations-schema";
 import { signPublicToken } from "../../src/lib/public-tokens";
 import { combinedAttachmentLimitError, loadCampaignAttachments, type CampaignAttachment } from "../../src/lib/campaign-attachments";
 import { loadTemplateAttachments } from "../../src/lib/template-attachments";
@@ -11,7 +11,7 @@ import { makeBounceAddress } from "../../src/lib/bounce-address";
 import { injectPreheader } from "../../src/lib/email-preheader";
 import { hasConfirmedConsent } from "../../src/lib/consent-policy";
 import { getRuntimePolicy } from "../../src/lib/runtime-policy";
-import { classifyDeliveryRestriction, providerForDelivery, providerForEmail, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY } from "../../src/lib/provider";
+import { classifyDeliveryRestriction, providerForDelivery, providerForEmail, providerFromMxHosts, SENDER_COOLDOWN_KEY, UPSTREAM_COOLDOWN_KEY, type MailboxProvider } from "../../src/lib/provider";
 import { readDeliverySettings, type DeliverySettings } from "../../src/lib/delivery-settings";
 import { personalizeContactText, personalizeContactHtml } from "../../src/lib/personalization";
 import { validationAllowsSend } from "../../src/lib/validation-policy";
@@ -72,8 +72,8 @@ async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect,
   return { allowed: (effectiveHourly === 0 || hourCount < effectiveHourly) && (effectiveDaily === 0 || dayCount < effectiveDaily), effectiveHourly, effectiveDaily };
 }
 
-async function providerGate(accountId: string, recipientEmail: string, cooldownMinutes: number) {
-  const provider = providerForEmail(recipientEmail);
+async function providerGate(accountId: string, recipientEmail: string, cooldownMinutes: number, inferredProvider?: MailboxProvider) {
+  const provider = inferredProvider || providerForEmail(recipientEmail);
   const active = await db.select().from(providerCooldowns).where(and(
     eq(providerCooldowns.sendingAccountId, accountId),
     eq(providerCooldowns.active, true),
@@ -315,10 +315,14 @@ async function runOnce() {
     const limit = await accountWithinLimits(account, settings);
     if (!limit.allowed) { await releaseThrottled(message.id); throttled++; continue; }
 
-    const provider = providerForEmail(contact.email);
+    const recipientDomain = contact.normalizedEmail.split("@")[1]?.toLowerCase() || "";
+    const [domainHealth] = recipientDomain
+      ? await db.select({ mxHosts: recipientDomainHealth.mxHosts }).from(recipientDomainHealth).where(eq(recipientDomainHealth.domain, recipientDomain)).limit(1)
+      : [];
+    const provider = providerFromMxHosts(domainHealth?.mxHosts) || providerForEmail(contact.email);
     const waitMs = Math.max(0, (providerNextAt.get(provider) || 0) - Date.now(), globalNextAt - Date.now());
     if (waitMs) await sleep(waitMs);
-    const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes);
+    const gate = await providerGate(account.id, contact.email, settings.providerCooldownMinutes, provider);
     if (!gate.allowed) { await releaseProviderCooldown(message.id, gate.cooldownKey, gate.retryAt, settings.providerCooldownMinutes); providerHeld++; continue; }
     if (gate.probe) { providerProbes++; await event(message.id,"provider_probe",{provider:gate.provider,cooldownKey:gate.cooldownKey,cooldownScope:gate.cooldownScope,retryAt:gate.retryAt?.toISOString()}); }
 
