@@ -34,10 +34,9 @@ export function decideAdaptiveDelivery(input: {
   // Safety thresholds apply to every campaign, including campaigns smaller than
   // the configured initial canary. A small campaign can still produce enough
   // terminal outcomes to prove the list is unsafe while unsent messages remain.
-  const earlySample = Math.min(
-    total,
-    input.config.reputationMinSample,
-  );
+  const earlySample = total >= input.config.reputationMinSample
+    ? input.config.reputationMinSample
+    : Math.min(total, Math.max(20, Math.ceil(total * 0.5)));
   if (input.released < total && input.sample >= earlySample && bounceRate >= input.config.bounceStopRate) {
     return { phase, releaseLimit, state: "paused", bounceRate, paused: true, reason: "hard_bounce_rate_stop" };
   }
