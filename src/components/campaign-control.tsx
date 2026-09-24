@@ -40,7 +40,7 @@ export function CampaignControl({ id, status, failed = 0 }: { id: string; status
   return <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
     {status === "paused" ? <button disabled={!!busy} className="btn-primary" onClick={() => run("resume")}>{busy === "resume" ? "Resuming…" : "Resume"}</button> : null}
     {["queued", "scheduled", "sending"].includes(status) ? <button disabled={!!busy} className="btn-secondary" onClick={() => run("pause")}>{busy === "pause" ? "Pausing…" : "Pause"}</button> : null}
-    {failed > 0 && status !== "cancelled" ? <button disabled={!!busy} className="btn-secondary" onClick={() => run("retry_failed")}>{busy === "retry_failed" ? "Retrying…" : `Retry failed (${failed})`}</button> : null}
+    {failed > 0 && status !== "cancelled" ? <button disabled={!!busy} className="btn-secondary" onClick={() => run("retry_failed")}>{busy === "retry_failed" ? "Retrying…" : `Retry eligible (${failed})`}</button> : null}
     {status !== "completed" ? <button disabled={!!busy} className="btn-danger" onClick={() => run("cancel")}>{busy === "cancel" ? "Cancelling…" : "Cancel"}</button> : null}
     {error ? <span role="alert" className="basis-full text-right text-xs font-semibold text-rose-600">{error}</span> : null}
   </div>;
