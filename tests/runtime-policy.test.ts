@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getRuntimePolicy } from "../src/lib/runtime-policy";
+import { defaultDeliverySettings } from "../src/lib/delivery-settings";
 
 test("runtime fails closed when mode and send flag are omitted", () => {
   const policy = getRuntimePolicy({});
@@ -26,4 +27,11 @@ test("staging send remains separately gated and recipient-capped", () => {
   });
   assert.equal(policy.sendingEnabled, true);
   assert.equal(policy.maxRecipientsPerCampaign, 5000);
+});
+
+test("production delivery defaults do not impose recipient or hourly/daily caps", () => {
+  const settings = defaultDeliverySettings({});
+  assert.equal(settings.maxRecipientsPerCampaign, 0);
+  assert.equal(settings.maxRollingHour, 0);
+  assert.equal(settings.maxRolling24h, 0);
 });
