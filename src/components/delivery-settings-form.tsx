@@ -23,7 +23,7 @@ const fields: Field[] = [
   { key:"maxRolling24h", section:"Sending limits", label:"Global 24-hour limit", help:"0 = unlimited. This is an optional global safety ceiling." },
   { key:"maxActiveQueued", section:"Sending limits", label:"Maximum active / queued messages", help:"Backpressure ceiling used to avoid releasing more work than the system can safely process." },
 
-  { key:"maxConcurrentCampaigns", section:"Multi-campaign delivery", label:"Maximum simultaneous campaigns", help:"How many campaigns may be in active sending state at once. Additional queued or scheduled campaigns wait for a free slot.", min:"1", max:"25" },
+  { key:"maxConcurrentCampaigns", section:"Multi-campaign delivery", label:"Campaign scheduler ceiling", help:"0 = no campaign-count cap. NexiMail still uses queue backpressure and fair round-robin scheduling to protect the database and transport path." },
   { key:"campaignBurstPerRound", section:"Multi-campaign delivery", label:"Messages per campaign turn", help:"Round-robin fairness. 1 alternates one message per campaign; higher values let each campaign send a small burst before rotating.", min:"1", max:"50" },
 
   { key:"retryMaxAttempts", section:"Retry policy", label:"Maximum delivery attempts", help:"Temporary delivery failures stop retrying after this many attempts." },
