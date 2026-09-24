@@ -47,3 +47,20 @@ test("small campaign can still stop while recipients remain unsent", () => {
   assert.equal(result.state, "paused");
   assert.equal(result.reason, "hard_bounce_rate_stop");
 });
+
+test("zero bounce stop threshold disables automatic hard-bounce pause", () => {
+  const result = decideAdaptiveDelivery({
+    total: 1000, released: 100, sample: 100, bounced: 20, phase: 0, releaseLimit: 100,
+    config: { ...config, bounceStopRate: 0 },
+  });
+  assert.equal(result.paused, false);
+});
+
+test("zero canary warning threshold disables slowdown", () => {
+  const result = decideAdaptiveDelivery({
+    total: 3000, released: 100, sample: 100, bounced: 10, phase: 0, releaseLimit: 100,
+    config: { ...config, bounceWarnRate: 0 },
+  });
+  assert.equal(result.paused, false);
+  assert.equal(result.releaseLimit, 400);
+});
