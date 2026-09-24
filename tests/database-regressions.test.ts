@@ -37,7 +37,8 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
       ('unknown@example.com','unknown@example.com','confirmed','form','unknown'),
       ('error@example.com','error@example.com','confirmed','form','error'),
       ('unconfirmed@example.com','unconfirmed@example.com','unconfirmed',null,'valid');
-      insert into suppressions(email,normalized_email,reason,source) values('blocked@example.com','blocked@example.com','unsubscribe','test');`);
+      insert into suppressions(email,normalized_email,reason,source) values('blocked@example.com','blocked@example.com','unsubscribe','test');
+      insert into recipient_domain_health(domain,status,mx_hosts) values('example.com','valid','["mx.example.com"]'::jsonb),('gmail.com','valid','["gmail-smtp-in.l.google.com"]'::jsonb);`);
     await pg.query("insert into contact_lists(contact_id,list_id) select id,$1::uuid from contacts", [list.id]);
     const selection = await audienceSelection(list, orm as unknown as Parameters<typeof audienceSelection>[1]);
     const result = await orm.execute(sql`select * from (${selection}) a where not suppressed and send_eligible`);
