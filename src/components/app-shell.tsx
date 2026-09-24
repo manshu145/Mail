@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3, Blocks, ChevronDown, ContactRound, FileUp, Gauge,
   Globe2, Layers3, ListOrdered, Mail, MailCheck, Menu, Network,
-  PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldBan, TimerReset, UserMinus, Users, X,
+  PanelLeftClose, PanelLeftOpen, Send, Settings, ShieldBan, TimerReset, UserMinus, Users, X, TestTube2,
 } from "lucide-react";
 import { BrandMark } from "./brand-mark";
 import { PwaStatus } from "./pwa-status";
@@ -47,6 +47,7 @@ const navGroups: NavGroup[] = [
   { label: "Workspace", items: [
     { href: "/users", label: "Team access", icon: Users, roles: ["owner"] },
     { href: "/settings", label: "Settings", icon: Settings },
+    { href: "/ui-tester", label: "UI tester", icon: TestTube2, roles: ["owner"] },
   ]},
 ]
 
