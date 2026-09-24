@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import type { DeliverySettings } from "@/lib/delivery-settings";
 
 type Section = "Reputation protection" | "Sending limits" | "Multi-campaign delivery" | "Retry policy";
-type Field = { key:keyof DeliverySettings; label:string; help:string; section:Section; step?:string; min?:string; max?:string; display?:"percent" };
+type NumericDeliveryKey = Exclude<keyof DeliverySettings, "adaptivePacingEnabled">;
+type Field = { key:NumericDeliveryKey; label:string; help:string; section:Section; step?:string; min?:string; max?:string; display?:"percent" };
 
 const fields: Field[] = [
   { key:"reputationBounceStopRate", section:"Reputation protection", label:"Pause sender at bounce rate (%)", help:"Automatically pause a sender when its 24-hour bounce rate reaches this level. 0 = disabled.", step:"0.01", display:"percent" },
