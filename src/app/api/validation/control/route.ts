@@ -35,32 +35,35 @@ async function selectedValidationMode() {
   return mode;
 }
 
+export async function GET() {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
+  const rows = await db.select({ id: lists.id, name: lists.name, isDynamic: lists.isDynamic })
+    .from(lists)
+    .orderBy(lists.name)
+    .limit(200);
+  const options = [];
+  for (const list of rows) {
+    try {
+      const audience = await audienceSelection(list);
+      const result = await pool.query<{ total: number }>(`
+        select count(*)::int as total
+        from (${audience}) a
+        where a.validation_status in ('pending','unknown','error')
+      `);
+      options.push({ id: list.id, name: list.name, isDynamic: list.isDynamic, unresolved: Number(result.rows[0]?.total || 0) });
+    } catch {
+      options.push({ id: list.id, name: list.name, isDynamic: list.isDynamic, unresolved: 0 });
+    }
+  }
+  return NextResponse.json({ lists: options });
+}
+
 export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
-
-  if (request.method === "GET") {
-    const rows = await db.select({ id: lists.id, name: lists.name, isDynamic: lists.isDynamic })
-      .from(lists)
-      .orderBy(lists.name)
-      .limit(200);
-    const options = [];
-    for (const list of rows) {
-      try {
-        const audience = await audienceSelection(list);
-        const result = await pool.query<{ total: number }>(`
-          select count(*)::int as total
-          from (${audience}) a
-          where a.validation_status in ('pending','unknown','error')
-        `);
-        options.push({ id: list.id, name: list.name, isDynamic: list.isDynamic, unresolved: Number(result.rows[0]?.total || 0) });
-      } catch {
-        options.push({ id: list.id, name: list.name, isDynamic: list.isDynamic, unresolved: 0 });
-      }
-    }
-    return NextResponse.json({ lists: options });
-  }
 
   const body = await request.json().catch(() => null) as {
     action?: "start_pending" | "start_import" | "start_list" | "start_single" | "pause" | "resume";
