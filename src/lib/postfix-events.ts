@@ -287,13 +287,15 @@ export async function handlePostfixEvent(db: EventDb, line: string, mappedMessag
       },
     });
 
-    await db.insert(suppressions).values({
-      email: message.recipientEmail,
-      normalizedEmail: normalizeEmail(message.recipientEmail),
-      reason: classification.suppressRecipient ? "hard_bounce" : "bounce",
-      source: "postfix_event",
-      note: detail,
-    }).onConflictDoNothing({ target: suppressions.normalizedEmail });
+    if (classification.suppressRecipient) {
+      await db.insert(suppressions).values({
+        email: message.recipientEmail,
+        normalizedEmail: normalizeEmail(message.recipientEmail),
+        reason: "hard_bounce",
+        source: "postfix_event",
+        note: detail,
+      }).onConflictDoNothing({ target: suppressions.normalizedEmail });
+    }
 
     await emitWebhookEvent("message.bounced", {
       ...base,
