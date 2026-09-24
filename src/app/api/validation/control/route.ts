@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, databaseConfigured, pool } from "@/db";
+import { db, databaseConfigured } from "@/db";
 import { contacts, importJobs, lists, systemSettings, validationJobs } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
@@ -35,6 +35,17 @@ async function selectedValidationMode() {
   return mode;
 }
 
+async function unresolvedCountForList(list: typeof lists.$inferSelect) {
+  const audience = await validationAudienceSelection(list);
+  const result = await db.execute(sql`
+    select count(*)::int as total
+    from (${audience}) a
+    where a.validation_status in ('pending','unknown','error')
+  `);
+  const rows = Array.isArray(result) ? result : result.rows;
+  return Number((rows as Array<{ total?: number | string }>)[0]?.total || 0);
+}
+
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -45,13 +56,8 @@ export async function GET() {
   const options: Array<{ id: string; name: string; isDynamic: boolean; unresolved: number }> = [];
   for (const list of rows) {
     try {
-      const audience = await validationAudienceSelection(list);
-      const result = await pool.query<{ total: number }>(`
-        select count(*)::int as total
-        from (${audience}) a
-        where a.validation_status in ('pending','unknown','error')
-      `);
-      options.push({ id: list.id, name: list.name, isDynamic: list.isDynamic, unresolved: Number(result.rows[0]?.total || 0) });
+      const unresolved = await unresolvedCountForList(list);
+      options.push({ id: list.id, name: list.name, isDynamic: list.isDynamic, unresolved });
     } catch {
       options.push({ id: list.id, name: list.name, isDynamic: list.isDynamic, unresolved: 0 });
     }
@@ -114,13 +120,7 @@ export async function POST(request: NextRequest) {
     const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
     if (!list) return NextResponse.json({ error: "List or segment not found." }, { status: 404 });
 
-    const audience = await validationAudienceSelection(list);
-    const result = await pool.query<{ total: number }>(`
-      select count(*)::int as total
-      from (${audience}) a
-      where a.validation_status in ('pending','unknown','error')
-    `);
-    const total = Number(result.rows[0]?.total || 0);
+    const total = await unresolvedCountForList(list);
     if (!total) return NextResponse.json({ error: "This list or segment has no unresolved contacts to validate." }, { status: 409 });
 
     const [job] = await db.insert(validationJobs).values({ scope: `list:${listId}`, validationMode, totalRows: total }).returning({ id: validationJobs.id });
