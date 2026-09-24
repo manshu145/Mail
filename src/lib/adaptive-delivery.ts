@@ -38,7 +38,7 @@ export function decideAdaptiveDelivery(input: {
     total,
     input.config.reputationMinSample,
   );
-  if (input.sample >= earlySample && bounceRate >= input.config.bounceStopRate) {
+  if (input.released < total && input.sample >= earlySample && bounceRate >= input.config.bounceStopRate) {
     return { phase, releaseLimit, state: "paused", bounceRate, paused: true, reason: "hard_bounce_rate_stop" };
   }
 
