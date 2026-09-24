@@ -37,6 +37,7 @@ const navGroups: NavGroup[] = [
     { href: "/messages", label: "Message log", icon: ListOrdered },
   ]},
   { label: "Deliverability", items: [
+    { href: "/inbox-tests", label: "Inbox placement", icon: MailCheck },
     { href: "/domains", label: "Sending domains", icon: Globe2 },
     { href: "/sender-identities", label: "Sender identities", icon: Network },
     { href: "/suppressions", label: "Suppressions", icon: ShieldBan },
