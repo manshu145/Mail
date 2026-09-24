@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, databaseConfigured, pool } from "@/db";
-import { contacts, importJobs, systemSettings, validationJobs } from "@/db/schema";
+import { contacts, importJobs, lists, systemSettings, validationJobs } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { isValidEmail, normalizeEmail } from "@/lib/contact-utils";
+import { audienceSelection } from "@/lib/audience";
 import { DEFAULT_VALIDATION_MODE, normalizeValidationMode, VALIDATION_MODE_KEY, validationModeNeedsSupersend } from "@/lib/validation-provider";
 
 const unresolved = inArray(contacts.validationStatus, ["pending","unknown","error"]);
@@ -39,9 +40,32 @@ export async function POST(request: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
+  if (request.method === "GET") {
+    const rows = await db.select({ id: lists.id, name: lists.name, isDynamic: lists.isDynamic })
+      .from(lists)
+      .orderBy(lists.name)
+      .limit(200);
+    const options = [];
+    for (const list of rows) {
+      try {
+        const audience = await audienceSelection(list);
+        const result = await pool.query<{ total: number }>(`
+          select count(*)::int as total
+          from (${audience}) a
+          where a.validation_status in ('pending','unknown','error')
+        `);
+        options.push({ id: list.id, name: list.name, isDynamic: list.isDynamic, unresolved: Number(result.rows[0]?.total || 0) });
+      } catch {
+        options.push({ id: list.id, name: list.name, isDynamic: list.isDynamic, unresolved: 0 });
+      }
+    }
+    return NextResponse.json({ lists: options });
+  }
+
   const body = await request.json().catch(() => null) as {
-    action?: "start_pending" | "start_import" | "start_single" | "pause" | "resume";
+    action?: "start_pending" | "start_import" | "start_list" | "start_single" | "pause" | "resume";
     importId?: string;
+    listId?: string;
     email?: string;
   } | null;
   if (!body?.action) return NextResponse.json({ error: "Action is required." }, { status: 400 });
@@ -79,6 +103,26 @@ export async function POST(request: NextRequest) {
     if (!total) return NextResponse.json({ error: "No unresolved contacts need validation." }, { status: 409 });
     const [job] = await db.insert(validationJobs).values({ scope: "pending", validationMode, totalRows: total }).returning({ id: validationJobs.id });
     await audit("validation.queued", session, "validation_job", job.id, { scope: "pending", total, validationMode });
+    return NextResponse.json({ ok: true, id: job.id, total });
+  }
+
+  if (body.action === "start_list") {
+    const listId = String(body.listId || "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(listId)) return NextResponse.json({ error: "Choose a valid list or segment." }, { status: 400 });
+    const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+    if (!list) return NextResponse.json({ error: "List or segment not found." }, { status: 404 });
+
+    const audience = await audienceSelection(list);
+    const result = await pool.query<{ total: number }>(`
+      select count(*)::int as total
+      from (${audience}) a
+      where a.validation_status in ('pending','unknown','error')
+    `);
+    const total = Number(result.rows[0]?.total || 0);
+    if (!total) return NextResponse.json({ error: "This list or segment has no unresolved contacts to validate." }, { status: 409 });
+
+    const [job] = await db.insert(validationJobs).values({ scope: `list:${listId}`, validationMode, totalRows: total }).returning({ id: validationJobs.id });
+    await audit("validation.queued", session, "validation_job", job.id, { scope: `list:${listId}`, listId, listName: list.name, total, validationMode });
     return NextResponse.json({ ok: true, id: job.id, total });
   }
 
