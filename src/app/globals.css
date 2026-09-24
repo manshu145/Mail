@@ -604,3 +604,153 @@ body::before {
     transform: none !important;
   }
 }
+
+
+/* NexiMail V2 UI refinement layer */
+:root {
+  --ui-accent-violet: #6d5dfc;
+  --ui-accent-blue: #4c7df3;
+  --ui-accent-cyan: #4b9cff;
+  --ui-accent-indigo: #7568f8;
+  --ui-accent-green: #15a36d;
+  --ui-accent-warm: #e89b2f;
+  --ui-radius-lg: 18px;
+  --ui-radius-md: 14px;
+}
+.dark {
+  --ui-accent-violet: #8b7cff;
+  --ui-accent-blue: #6791ff;
+  --ui-accent-cyan: #5cb4ff;
+  --ui-accent-indigo: #978cff;
+  --ui-accent-green: #49c994;
+  --ui-accent-warm: #f3b95b;
+}
+[data-section="overview"] { --section-accent: var(--ui-accent-violet); --section-accent-2: var(--ui-accent-blue); }
+[data-section="audience"] { --section-accent: var(--ui-accent-blue); --section-accent-2: var(--ui-accent-cyan); }
+[data-section="campaigns"] { --section-accent: var(--ui-accent-violet); --section-accent-2: var(--ui-accent-indigo); }
+[data-section="delivery"] { --section-accent: var(--ui-accent-blue); --section-accent-2: var(--ui-accent-violet); }
+[data-section="deliverability"] { --section-accent: var(--ui-accent-indigo); --section-accent-2: var(--ui-accent-blue); }
+[data-section="workspace"] { --section-accent: var(--ui-accent-violet); --section-accent-2: var(--ui-accent-cyan); }
+
+.app-shell-header {
+  position: relative;
+}
+.app-shell-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--section-accent, var(--accent)) 28%, transparent), transparent);
+  pointer-events: none;
+}
+.section-nav-icon {
+  color: var(--section-accent, var(--accent));
+  background:
+    radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--section-accent, var(--accent)) 14%, transparent), transparent 65%),
+    linear-gradient(145deg, var(--surface), var(--accent-soft));
+  border-color: color-mix(in srgb, var(--section-accent, var(--accent)) 14%, var(--border));
+}
+.section-nav-kicker {
+  color: color-mix(in srgb, var(--section-accent, var(--accent)) 78%, var(--muted));
+}
+.sidebar-brand-glow {
+  position: relative;
+}
+.sidebar-brand-glow::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 26%, transparent), transparent);
+}
+.ui-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-muted) 82%, var(--surface));
+  border-radius: 10px;
+}
+.ui-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, white 42%, transparent), transparent);
+  animation: ui-shimmer 1.35s ease-in-out infinite;
+}
+.dark .ui-skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent);
+}
+@keyframes ui-shimmer {
+  100% { transform: translateX(100%); }
+}
+.ui-loading-bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 1000;
+  height: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.ui-loading-bar::after {
+  content: "";
+  display: block;
+  width: 35%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2), transparent);
+  animation: ui-loading-sweep 1.1s ease-in-out infinite;
+}
+@keyframes ui-loading-sweep {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(330%); }
+}
+.ui-toast {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--accent-soft));
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(18px);
+}
+.ui-error-panel {
+  border: 1px solid color-mix(in srgb, var(--danger) 22%, var(--border));
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+}
+.ui-empty {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--ui-radius-lg);
+  background: linear-gradient(145deg, var(--surface), color-mix(in srgb, var(--accent-soft) 34%, var(--surface)));
+}
+.ui-focus-ring:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--section-accent, var(--accent)) 70%, transparent);
+  outline-offset: 3px;
+}
+@media (max-width: 767px) {
+  .page-actions {
+    width: 100%;
+  }
+  .page-actions > a,
+  .page-actions > button {
+    min-width: 0;
+  }
+  .section-card-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .data-table-shell {
+    border-radius: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-skeleton::after,
+  .ui-loading-bar::after {
+    animation: none !important;
+  }
+}
