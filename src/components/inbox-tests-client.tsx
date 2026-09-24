@@ -97,7 +97,7 @@ export function InboxTestsClient({ seeds: initialSeeds, campaigns, tests: initia
     <section className="section-card p-5">
       <div className="mb-4"><p className="text-sm font-black">Seed inboxes</p><p className="mt-1 text-xs text-[var(--muted)]">Use inboxes you control across the providers that matter to your audience.</p></div>
       <div className="grid gap-2 md:grid-cols-[1fr_160px_1fr_auto]">
-        <input value={seedEmail} onChange={(e) => setSeedEmail(e.target.value)} placeholder="seed@gmail.com" className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm" />
+        <input value={seedEmail} onChange={(e) => setSeedEmail(e.target.value)} placeholder="seed@example.com" className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm" />
         <select value={seedProvider} onChange={(e) => setSeedProvider(e.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm"><option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="other">Other</option></select>
         <input value={seedLabel} onChange={(e) => setSeedLabel(e.target.value)} placeholder="Label (optional)" className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm" />
         <button disabled={busy} onClick={addSeed} className="btn-secondary">Add seed</button>
