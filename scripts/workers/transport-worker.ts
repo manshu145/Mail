@@ -363,9 +363,14 @@ async function runOnce() {
 
     // Recheck after rendering: a queued contact may have unsubscribed or been
     // suppressed since the policy worker approved this message.
-    const eligibility = await pool.query<{ status: string; contact_status: string; validation_status: string; email: string; consent_status: string; consent_source: string | null; suppressed: boolean }>(`
+    const eligibility = await pool.query<{ status: string; contact_status: string; validation_status: string; email: string; consent_status: string; consent_source: string | null; suppressed: boolean; recipient_domain_valid: boolean }>(`
       select c.status, ct.status as contact_status, ct.validation_status, ct.email, ct.consent_status, ct.consent_source,
-        exists(select 1 from suppressions s where s.normalized_email=ct.normalized_email) as suppressed
+        exists(select 1 from suppressions s where s.normalized_email=ct.normalized_email) as suppressed,
+        exists(
+          select 1 from recipient_domain_health rdh
+          where rdh.domain=lower(split_part(ct.normalized_email,'@',2))
+            and rdh.status='valid'
+        ) as recipient_domain_valid
       from messages m join campaigns c on c.id=m.campaign_id join contacts ct on ct.id=m.contact_id
       where m.id=$1 and m.status='sending'`, [message.id]);
     const latest = eligibility.rows[0];
@@ -374,7 +379,7 @@ async function runOnce() {
       await pool.query(`update messages set status=$2,last_error='campaign_not_sending',attempt_count=greatest(attempt_count-1,0),next_attempt_at=null where id=$1 and status='sending'`, [message.id, latest.status === "cancelled" ? "cancelled" : "ready_for_transport"]);
       continue;
     }
-    if (latest.contact_status !== "active" || !validationAllowsSend(latest.email, latest.validation_status) || latest.suppressed || latest.email !== contact.email || !hasConfirmedConsent({ consentStatus: latest.consent_status, consentSource: latest.consent_source })) {
+    if (latest.contact_status !== "active" || !validationAllowsSend(latest.email, latest.validation_status) || !latest.recipient_domain_valid || latest.suppressed || latest.email !== contact.email || !hasConfirmedConsent({ consentStatus: latest.consent_status, consentSource: latest.consent_source })) {
       await pool.query(`update messages set status='cancelled',last_error='recipient_no_longer_eligible',next_attempt_at=null where id=$1 and status='sending'`, [message.id]);
       await event(message.id, "transport_cancelled", { reason: "recipient_no_longer_eligible" });
       continue;
