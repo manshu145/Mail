@@ -26,14 +26,16 @@ function stage(status:string,lastError:unknown,lastEvent:unknown){
   return status.replaceAll("_"," ");
 }
 
-export default async function MessagesPage({searchParams}:{searchParams:Promise<{q?:string;status?:string}>}){
+export default async function MessagesPage({searchParams}:{searchParams:Promise<{q?:string;status?:string;page?:string}>}){
   const session=await getSession();if(!session)redirect("/login");
-  const {q="",status=""}=await searchParams;
+  const {q="",status="",page:pageParam=""}=await searchParams;
+  const pageSize=100;
+  const page=Math.max(1,Number.isFinite(Number(pageParam))?Math.floor(Number(pageParam)):1);
   const validStatus=statuses.includes(status as typeof statuses[number])?status:"";
   const qWhere=q.trim()?sql`and m.recipient_email ilike ${`%${q.trim()}%`}`:sql``;
   const statusWhere=validStatus?sql`and m.status::text=${validStatus}`:sql``;
 
-  let rows:Array<Record<string,unknown>>=[]; let inFlight=0,delivered=0,failed=0,dbError=false;
+  let rows:Array<Record<string,unknown>>=[]; let inFlight=0,delivered=0,failed=0,totalMessages=0,dbError=false;
   if(databaseConfigured)try{
     const [data,summary]=await Promise.all([
       db.execute(sql`
@@ -44,16 +46,19 @@ export default async function MessagesPage({searchParams}:{searchParams:Promise<
           select e.type,e.payload,e.created_at from message_events e where e.message_id=m.id order by e.created_at desc limit 1
         ) le on true
         where true ${qWhere} ${statusWhere}
-        order by coalesce(le.created_at,m.queued_at) desc limit 250
+        order by coalesce(le.created_at,m.queued_at) desc
+        limit ${pageSize} offset ${(page-1)*pageSize}
       `),
       db.execute(sql`select
         count(*) filter(where status in ('queued','ready_for_transport','sending','mta_accepted','deferred'))::int in_flight,
         count(*) filter(where status='delivered')::int delivered,
-        count(*) filter(where status in ('failed','bounced'))::int failed
-        from messages`)
+        count(*) filter(where status in ('failed','bounced'))::int failed,
+        count(*)::int total
+        from messages
+        where true ${qWhere} ${statusWhere}`)
     ]);
     rows=data.rows as Array<Record<string,unknown>>;
-    const t=(summary.rows[0]||{}) as Record<string,unknown>;inFlight=Number(t.in_flight||0);delivered=Number(t.delivered||0);failed=Number(t.failed||0);
+    const t=(summary.rows[0]||{}) as Record<string,unknown>;inFlight=Number(t.in_flight||0);delivered=Number(t.delivered||0);failed=Number(t.failed||0);totalMessages=Number(t.total||0);
   }catch(error){console.error("[messages]",error);dbError=true}
   const usable=databaseConfigured&&!dbError;
 
@@ -69,6 +74,14 @@ export default async function MessagesPage({searchParams}:{searchParams:Promise<
       {rows.length?<><div className="desktop-table-only overflow-x-auto"><table className="w-full min-w-[1380px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.13em] text-[var(--muted)]"><tr><th className="px-5 py-3.5">Recipient</th><th>Provider</th><th>Status</th><th>Current stage</th><th>Last event</th><th>Last response / detail</th><th>Last update</th><th></th></tr></thead><tbody>{rows.map(row=>{const provider=providerForEmail(String(row.recipient_email));const detail=payloadDetail(row.last_event_payload)||String(row.last_error||"");return <tr key={String(row.id)} className="interactive-row border-t border-[var(--border)] align-top"><td className="px-5 py-4"><Link href={`/messages/${String(row.id)}`} className="font-extrabold hover:text-[var(--accent)]">{String(row.recipient_email)}</Link><div className="mt-1 font-mono text-[10px] text-[var(--muted)]">{String(row.provider_message_id||row.id)}</div></td><td className="text-xs font-bold text-[var(--muted)]">{providerLabel(provider)}</td><td><MessageStatusBadge status={String(row.status)}/></td><td className="text-xs font-black capitalize">{stage(String(row.status),row.last_error,row.last_event_type)}</td><td className="text-xs font-bold">{String(row.last_event_type||"queued").replaceAll("_"," ")}</td><td className="max-w-[360px]"><p title={detail} className="line-clamp-3 break-words text-xs leading-5 text-[var(--muted)]">{detail||"—"}</p></td><td className="whitespace-nowrap text-xs text-[var(--muted)]">{fmt(row.last_event_at||row.queued_at)}</td><td className="pr-5"><div className="flex items-center gap-2"><Link className="btn-secondary px-3 py-2 text-xs" href={`/messages/${String(row.id)}`}>Timeline</Link><MessageActions id={String(row.id)} status={String(row.status)}/></div></td></tr>})}</tbody></table></div>
 
       <div className="mobile-card-list p-3">{rows.map(row=>{const provider=providerForEmail(String(row.recipient_email));const detail=payloadDetail(row.last_event_payload)||String(row.last_error||"");return <article key={String(row.id)} className="panel-soft overflow-hidden"><Link href={`/messages/${String(row.id)}`} className="block p-4"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate text-xs font-black">{String(row.recipient_email)}</p><p className="mt-1 text-[10px] font-bold text-[var(--muted)]">{providerLabel(provider)}</p></div><MessageStatusBadge status={String(row.status)} compact/></div><div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-[var(--surface)] px-3 py-2"><div><p className="text-[9px] font-black uppercase tracking-wide text-[var(--muted)]">Current stage</p><p className="mt-0.5 text-xs font-black capitalize">{stage(String(row.status),row.last_error,row.last_event_type)}</p></div><ArrowUpRight className="h-4 w-4 text-[var(--accent)]"/></div>{detail?<p className="mt-3 line-clamp-2 text-[10px] leading-4 text-[var(--muted)]">{detail}</p>:null}<p className="mt-2 text-[10px] text-[var(--muted)]">Updated {fmt(row.last_event_at||row.queued_at)}</p></Link><div className="border-t border-[var(--border)] p-2"><MessageActions id={String(row.id)} status={String(row.status)}/></div></article>})}</div></>:<div className="grid min-h-64 place-items-center p-8 text-center"><div><Send className="mx-auto h-8 w-8 text-[var(--muted)]"/><h3 className="mt-4 font-black">No matching messages</h3></div></div>}
+    \${totalMessages>pageSize ? <div className="flex flex-col gap-3 border-t border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-[11px] font-bold text-[var(--muted)]">Showing \${((page-1)*pageSize)+1}–\${Math.min(page*pageSize,totalMessages)} of \${totalMessages.toLocaleString()} messages</p>
+      <div className="flex items-center gap-2">
+        \${page>1 ? <Link href={{query:{...(q?{q}:{}),...(validStatus?{status:validStatus}:{}),page:String(page-1)}}} className="btn-secondary px-3 py-2 text-xs">Previous</Link> : <span className="btn-secondary cursor-not-allowed px-3 py-2 text-xs opacity-50">Previous</span>}
+        <span className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px] font-black">Page \${page} / \${Math.ceil(totalMessages/pageSize)}</span>
+        \${page*pageSize<totalMessages ? <Link href={{query:{...(q?{q}:{}),...(validStatus?{status:validStatus}:{}),page:String(page+1)}}} className="btn-secondary px-3 py-2 text-xs">Next</Link> : <span className="btn-secondary cursor-not-allowed px-3 py-2 text-xs opacity-50">Next</span>}
+      </div>
+    </div> : null}
     </section>
   </AppShell>;
 }
