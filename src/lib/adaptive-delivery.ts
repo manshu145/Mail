@@ -37,7 +37,7 @@ export function decideAdaptiveDelivery(input: {
   const earlySample = total >= input.config.reputationMinSample
     ? input.config.reputationMinSample
     : Math.min(total, Math.max(20, Math.ceil(total * 0.5)));
-  if (input.released < total && input.sample >= earlySample && bounceRate >= input.config.bounceStopRate) {
+  if (input.config.bounceStopRate > 0 && input.released < total && input.sample >= earlySample && bounceRate >= input.config.bounceStopRate) {
     return { phase, releaseLimit, state: "paused", bounceRate, paused: true, reason: "hard_bounce_rate_stop" };
   }
 
@@ -52,7 +52,7 @@ export function decideAdaptiveDelivery(input: {
   }
 
   const nextBatch = phase === 0 ? input.config.secondBatch : phase === 1 ? input.config.thirdBatch : total;
-  if (bounceRate >= input.config.bounceWarnRate) {
+  if (input.config.bounceWarnRate > 0 && bounceRate >= input.config.bounceWarnRate) {
     releaseLimit = Math.min(total, releaseLimit + Math.max(10, Math.floor(nextBatch * 0.1)));
     return { phase, releaseLimit, state: "slowed", bounceRate, paused: false, reason: "hard_bounce_rate_slowdown" };
   }
