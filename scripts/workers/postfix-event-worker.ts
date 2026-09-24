@@ -203,7 +203,9 @@ async function main() {
   while (!stopping) {
     const lock = await pool.connect();
     try {
-      const result = await lock.query("select pg_try_advisory_lock(734201,2) as acquired");
+      // Reconciliation has its own lock so campaign scheduling cannot starve
+      // while Postfix logs are being ingested or cooldown queues evacuated.
+      const result = await lock.query("select pg_try_advisory_lock(734201,4) as acquired");
       if (result.rows[0].acquired) await runOnce();
     } catch (error) {
       console.error("[postfix-event-worker]", error);
