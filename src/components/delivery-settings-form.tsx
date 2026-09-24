@@ -8,14 +8,14 @@ type Section = "Reputation protection" | "Sending limits" | "Multi-campaign deli
 type Field = { key:keyof DeliverySettings; label:string; help:string; section:Section; step?:string; min?:string; max?:string; display?:"percent" };
 
 const fields: Field[] = [
-  { key:"reputationBounceStopRate", section:"Reputation protection", label:"Pause sender at bounce rate (%)", help:"Automatically pause a sender when its 24-hour bounce rate reaches this level.", step:"0.01", display:"percent" },
-  { key:"reputationComplaintStopRate", section:"Reputation protection", label:"Pause sender at complaint rate (%)", help:"Automatically pause a sender when complaint rate reaches this level.", step:"0.01", display:"percent" },
+  { key:"reputationBounceStopRate", section:"Reputation protection", label:"Pause sender at bounce rate (%)", help:"Automatically pause a sender when its 24-hour bounce rate reaches this level. 0 = disabled.", step:"0.01", display:"percent" },
+  { key:"reputationComplaintStopRate", section:"Reputation protection", label:"Pause sender at complaint rate (%)", help:"Automatically pause a sender when complaint rate reaches this level. 0 = disabled.", step:"0.01", display:"percent" },
   { key:"reputationMinSample", section:"Reputation protection", label:"Minimum sample before auto-pause", help:"Reputation thresholds are ignored until at least this many messages are observed." },
   { key:"providerCooldownMinutes", section:"Reputation protection", label:"Provider cooldown / probe interval (minutes)", help:"When a provider applies temporary pressure, NexiMail holds only that provider and probes again after this interval. Allowed range: 1–60 minutes.", min:"1", max:"60" },
   { key:"canaryInitialBatch", section:"Reputation protection", label:"Adaptive first batch", help:"Recipients released first for a larger campaign before delivery health is evaluated." },
   { key:"canarySecondBatch", section:"Reputation protection", label:"Second ramp batch", help:"Additional recipients released after the first batch has healthy outcomes." },
   { key:"canaryThirdBatch", section:"Reputation protection", label:"Third ramp batch", help:"Additional recipients released before the remaining audience is opened." },
-  { key:"canaryBounceWarnRate", section:"Reputation protection", label:"Canary slowdown bounce rate (%)", help:"Slow the next ramp when observed hard-bounce rate reaches this internal safety threshold.", step:"0.01", display:"percent" },
+  { key:"canaryBounceWarnRate", section:"Reputation protection", label:"Canary slowdown bounce rate (%)", help:"Slow the next ramp when observed hard-bounce rate reaches this internal safety threshold. 0 = disabled.", step:"0.01", display:"percent" },
 
   { key:"maxPerSecond", section:"Sending limits", label:"Maximum sends per second", help:"Global release speed. Lower values are gentler; higher values require stronger reputation and capacity." },
   { key:"maxRecipientsPerCampaign", section:"Sending limits", label:"Recipients per campaign", help:"0 = unlimited. Use a value only when you want a hard campaign-size ceiling." },
