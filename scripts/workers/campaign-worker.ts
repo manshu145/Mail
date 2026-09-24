@@ -109,6 +109,7 @@ async function runOnce() {
       if (!list) { await blockCampaign(campaign.id, "campaign.worker_list_not_found", { listId: campaign.listId }); blocked++; continue; }
 
       const preflight = await preflightAudience(list);
+      const targetCount = campaign.sendOnlyValidated ? preflight.validCount : preflight.eligibleCount;
       if (!campaign.sendingAccountId || !campaign.templateId) {
         await blockCampaign(campaign.id, "campaign.worker_delivery_configuration_missing", {});
         blocked++;
@@ -177,12 +178,12 @@ async function runOnce() {
         continue;
       }
 
-      if (campaignLimit !== null && preflight.eligibleCount > campaignLimit) {
-        await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { eligibleRecipients: preflight.eligibleCount, limit: campaignLimit, runtimeLimit, deliveryLimit: delivery.maxRecipientsPerCampaign });
+      if (campaignLimit !== null && targetCount > campaignLimit) {
+        await blockCampaign(campaign.id, "campaign.recipient_limit_blocked", { eligibleRecipients: targetCount, limit: campaignLimit, runtimeLimit, deliveryLimit: delivery.maxRecipientsPerCampaign });
         blocked++;
         continue;
       }
-      if (!preflight.eligibleCount) {
+      if (!targetCount) {
         await blockCampaign(campaign.id, "campaign.worker_no_eligible_recipients", {
           rawCount: preflight.rawCount,
           suppressedCount: preflight.suppressedCount,
@@ -196,9 +197,10 @@ async function runOnce() {
         const [current] = await tx.select({ status: campaigns.status }).from(campaigns).where(eq(campaigns.id, campaign.id)).for("update");
         if (current?.status !== "sending") return;
         const selection = await audienceSelection(list);
+        const validationFilter = campaign.sendOnlyValidated ? sql`and validation_status in ('valid','accepted')` : sql``;
         await tx.execute(sql`insert into messages(campaign_id,contact_id,recipient_email,status)
           select ${campaign.id}::uuid, contact_id, email, 'queued'::message_status from (${selection}) audience
-          where not suppressed and send_eligible
+          where not suppressed and send_eligible ${validationFilter}
           on conflict(campaign_id,contact_id) do nothing`);
         const [counts] = await tx.select({ count: sql<number>`count(*)::int` }).from(messages).where(eq(messages.campaignId, campaign.id));
         if (!Number(counts?.count || 0)) throw new Error("No eligible recipients remain at snapshot time");
@@ -210,6 +212,7 @@ async function runOnce() {
           entityId: campaign.id,
           metadataJson: JSON.stringify({
             listId: list.id,
+            sendOnlyValidated: campaign.sendOnlyValidated,
             rawCount: preflight.rawCount,
             eligibleCount: preflight.eligibleCount,
             suppressedCount: preflight.suppressedCount,
@@ -222,7 +225,7 @@ async function runOnce() {
           }),
         });
       });
-      resolved += preflight.eligibleCount;
+      resolved += targetCount;
       excluded += preflight.suppressedCount + preflight.invalidCount;
     } catch (error) {
       console.error(`[campaign-worker] failed campaign ${campaignId}`, error);
