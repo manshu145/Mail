@@ -192,9 +192,28 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
       and m.status in ('ready_for_transport','deferred')
       and (m.next_attempt_at is null or m.next_attempt_at <= now())
     returning m.id,m.attempt_count,m.recipient_email`, [claimBatch,campaignBurstPerRound]);
-  const counts = new Map<string, number>();
-  for (const row of result.rows) { const p = providerForEmail(row.recipient_email); counts.set(p, (counts.get(p) || 0) + 1); }
-  return result.rows.sort((a,b) => (counts.get(providerForEmail(b.recipient_email)) || 0) - (counts.get(providerForEmail(a.recipient_email)) || 0));
+  const buckets = new Map<string, Claimed[]>();
+  for (const row of result.rows) {
+    const provider = providerForEmail(row.recipient_email);
+    const bucket = buckets.get(provider) || [];
+    bucket.push(row);
+    buckets.set(provider, bucket);
+  }
+  const providers = [...buckets.keys()].sort((a,b) => a.localeCompare(b));
+  const ordered: Claimed[] = [];
+  let remaining = result.rows.length;
+  while (remaining > 0) {
+    let added = false;
+    for (const provider of providers) {
+      const bucket = buckets.get(provider);
+      if (!bucket?.length) continue;
+      ordered.push(bucket.shift()!);
+      remaining--;
+      added = true;
+    }
+    if (!added) break;
+  }
+  return ordered;
 }
 async function markDeferred(id: string, attempt: number, error: unknown, settings: DeliverySettings) {
   const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error";
