@@ -89,11 +89,13 @@ async function runOnce() {
     where status='sending'
   `);
   const activeCampaigns = Number(activeResult.rows[0]?.total || 0);
-  const schedulerCap = delivery.maxConcurrentCampaigns > 0 ? delivery.maxConcurrentCampaigns : null;
-  const availableCampaignSlots = schedulerCap === null
-    ? claimBatch
-    : Math.max(0, schedulerCap - activeCampaigns);
-  const claimedIds = await claimDueCampaigns(Math.min(claimBatch, availableCampaignSlots));
+  // Campaign count is not a sending quota. Every due campaign can enter
+  // the scheduler; claimBatch is only the per-cycle database backpressure
+  // boundary. Held/provider-blocked campaigns therefore do not consume a
+  // permanent scheduler slot.
+  const schedulerCap = null;
+  const availableCampaignSlots = claimBatch;
+  const claimedIds = await claimDueCampaigns(claimBatch);
   let resolved = 0;
   let excluded = 0;
   let blocked = 0;
