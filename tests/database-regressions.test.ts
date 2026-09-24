@@ -34,6 +34,8 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
       ('invalid@example.com','invalid@example.com','confirmed','form','invalid'),
       ('waiting@gmail.com','waiting@gmail.com','confirmed','form','pending'),
       ('pending@example.com','pending@example.com','confirmed','form','pending'),
+      ('unknown@example.com','unknown@example.com','confirmed','form','unknown'),
+      ('error@example.com','error@example.com','confirmed','form','error'),
       ('unconfirmed@example.com','unconfirmed@example.com','unconfirmed',null,'valid');
       insert into suppressions(email,normalized_email,reason,source) values('blocked@example.com','blocked@example.com','unsubscribe','test');`);
     await pg.query("insert into contact_lists(contact_id,list_id) select id,$1::uuid from contacts", [list.id]);
@@ -47,6 +49,10 @@ test("migrated database: analytics, SQL audiences, and atomic Postfix recovery",
     const pendingCustom = await orm.execute(sql`select * from (${selection}) a where email='pending@example.com'`);
     assert.equal(pendingCustom.rows[0].send_eligible, false);
     assert.equal(pendingCustom.rows[0].awaiting_validation, true);
+    for (const email of ['unknown@example.com', 'error@example.com']) {
+      const inconclusive = await orm.execute(sql`select * from (${selection}) a where email=${email}`);
+      assert.equal(inconclusive.rows[0].send_eligible, false, `${email} must remain out of transport until positively validated`);
+    }
     await pg.exec("insert into campaigns(name,subject,status) values('test','test','sending')");
     await orm.execute(sql`insert into messages(campaign_id,contact_id,recipient_email,status)
       select (select id from campaigns limit 1),contact_id,email,'queued'::message_status from (${selection}) a
