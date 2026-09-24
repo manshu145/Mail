@@ -12,6 +12,7 @@ import { campaignDeliverySafety, campaignPreflights } from "@/db/campaign-ops-sc
 import { campaigns, lists, sendingAccounts, templates } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getRuntimePolicy } from "@/lib/runtime-policy";
+import { readDeliverySettings } from "@/lib/delivery-settings";
 import { getCampaignMetrics } from "@/lib/campaign-reporting";
 import { providerLabel } from "@/lib/provider";
 
@@ -221,6 +222,12 @@ export default async function CampaignDetailPage({
           ? {title:"Campaign queued",detail:"The audience snapshot is ready and delivery is waiting to start. Editing is locked."}
           : {title:"Campaign read-only",detail:"Editing is unavailable for this campaign state."};
   const runtimePolicy=getRuntimePolicy();
+  const deliverySettings=await readDeliverySettings();
+  const effectiveCampaignLimit=runtimePolicy.maxRecipientsPerCampaign===null
+    ? (deliverySettings.maxRecipientsPerCampaign>0 ? deliverySettings.maxRecipientsPerCampaign : null)
+    : (deliverySettings.maxRecipientsPerCampaign>0
+      ? Math.min(runtimePolicy.maxRecipientsPerCampaign,deliverySettings.maxRecipientsPerCampaign)
+      : runtimePolicy.maxRecipientsPerCampaign);
   const inFlight=metrics?metrics.queued+metrics.ready+metrics.sending+metrics.accepted+metrics.deferred:0;
 
   const cardData=metrics?[
@@ -305,7 +312,7 @@ export default async function CampaignDetailPage({
       </section>
     </>:null}
 
-    {editable?<section className="premium-panel p-3 sm:p-5 lg:p-6"><CampaignEditor campaign={{...campaign,scheduledAt:campaign.scheduledAt?.toISOString()||null}} lists={listRows} templates={templateRows} accounts={accountRows} runtimePolicy={{mode:runtimePolicy.mode,sendingEnabled:runtimePolicy.sendingEnabled,maxRecipientsPerCampaign:runtimePolicy.maxRecipientsPerCampaign}}/></section>:<section className="premium-panel p-4 sm:p-6"><div className="grid min-h-32 place-items-center text-center"><div><CircleGauge className="mx-auto h-8 w-8 text-[var(--muted)]"/><h2 className="mt-4 font-black">{readOnlyState.title}</h2><p className="mt-1 text-sm text-[var(--muted)]">{readOnlyState.detail}</p></div></div></section>}
+    {editable?<section className="premium-panel p-3 sm:p-5 lg:p-6"><CampaignEditor campaign={{...campaign,scheduledAt:campaign.scheduledAt?.toISOString()||null}} lists={listRows} templates={templateRows} accounts={accountRows} runtimePolicy={{mode:runtimePolicy.mode,sendingEnabled:runtimePolicy.sendingEnabled,maxRecipientsPerCampaign:effectiveCampaignLimit}}/></section>:<section className="premium-panel p-4 sm:p-6"><div className="grid min-h-32 place-items-center text-center"><div><CircleGauge className="mx-auto h-8 w-8 text-[var(--muted)]"/><h2 className="mt-4 font-black">{readOnlyState.title}</h2><p className="mt-1 text-sm text-[var(--muted)]">{readOnlyState.detail}</p></div></div></section>}
 
     {links.length?<section className="premium-panel mt-5 overflow-hidden"><div className="border-b border-[var(--border)] p-5"><h2 className="font-black">Clicked links</h2><p className="mt-1 text-xs text-[var(--muted)]">Click a URL row to see exactly who clicked it.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-[var(--surface-soft)] text-[10px] font-black uppercase tracking-[.12em] text-[var(--muted)]"><tr><th className="px-5 py-3">URL</th><th>Unique clickers</th><th>Total clicks</th></tr></thead><tbody>{links.map((row,i)=>{const url=String(row.url||"");return <tr className="border-t border-[var(--border)] transition hover:bg-[var(--surface-soft)]" key={`${url}-${i}`}><td className="max-w-[620px] truncate px-5 py-3.5"><Link className="font-semibold text-violet-600 hover:underline" href={drillHref("clicks",1,url)}>{url}</Link></td><td>{Number(row.unique_clickers||0).toLocaleString()}</td><td>{Number(row.clicks||0).toLocaleString()}</td></tr>})}</tbody></table></div></section>:null}
 
