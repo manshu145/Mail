@@ -34,6 +34,9 @@ function friendlyValidationDetail(detail: string | null) {
   if (value.includes("timeout") || value.includes("connection_failed")) {
     return { label: "Temporary validation issue", note: "The mailbox was not conclusively checked." };
   }
+  if (value.includes("mx_present_mailbox_unverified")) {
+    return { label: "MX reachable — mailbox unverified", note: "The recipient domain has working MX records, but NexiMail Internal does not probe the mailbox itself. Use Smart Hybrid or SuperSend for a mailbox-level verdict." };
+  }
   if (value.includes("supersend_v2_risky")) {
     return { label: "Risky / inconclusive", note: "SuperSend did not return a final valid or invalid verdict." };
   }
