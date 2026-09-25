@@ -84,9 +84,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, paused: true });
   }
   if (body.action === "resume") {
+    // Resume the existing job using the currently configured validation mode.
+    // This prevents a pre-hardening job from silently continuing with its
+    // legacy mode after the validation pipeline has been changed.
+    let resumeMode: ReturnType<typeof normalizeValidationMode>;
+    try {
+      resumeMode = await selectedValidationMode();
+    } catch (error) {
+      return NextResponse.json({
+        error: error instanceof Error ? error.message : "Validation provider configuration is unavailable.",
+      }, { status: 409 });
+    }
+
+    const active = await activeJob();
+    if (active) {
+      await db.update(validationJobs)
+        .set({ validationMode: resumeMode })
+        .where(eq(validationJobs.id, active.id));
+    }
+
     await setPaused(false);
-    await audit("validation.resumed", session, "validation", undefined, {});
-    return NextResponse.json({ ok: true, paused: false });
+    await audit("validation.resumed", session, "validation", undefined, {
+      activeJobId: active?.id,
+      validationMode: resumeMode,
+      safety: "resumed_with_current_validation_pipeline",
+    });
+    return NextResponse.json({
+      ok: true,
+      paused: false,
+      validationMode: resumeMode,
+      activeJobId: active?.id ?? null,
+    });
   }
 
   const active = await activeJob();
