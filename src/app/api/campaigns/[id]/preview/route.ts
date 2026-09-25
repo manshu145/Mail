@@ -23,7 +23,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const { id } = await params;
   if (!isUuid(id)) return NextResponse.json({ error: "Invalid resource id." }, { status: 400 });
-  const body = await request.json().catch(() => null) as { listId?: string; templateId?: string; sendingAccountId?: string; subject?: string } | null;
+  const body = await request.json().catch(() => null) as { listId?: string; templateId?: string; sendingAccountId?: string; subject?: string; validationPolicy?: string } | null;
   if (!body) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
   const [campaign] = await db.select({ id: campaigns.id, subject: campaigns.subject }).from(campaigns).where(eq(campaigns.id, id)).limit(1);
@@ -40,7 +40,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!list) return NextResponse.json({ error: "Audience not found." }, { status: 404 });
   if (!template) return NextResponse.json({ error: "Template not found." }, { status: 404 });
 
-  const audience = await preflightAudience(list);
+  const validationPolicy = body.validationPolicy === "previously_validated" || body.validationPolicy === "bypass_unvalidated" ? "bypass_unvalidated" : "standard";
+  const audience = await preflightAudience(list, validationPolicy);
   const recipient = "alex.customer@example.com";
   const html = samplePersonalization(template.htmlBody || "", recipient).replaceAll("{{unsubscribe_url}}", "#unsubscribe");
   const text = samplePersonalization(template.textBody || "", recipient).replaceAll("{{unsubscribe_url}}", "https://example.com/unsubscribe");
