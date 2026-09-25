@@ -40,6 +40,7 @@ export function ValidationControls({
   const [providerKey, setProviderKey] = useState("");
   const [providerBusy, setProviderBusy] = useState(false);
   const [providerMessage, setProviderMessage] = useState("");
+  const [providerTestBusy, setProviderTestBusy] = useState(false);
   const [providerMode, setProviderMode] = useState<ValidationMode>("internal");
   const [providerModeBusy, setProviderModeBusy] = useState(false);
 
@@ -92,6 +93,21 @@ export function ValidationControls({
       setProviderMode(d.mode || mode); setProviderMessage("Validation mode updated for new jobs."); router.refresh();
     } catch { setProviderMessage("Could not reach NexiMail."); }
     finally { setProviderModeBusy(false); }
+  }
+
+  async function testProviderConnection() {
+    setProviderTestBusy(true); setProviderMessage("");
+    try {
+      const r = await fetch("/api/validation/provider", {
+        method: "POST",
+        headers: {"content-type":"application/json"},
+        body: JSON.stringify({action:"test"}),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setProviderMessage(d.error || "SuperSend connection test failed."); return; }
+      setProviderMessage("SuperSend connection verified. API key is accepted.");
+    } catch { setProviderMessage("Could not reach NexiMail."); }
+    finally { setProviderTestBusy(false); }
   }
 
   async function removeProviderKey() {
@@ -249,7 +265,7 @@ export function ValidationControls({
           <div className="p-4 sm:p-5">
             <div className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface-soft)] p-3"><div><p className="text-[9px] font-black uppercase text-[var(--muted)]">Status</p><p className="mt-1 text-sm font-black">{providerConfigured === null ? "Checking…" : providerConfigured ? "Configured" : "Not configured"}</p></div><span className={`rounded-full px-2.5 py-1 text-[8px] font-black uppercase ${providerConfigured ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>{providerConfigured ? providerSource === "workspace" ? "Workspace" : "Environment" : "Optional"}</span></div>
             {providerConfigured && providerHint ? <p className="mt-3 truncate rounded-lg bg-[var(--surface-soft)] px-3 py-2 font-mono text-[10px] text-[var(--muted)]">{providerHint}</p> : null}
-            {providerManage ? <div className="mt-3 space-y-2"><input type="password" autoComplete="new-password" value={providerKey} onChange={e=>setProviderKey(e.target.value)} placeholder={providerConfigured ? "Replace API key" : "Paste SuperSend API key"} className="form-control"/><div className="flex gap-2"><button disabled={providerBusy || !providerKey.trim()} onClick={()=>void saveProviderKey()} className="btn-primary !min-h-10 flex-1">{providerBusy ? "Saving…" : providerConfigured ? "Replace key" : "Save key"}</button>{providerSource === "workspace" ? <button disabled={providerBusy} onClick={()=>void removeProviderKey()} className="btn-danger !min-h-10 !px-3" aria-label="Remove key"><Trash2 className="h-4 w-4"/></button> : null}</div></div> : <p className="mt-3 text-[10.5px] text-[var(--muted)]">Owner access is required to manage the provider.</p>}
+            {providerManage ? <div className="mt-3 space-y-2"><input type="password" autoComplete="new-password" value={providerKey} onChange={e=>setProviderKey(e.target.value)} placeholder={providerConfigured ? "Replace API key" : "Paste SuperSend API key"} className="form-control"/><div className="flex gap-2"><button disabled={providerBusy || !providerKey.trim()} onClick={()=>void saveProviderKey()} className="btn-primary !min-h-10 flex-1">{providerBusy ? "Saving…" : providerConfigured ? "Replace key" : "Save key"}</button>{providerConfigured ? <button disabled={providerBusy || providerTestBusy} onClick={()=>void testProviderConnection()} className="btn-secondary !min-h-10 !px-3">{providerTestBusy ? "Testing…" : "Test"}</button> : null}{providerSource === "workspace" ? <button disabled={providerBusy || providerTestBusy} onClick={()=>void removeProviderKey()} className="btn-danger !min-h-10 !px-3" aria-label="Remove key"><Trash2 className="h-4 w-4"/></button> : null}</div></div> : <p className="mt-3 text-[10.5px] text-[var(--muted)]">Owner access is required to manage the provider.</p>}
             {providerMessage ? <p className="mt-3 text-[10.5px] font-bold text-[var(--muted)]">{providerMessage}</p> : null}
           </div>
         </div>
