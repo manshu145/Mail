@@ -182,7 +182,8 @@ export function ValidationControls({
               <div className="grid grid-cols-3 gap-2 text-center">
                 {[[`Done`,activeJob.processedRows.toLocaleString()],[`Remaining`,remaining.toLocaleString()],[`Progress`,`${progress.toFixed(1)}%`]].map(([l,v]) => <div key={l} className="min-w-[72px] rounded-xl border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2"><p className="text-[8px] font-black uppercase text-[var(--muted)]">{l}</p><p className="mt-1 text-xs font-black">{v}</p></div>)}
               </div>
-              <button disabled={busy} onClick={()=>void act(paused ? "resume" : "cancel")} className={`inline-flex min-h-10 items-center gap-2 rounded-xl px-3 text-[11px] font-black ${paused ? "btn-secondary" : "btn-danger"}`}>{paused ? <Play className="h-3.5 w-3.5"/> : <Trash2 className="h-3.5 w-3.5"/>}{paused ? "Resume" : "Cancel"}</button>
+              {!paused ? <button disabled={busy} onClick={()=>void act("pause")} className="btn-secondary inline-flex min-h-10 items-center gap-2 rounded-xl px-3 text-[11px] font-black"><Pause className="h-3.5 w-3.5"/>Pause</button> : <button disabled={busy} onClick={()=>void act("resume")} className="btn-secondary inline-flex min-h-10 items-center gap-2 rounded-xl px-3 text-[11px] font-black"><Play className="h-3.5 w-3.5"/>Resume</button>}
+              <button disabled={busy} onClick={()=>void act("cancel")} className="btn-danger inline-flex min-h-10 items-center gap-2 rounded-xl px-3 text-[11px] font-black"><Trash2 className="h-3.5 w-3.5"/>Cancel</button>
             </div>
           </div>
           <div className="h-1 bg-[var(--border)]"><div className="h-full bg-violet-500 transition-all" style={{width:`${progress}%`}}/></div>
@@ -194,7 +195,7 @@ export function ValidationControls({
       <section>
         <div className="mb-3 flex items-end justify-between gap-3">
           <div><p className="page-eyebrow">Start validation</p><h2 className="section-title mt-1">Choose what to validate</h2></div>
-          {!activeJob ? <button disabled={busy || unresolved === 0 || quotaReached} onClick={()=>void act(paused ? "resume" : "start_pending")} className="btn-primary !min-h-10 !px-4"><RotateCcw className="h-3.5 w-3.5"/>{paused ? "Resume engine" : "Validate unresolved"}</button> : null}
+          <button disabled={busy || !!activeJob || unresolved === 0 || quotaReached} onClick={()=>void act(paused ? "resume" : "start_pending")} className="btn-primary !min-h-10 !px-4"><Play className="h-3.5 w-3.5"/>{paused ? "Resume engine" : "Start validation"}</button>
         </div>
         <div className="grid gap-3 lg:grid-cols-3">
           {actionCard(<SearchCheck className="h-5 w-5"/>, "Single contact", "Instantly queue one address for validation.",
