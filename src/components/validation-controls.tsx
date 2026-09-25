@@ -148,7 +148,8 @@ export function ValidationControls({
     } finally { setProviderBusy(false); }
   }
 
-  async function act(action: "start_pending"|"start_import"|"start_list"|"start_single"|"pause"|"resume") {
+  async function act(action: "start_pending"|"start_import"|"start_list"|"start_single"|"pause"|"resume"|"cancel") {
+    if (action === "cancel" && !window.confirm("Cancel the active validation job? Completed results will be kept and the job will not resume.")) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch("/api/validation/control", {
@@ -159,6 +160,7 @@ export function ValidationControls({
       const data = await response.json().catch(() => ({})) as { error?: string; total?: number };
       if (!response.ok) { setError(data.error || "Validation action failed."); return; }
       if (action === "pause") setNotice("Validation paused after the current check.");
+      else if (action === "cancel") setNotice("Validation job cancelled. Completed results were kept.");
       else if (action === "resume") setNotice("Validation resumed.");
       else setNotice("Validation queued" + (data.total ? " for " + data.total.toLocaleString() + " contact" + (data.total === 1 ? "" : "s") : "") + ".");
       if (action === "start_single") setEmail("");
@@ -184,12 +186,14 @@ export function ValidationControls({
         <div className="min-w-0">
           <p className="page-eyebrow">Validation control</p>
           <h2 className="section-title mt-1">Mailbox checks</h2>
-          <p className="section-subtitle max-w-2xl">Run bulk or single-contact validation without losing the active job. Provider-aware pacing, safety holds and retries stay automatic.</p>
+          <p className="section-subtitle max-w-2xl">Run bulk or single-contact validation with safe cancellation. Provider-aware pacing, safety holds and retries stay automatic.</p>
         </div>
         <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          {paused
-            ? <button disabled={busy} type="button" onClick={() => act("resume")} className="btn-secondary !min-h-10 !px-3"><Play className="h-3.5 w-3.5"/> Resume</button>
-            : <button disabled={busy || quotaReached} type="button" onClick={() => act("pause")} className="btn-secondary !min-h-10 !px-3"><Pause className="h-3.5 w-3.5"/> Pause</button>}
+          {activeJob
+            ? <button disabled={busy} type="button" onClick={() => act("cancel")} className="btn-danger !min-h-10 !px-3"><Trash2 className="h-3.5 w-3.5"/> Cancel validation</button>
+            : paused
+              ? <button disabled={busy} type="button" onClick={() => act("resume")} className="btn-secondary !min-h-10 !px-3"><Play className="h-3.5 w-3.5"/> Resume</button>
+              : <button disabled={busy || quotaReached} type="button" onClick={() => act("pause")} className="btn-secondary !min-h-10 !px-3"><Pause className="h-3.5 w-3.5"/> Pause</button>
           <button disabled={busy || !!activeJob || unresolved === 0 || !validationReady} type="button" onClick={() => act("start_pending")} className="btn-primary !min-h-10 !px-3"><RotateCcw className="h-3.5 w-3.5"/> Validate unresolved</button>
         </div>
       </div>
@@ -243,7 +247,7 @@ export function ValidationControls({
         </div>
         <div className="grid gap-2.5 p-3 sm:p-4 md:grid-cols-3">
           {([
-            ["internal","NexiMail Internal","No external credits","Syntax + MX + direct SMTP RCPT checks, with provider-aware pacing and holds."],
+            ["internal","NexiMail Internal","No external credits","Syntax + MX only. Mailbox-level checks use SuperSend or delivery evidence."],
             ["hybrid","Smart Hybrid","Credit-saving fallback","NexiMail checks first. Only unresolved results use SuperSend fallback."],
             ["supersend","SuperSend Primary","External provider","Every new validation check goes through SuperSend and uses provider credits."],
           ] as Array<[ValidationMode,string,string,string]>).map(([mode,title,badge,body])=>{
@@ -305,8 +309,8 @@ export function ValidationControls({
           {[
             ["Provider-aware","Major mailbox providers use separate lanes, pacing and backoff so one provider cannot stall the whole validation job."],
             ["Safe invalids","Only explicit mailbox-missing or invalid-domain evidence becomes Invalid and is suppressed."],
-            ["Temporary holds","Banner, HELO, MAIL FROM and connection failures pause that provider; untouched recipients are retried instead of falsely classified."],
-            ["Bounded probes","DNS and SMTP checks have deadlines, preventing one stalled network operation from freezing bulk progress."],
+            ["Temporary holds","DNS/MX checks never probe recipient SMTP servers. External mailbox validation and delivery evidence remain the mailbox-level sources."],
+            ["Bounded probes","DNS checks have deadlines, preventing one stalled network operation from freezing bulk progress."],
           ].map(([title,body],index)=><div key={title} className={`p-4 ${index>0?"border-t border-[var(--border)] sm:border-t-0":""} ${index%2===1?"sm:border-l sm:border-[var(--border)]":""} ${index>=2?"sm:border-t sm:border-[var(--border)]":""}`}><div className="flex items-start gap-3"><div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-700 dark:text-violet-300">{index===0?<Gauge className="h-3.5 w-3.5"/>:index===1?<ShieldCheck className="h-3.5 w-3.5"/>:index===2?<TimerReset className="h-3.5 w-3.5"/>:<Activity className="h-3.5 w-3.5"/>}</div><div><p className="text-[11px] font-black">{title}</p><p className="mt-1 text-[10.5px] leading-4.5 text-[var(--muted)]">{body}</p></div></div></div>)}
         </div>
       </section>
