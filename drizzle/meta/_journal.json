@@ -281,6 +281,13 @@
       "when": 1790328000000,
       "tag": "0039_campaign_validation_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790322862390,
+      "tag": "0040_validation_job_cancellation",
+      "breakpoints": true
     }
   ]
 }
