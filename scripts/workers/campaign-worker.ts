@@ -198,7 +198,7 @@ async function runOnce() {
         const [current] = await tx.select({ status: campaigns.status }).from(campaigns).where(eq(campaigns.id, campaign.id)).for("update");
         if (current?.status !== "sending") return;
         const selection = await audienceSelection(list, db, validationPolicy);
-        const validationFilter = campaign.sendOnlyValidated ? sql`and validation_status in ('valid','accepted')` : sql``;
+        const validationFilter = campaign.sendOnlyValidated ? sql`and validation_status = 'valid'` : sql``;
         await tx.execute(sql`insert into messages(campaign_id,contact_id,recipient_email,status)
           select ${campaign.id}::uuid, contact_id, email, 'queued'::message_status from (${selection}) audience
           where not suppressed and send_eligible ${validationFilter}
