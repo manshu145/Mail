@@ -136,7 +136,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     const timer = window.setTimeout(() => void loadPreview(true), 350);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listId, templateId, accountId, subject]);
+  }, [listId, templateId, accountId, subject, validationPolicy, sendOnlyValidated]);
 
   async function submit(formData: FormData, action: CampaignAction) {
     setError(""); setNotice("");
