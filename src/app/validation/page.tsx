@@ -16,26 +16,23 @@ function resultClass(status: string) {
 function friendlyValidationDetail(detail: string | null) {
   const value = String(detail || "").toLowerCase();
   if (!value) return { label: "No detail", note: "" };
-  if (value.includes("smtp_rcpt_250") || value.includes("supersend_v2_valid")) {
+  if (value.includes("supersend_v2_valid") || value.includes("historical_successful_delivery")) {
     return { label: "Mailbox accepted", note: "The recipient server/provider returned a positive validation result." };
   }
-  if (value.includes("5.1.1") || value.includes("user_unknown") || value.includes("no_such_user") || value.includes("mailbox_not_found") || value.includes("supersend_v2_invalid")) {
+  if (value.includes("5.1.1") || value.includes("user_unknown") || value.includes("no_such_user") || value.includes("mailbox_not_found") || value.includes("supersend_v2_invalid") || value.includes("historical_hard_failure")) {
     return { label: "Mailbox not found", note: "The provider returned an explicit invalid-mailbox result." };
   }
-  if (value.startsWith("smtp_banner_") || value.startsWith("smtp_helo_") || value.startsWith("smtp_mail_from_")) {
-    return { label: "Provider blocked the probe", note: "The mailbox was not evaluated. NexiMail will retry after the provider hold." };
-  }
-  if (value.includes("smtp_rcpt_4") || value.includes("temporary_or_policy")) {
+  if (value.includes("temporary_or_policy")) {
     return { label: "Temporary provider deferral", note: "The provider deferred this check. This is not an invalid mailbox result." };
   }
   if (value.includes("provider_hold_active")) {
-    return { label: "Provider temporarily held", note: "NexiMail paused new probes for this provider and will resume after the safety hold." };
+    return { label: "Provider temporarily held", note: "NexiMail paused new validation checks for this provider and will retry safely later." };
   }
   if (value.includes("policy_or_ambiguous")) {
     return { label: "Provider policy / inconclusive", note: "The response was not explicit enough to mark the mailbox invalid." };
   }
   if (value.includes("timeout") || value.includes("connection_failed")) {
-    return { label: "Temporary connection issue", note: "The mailbox was not conclusively checked." };
+    return { label: "Temporary validation issue", note: "The mailbox was not conclusively checked." };
   }
   if (value.includes("supersend_v2_risky")) {
     return { label: "Risky / inconclusive", note: "SuperSend did not return a final valid or invalid verdict." };
@@ -171,7 +168,7 @@ export default async function ValidationPage() {
       <div className="min-w-0">
         <p className="page-eyebrow mb-1.5">Deliverability</p>
         <h1 className="page-title">Email validation</h1>
-        <p className="page-description max-w-3xl">Validate recipient syntax, MX and mailbox responses with NexiMail Internal, Smart Hybrid or SuperSend Primary.</p>
+        <p className="page-description max-w-3xl">Validate recipient syntax and MX safely with NexiMail Internal; use Smart Hybrid or SuperSend Primary for mailbox-level validation.</p>
       </div>
       {usable ? <div className="flex flex-wrap items-center gap-2">
         <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-black ${paused ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300" : engineRunning ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "border-[var(--border)] bg-[var(--surface-soft)] text-[var(--muted)]"}`}>
