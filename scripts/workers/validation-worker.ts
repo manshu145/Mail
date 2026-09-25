@@ -590,11 +590,30 @@ async function runJob() {
       backoffDelayMs: validationProviderBackoffMs,
       shouldHoldProvider: (verdict) => validationIsPreRecipientFailure(verdict),
       providerHoldUntil: (provider) => providerHoldUntil.get(provider) || 0,
-      shouldStop: async () => (await validationPaused()) || dailyCompleted >= dailyRemaining,
+      shouldStop: async () => {
+        if (await validationPaused()) return true;
+        if (dailyCompleted >= dailyRemaining) return true;
+        const [currentJob] = await db.select({ status: validationJobs.status }).from(validationJobs)
+          .where(eq(validationJobs.id, job.id)).limit(1);
+        return currentJob?.status === "cancelled";
+      },
     },
   );
 
   await publishProgress(true);
+  const [jobAfterPool] = await db.select({ status: validationJobs.status }).from(validationJobs)
+    .where(eq(validationJobs.id, job.id)).limit(1);
+  if (jobAfterPool?.status === "cancelled") {
+    await heartbeat({
+      state: "cancelled",
+      jobId: job.id,
+      scope: job.scope,
+      processed,
+      total,
+      remaining: Math.max(0, total - processed),
+    });
+    return;
+  }
   if (outcome.stopped) {
     const quotaReached = dailyCompleted >= dailyRemaining;
     await heartbeat({ state: quotaReached ? "daily_quota_exhausted" : "paused", jobId: job.id, scope: job.scope, processed, total, remaining: Math.max(0, total - processed), dailyLimit, dailyUsage: dailyUsage + dailyCompleted });
