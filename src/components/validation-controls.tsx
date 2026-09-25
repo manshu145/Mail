@@ -193,8 +193,8 @@ export function ValidationControls({
             ? <button disabled={busy} type="button" onClick={() => act("cancel")} className="btn-danger !min-h-10 !px-3"><Trash2 className="h-3.5 w-3.5"/> Cancel validation</button>
             : paused
               ? <button disabled={busy} type="button" onClick={() => act("resume")} className="btn-secondary !min-h-10 !px-3"><Play className="h-3.5 w-3.5"/> Resume</button>
-              : <button disabled={busy || quotaReached} type="button" onClick={() => act("pause")} className="btn-secondary !min-h-10 !px-3"><Pause className="h-3.5 w-3.5"/> Pause</button>
-          <button disabled={busy || !!activeJob || unresolved === 0 || !validationReady} type="button" onClick={() => act("start_pending")} className="btn-primary !min-h-10 !px-3"><RotateCcw className="h-3.5 w-3.5"/> Validate unresolved</button>}
+              : <button disabled={busy || quotaReached} type="button" onClick={() => act("pause")} className="btn-secondary !min-h-10 !px-3"><Pause className="h-3.5 w-3.5"/> Pause</button>}
+          <button disabled={busy || !!activeJob || unresolved === 0 || !validationReady} type="button" onClick={() => act("start_pending")} className="btn-primary !min-h-10 !px-3"><RotateCcw className="h-3.5 w-3.5"/> Validate unresolved</button>
         </div>
       </div>
 
