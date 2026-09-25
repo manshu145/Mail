@@ -274,6 +274,13 @@
       "when": 1790155260000,
       "tag": "0038_campaign_validated_recipient_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1790328000000,
+      "tag": "0039_campaign_validation_policy",
+      "breakpoints": true
     }
   ]
 }
