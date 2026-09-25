@@ -48,6 +48,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!["save", "send_now", "schedule", "queue"].includes(action)) return NextResponse.json({ error: "Unknown campaign action." }, { status: 400 });
   const wantsDelivery = action === "send_now" || action === "schedule" || action === "queue";
   const sendOnlyValidated = body.sendOnlyValidated === true;
+  const validationPolicy = sendOnlyValidated ? "standard" : (body.validationPolicy === "previously_validated" || body.validationPolicy === "bypass_unvalidated" ? body.validationPolicy : "standard");
+  const validationAcknowledged = body.validationAcknowledged === true;
+  if (wantsDelivery && validationPolicy !== "standard" && !validationAcknowledged) return NextResponse.json({ error: "Confirm the recipient-validation acknowledgement before sending without NexiMail validation." }, { status: 409 });
   const scheduledRaw = value(body.scheduledAt);
   const scheduledAt = action === "send_now" ? null : scheduledRaw ? new Date(scheduledRaw) : null;
   if (scheduledAt && Number.isNaN(scheduledAt.getTime())) return NextResponse.json({ error: "Invalid schedule time." }, { status: 400 });
@@ -73,7 +76,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const [domainRow] = await db.select().from(sendingDomains).where(eq(sendingDomains.domain, domain)).limit(1);
     if (!domainRow || domainRow.status !== "ready" || !domainRow.spfOk || !domainRow.dkimOk || !domainRow.dmarcOk) return NextResponse.json({ error: `Sending domain ${domain} must pass SPF, DKIM and DMARC checks before sending.` }, { status: 409 });
 
-    audiencePreflight = await preflightAudience(list);
+    audiencePreflight = await preflightAudience(list, validationPolicy === "standard" ? "standard" : "bypass_unvalidated");
     audienceSize = sendOnlyValidated ? audiencePreflight.validCount : audiencePreflight.eligibleCount;
     const [campaignAttachments, templateAttachments] = await Promise.all([
       listCampaignAttachments(id),
@@ -132,6 +135,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     fromEmail: normalizedFromEmail,
     listId, templateId, sendingAccountId,
     sendOnlyValidated,
+    validationPolicy,
     trackOpens: body.trackOpens !== false,
     trackClicks: body.trackClicks !== false,
     scheduledAt,
@@ -142,6 +146,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }).where(eq(campaigns.id, id));
 
   const auditAction = action === "send_now" ? "campaign.send_now_queued" : action === "schedule" ? "campaign.scheduled" : action === "queue" ? "campaign.queued" : "campaign.updated";
-  await audit(auditAction, session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, sendOnlyValidated, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount } : null, runtimeMode: policy.mode });
+  await audit(auditAction, session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, sendOnlyValidated, validationPolicy, validationAcknowledged, audienceSize, validationPolicy, validationAcknowledged, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount } : null, runtimeMode: policy.mode });
   return NextResponse.json({ ok: true, status: nextStatus, audienceSize, sendGuard, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount, validCount: audiencePreflight.validCount, pendingCount: audiencePreflight.pendingCount, unknownCount: audiencePreflight.unknownCount, awaitingValidationCount: audiencePreflight.awaitingValidationCount, domainInvalidCount: audiencePreflight.domainInvalidCount, domainHealthPendingCount: audiencePreflight.domainHealthPendingCount, checkedDomainCount: audiencePreflight.checkedDomainCount } : null });
 }
