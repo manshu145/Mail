@@ -16,7 +16,7 @@ const validationHardTimeoutMs = Math.max(timeoutMs, Math.min(120_000, Number(pro
 
 async function validateMailboxWithDeadline(email: string): Promise<ValidationVerdict> {
   return Promise.race([
-    validateMailboxInternally(email, timeoutMs),
+    validateMailboxInternally(email),
     new Promise<ValidationVerdict>((resolve) => setTimeout(
       () => resolve({ status: "unknown", detail: "smtp_validation_hard_timeout" }),
       validationHardTimeoutMs,
