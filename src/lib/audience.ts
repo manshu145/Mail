@@ -5,7 +5,9 @@ import { contacts, lists } from "@/db/schema";
 import { engagementSegmentDefinitions, segmentDefinitions } from "@/db/segment-schema";
 
 /** A database-side audience relation: no recipient-sized arrays in the app. */
-export async function audienceSelection(list: typeof lists.$inferSelect, executor: Pick<typeof db, "select"> = db): Promise<SQL> {
+export type AudienceValidationPolicy = "standard" | "bypass_unvalidated";
+
+export async function audienceSelection(list: typeof lists.$inferSelect, executor: Pick<typeof db, "select"> = db, validationPolicy: AudienceValidationPolicy = "standard"): Promise<SQL> {
   let condition: SQL | undefined;
   if (!list.isDynamic) {
     condition = sql`exists(select 1 from contact_lists cl where cl.contact_id=${contacts.id} and cl.list_id=${list.id})`;
@@ -37,7 +39,8 @@ export async function audienceSelection(list: typeof lists.$inferSelect, executo
     ${contacts.normalizedEmail} as normalized_email,
     ${contacts.validationStatus} as validation_status,
     case
-      when ${contacts.validationStatus}::text in ('invalid','pending','unknown','error') then false
+      when ${contacts.validationStatus}::text='invalid' then false
+      when ${validationPolicy === 'standard' ? sql`${contacts.validationStatus}::text in ('pending','unknown','error')` : sql`false`} then false
       when not exists(
         select 1 from recipient_domain_health rdh
         where rdh.domain=lower(split_part(${contacts.normalizedEmail},'@',2))
