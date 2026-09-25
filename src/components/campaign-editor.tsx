@@ -2,7 +2,7 @@
 
 import { CheckCircle2, Circle, Eye, ListChecks, Maximize2, Monitor, RefreshCw, Rocket, Smartphone, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CampaignAttachments } from "@/components/campaign-attachments";
 
 type Option = { id: string; name: string };
@@ -52,6 +52,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const previewRequestRef = useRef(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [testRecipient, setTestRecipient] = useState("");
@@ -101,6 +102,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
 
   async function loadPreview(silent = false) {
     if (!listId || !templateId || !accountId) { setPreview(null); return; }
+    const requestId = ++previewRequestRef.current;
     setPreviewBusy(true);
     if (!silent) { setError(""); setNotice(""); }
     try {
@@ -110,6 +112,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
         body: JSON.stringify({ listId, templateId, sendingAccountId: accountId || null, subject, validationPolicy: sendOnlyValidated ? "standard" : validationPolicy }),
       });
       const data = await response.json().catch(() => ({})) as PreviewData & { error?: string };
+      if (requestId !== previewRequestRef.current) return;
       if (!response.ok) {
         if (!silent) setError(data.error || "Could not build campaign preview.");
         setPreview(null);
@@ -119,7 +122,7 @@ export function CampaignEditor({ campaign, lists, templates, accounts, runtimePo
     } catch {
       if (!silent) setError("Could not refresh campaign preview.");
     } finally {
-      setPreviewBusy(false);
+      if (requestId === previewRequestRef.current) setPreviewBusy(false);
     }
   }
 
