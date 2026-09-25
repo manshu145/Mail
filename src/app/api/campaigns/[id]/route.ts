@@ -122,7 +122,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }});
 
     if (sendGuard.status === "blocked") return NextResponse.json({ error: `Campaign preflight blocked launch: ${sendGuard.blockingIssues.join(" ")}`, audiencePreflight, sendGuard }, { status: 409 });
-    if (audienceSize === 0) return NextResponse.json({ error: "Selected audience has no recipients matching the selected validation rule.", audiencePreflight }, { status: 409 });
+    if (audienceSize === 0) { 
+      const error = sendOnlyValidated
+        ? `Validation is still in progress. No validated recipients are available yet. Wait for validation to complete before sending this campaign.`
+        : "Selected audience has no recipients matching the selected validation rule.";
+      return NextResponse.json({ error, audiencePreflight }, { status: 409 });
+    }
     if (policy.maxRecipientsPerCampaign !== null && audienceSize > policy.maxRecipientsPerCampaign) return NextResponse.json({ error: `This runtime allows up to ${policy.maxRecipientsPerCampaign.toLocaleString()} eligible recipients per campaign. This audience currently has ${audienceSize.toLocaleString()}.`, audiencePreflight }, { status: 409 });
   }
 
@@ -146,6 +151,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }).where(eq(campaigns.id, id));
 
   const auditAction = action === "send_now" ? "campaign.send_now_queued" : action === "schedule" ? "campaign.scheduled" : action === "queue" ? "campaign.queued" : "campaign.updated";
-  await audit(auditAction, session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, sendOnlyValidated, validationPolicy, validationAcknowledged, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount } : null, runtimeMode: policy.mode });
+  await audit(auditAction, session, "campaign", id, { status: nextStatus, listId, templateId, sendingAccountId, sendOnlyValidated, validationPolicy, validationAcknowledged, audienceSize, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, validCount: audiencePreflight.validCount, pendingCount: audiencePreflight.pendingCount, unknownCount: audiencePreflight.unknownCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount } : null, runtimeMode: policy.mode });
   return NextResponse.json({ ok: true, status: nextStatus, audienceSize, sendGuard, audiencePreflight: audiencePreflight ? { rawCount: audiencePreflight.rawCount, eligibleCount: audiencePreflight.eligibleCount, suppressedCount: audiencePreflight.suppressedCount, invalidCount: audiencePreflight.invalidCount, validCount: audiencePreflight.validCount, pendingCount: audiencePreflight.pendingCount, unknownCount: audiencePreflight.unknownCount, awaitingValidationCount: audiencePreflight.awaitingValidationCount, domainInvalidCount: audiencePreflight.domainInvalidCount, domainHealthPendingCount: audiencePreflight.domainHealthPendingCount, checkedDomainCount: audiencePreflight.checkedDomainCount } : null });
 }
