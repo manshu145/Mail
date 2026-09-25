@@ -108,7 +108,8 @@ async function runOnce() {
       const [list] = await db.select().from(lists).where(eq(lists.id, campaign.listId)).limit(1);
       if (!list) { await blockCampaign(campaign.id, "campaign.worker_list_not_found", { listId: campaign.listId }); blocked++; continue; }
 
-      const preflight = await preflightAudience(list);
+      const validationPolicy = campaign.validationPolicy === "previously_validated" || campaign.validationPolicy === "bypass_unvalidated" ? "bypass_unvalidated" : "standard";
+      const preflight = await preflightAudience(list, validationPolicy);
       const targetCount = campaign.sendOnlyValidated ? preflight.validCount : preflight.eligibleCount;
       if (!campaign.sendingAccountId || !campaign.templateId) {
         await blockCampaign(campaign.id, "campaign.worker_delivery_configuration_missing", {});
@@ -196,7 +197,7 @@ async function runOnce() {
       await db.transaction(async (tx) => {
         const [current] = await tx.select({ status: campaigns.status }).from(campaigns).where(eq(campaigns.id, campaign.id)).for("update");
         if (current?.status !== "sending") return;
-        const selection = await audienceSelection(list);
+        const selection = await audienceSelection(list, db, validationPolicy);
         const validationFilter = campaign.sendOnlyValidated ? sql`and validation_status in ('valid','accepted')` : sql``;
         await tx.execute(sql`insert into messages(campaign_id,contact_id,recipient_email,status)
           select ${campaign.id}::uuid, contact_id, email, 'queued'::message_status from (${selection}) audience
@@ -213,6 +214,7 @@ async function runOnce() {
           metadataJson: JSON.stringify({
             listId: list.id,
             sendOnlyValidated: campaign.sendOnlyValidated,
+            validationPolicy: campaign.validationPolicy,
             rawCount: preflight.rawCount,
             eligibleCount: preflight.eligibleCount,
             suppressedCount: preflight.suppressedCount,
