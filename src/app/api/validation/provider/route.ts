@@ -53,6 +53,41 @@ export async function PUT(request: NextRequest) {
   return NextResponse.json({ ok: true, configured: true, hint: encrypted.hint });
 }
 
+export async function POST(request: NextRequest) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!canManageInfrastructure(session.role)) return NextResponse.json({ error: "Owner role required." }, { status: 403 });
+  if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable." }, { status: 503 });
+
+  const body = await request.json().catch(() => null) as { action?: string } | null;
+  if (body?.action !== "test") return NextResponse.json({ error: "Unsupported provider action." }, { status: 400 });
+
+  const [row] = await db.select({ value: systemSettings.value })
+    .from(systemSettings).where(eq(systemSettings.key, KEY)).limit(1);
+  const apiKey = decryptWorkspaceSecret(row?.value) || String(process.env.SUPERSEND_API_KEY || "").trim();
+  if (!apiKey) return NextResponse.json({ error: "SuperSend API key is not configured." }, { status: 409 });
+
+  try {
+    const response = await fetch("https://api.supersend.io/v2/teams", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (!response.ok) {
+      const message = payload?.error && typeof payload.error === "object"
+        ? String((payload.error as Record<string, unknown>).message || "SuperSend rejected the API key.")
+        : "SuperSend rejected the API key.";
+      return NextResponse.json({ ok: false, error: message, status: response.status }, { status: 502 });
+    }
+    await audit("validation.provider_key.tested", session, "system_setting", KEY, { provider: "supersend", status: "ok" });
+    return NextResponse.json({ ok: true, connected: true });
+  } catch {
+    return NextResponse.json({ ok: false, error: "Could not reach SuperSend API." }, { status: 502 });
+  }
+}
+
 export async function PATCH(request: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
