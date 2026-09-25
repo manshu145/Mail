@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
   if (!databaseConfigured) return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
 
   const body = await request.json().catch(() => null) as {
-    action?: "start_pending" | "start_import" | "start_list" | "start_single" | "pause" | "resume";
+    action?: "start_pending" | "start_import" | "start_list" | "start_single" | "pause" | "resume" | "cancel";
     importId?: string;
     listId?: string;
     email?: string;
@@ -83,6 +83,20 @@ export async function POST(request: NextRequest) {
     await audit("validation.paused", session, "validation", undefined, {});
     return NextResponse.json({ ok: true, paused: true });
   }
+  if (body.action === "cancel") {
+    const active = await activeJob();
+    if (!active) return NextResponse.json({ error: "No active validation job to cancel." }, { status: 409 });
+    await db.update(validationJobs)
+      .set({ status: "cancelled", completedAt: new Date() })
+      .where(inArray(validationJobs.status, ["pending", "processing"]));
+    await audit("validation.cancelled", session, "validation_job", active.id, {
+      scope: active.scope,
+      processedRows: active.processedRows,
+      totalRows: active.totalRows,
+    });
+    return NextResponse.json({ ok: true, cancelled: true, id: active.id });
+  }
+
   if (body.action === "resume") {
     // Resume the existing job using the currently configured validation mode.
     // This prevents a pre-hardening job from silently continuing with its
