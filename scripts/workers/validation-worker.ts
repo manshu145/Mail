@@ -349,6 +349,32 @@ async function remainingCountForJob(scope: string, jobId: string) {
   `, [jobId]);
   return Number(result.rows[0]?.total || 0);
 }
+async function applyHistoricalRecipientEvidence(email: string, verdict: ValidationVerdict): Promise<ValidationVerdict> {
+  if (verdict.status !== "unknown") return verdict;
+  const normalized = normalizeEmail(email);
+  const result = await pool.query<{ delivered: boolean; hardFailure: boolean }>(`
+    select
+      exists(
+        select 1 from messages m
+        where lower(m.recipient_email)=lower($1)
+          and m.status='delivered'
+      ) as delivered,
+      exists(
+        select 1 from suppressions s
+        where s.normalized_email=$1
+          and s.reason in ('hard_bounce','invalid')
+      ) as "hardFailure"
+  `, [normalized]);
+  const row = result.rows[0];
+  if (row?.hardFailure) {
+    return { status: "invalid", detail: "historical_hard_failure" };
+  }
+  if (row?.delivered) {
+    return { status: "valid", detail: "historical_successful_delivery" };
+  }
+  return verdict;
+}
+
 async function addInvalidSuppression(email: string, contactId: string, detail: string | null) {
   await db.insert(suppressions).values({
     email,
@@ -525,6 +551,7 @@ async function runJob() {
         }
 
         result = await validateMailboxWithDeadline(contact.normalizedEmail);
+        result = await applyHistoricalRecipientEvidence(contact.normalizedEmail, result);
 
         if (validationIsPreRecipientFailure(result)) {
           registerProviderPressure(provider, result);
