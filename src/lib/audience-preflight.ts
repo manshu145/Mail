@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { type lists } from "@/db/schema";
-import { audienceSelection } from "@/lib/audience";
+import { audienceSelection, type AudienceValidationPolicy } from "@/lib/audience";
 import { refreshRecipientDomainHealth } from "@/lib/recipient-domain-health";
 
 export type AudiencePreflightResult = {
@@ -10,11 +10,11 @@ export type AudiencePreflightResult = {
   domainInvalidCount: number; domainHealthPendingCount: number; checkedDomainCount: number;
 };
 
-export async function preflightAudience(list: typeof lists.$inferSelect): Promise<AudiencePreflightResult> {
-  const selection = await audienceSelection(list);
+export async function preflightAudience(list: typeof lists.$inferSelect, validationPolicy: AudienceValidationPolicy = "standard"): Promise<AudiencePreflightResult> {
+  const selection = await audienceSelection(list, db, validationPolicy);
   const domainsResult = await db.execute(sql`select distinct lower(split_part(email,'@',2)) domain from (${selection}) audience where not suppressed limit 2001`);
   const domainHealth = await refreshRecipientDomainHealth(domainsResult.rows.map((row) => String((row as Record<string, unknown>).domain || "")).filter(Boolean));
-  const refreshedSelection = await audienceSelection(list);
+  const refreshedSelection = await audienceSelection(list, db, validationPolicy);
   const result = await db.execute(sql`with audience as (${refreshedSelection}) select
     count(*)::int as raw_count,
     count(*) filter(where not suppressed and send_eligible)::int as eligible_count,
