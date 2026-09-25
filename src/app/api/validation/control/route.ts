@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     if (!active) return NextResponse.json({ error: "No active validation job to cancel." }, { status: 409 });
     await db.update(validationJobs)
       .set({ status: "cancelled", completedAt: new Date() })
-      .where(inArray(validationJobs.status, ["pending", "processing"]));
+      .where(eq(validationJobs.id, active.id));
     await audit("validation.cancelled", session, "validation_job", active.id, {
       scope: active.scope,
       processedRows: active.processedRows,
