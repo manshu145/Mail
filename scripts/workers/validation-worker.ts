@@ -590,7 +590,7 @@ async function runJob() {
     const now = Date.now();
     if (!force && processed % 10 !== 0 && now - lastProgressPublish < 2000) return;
     lastProgressPublish = now;
-    await pool.query(`update validation_jobs set processed_rows=greatest(processed_rows,$2), total_rows=greatest(total_rows,$3) where id=$1`, [job.id, processed, total]);
+    await pool.query(`update validation_jobs set processed_rows=greatest(processed_rows,$2::integer), total_rows=greatest(total_rows,$3::integer) where id=$1`, [job.id, processed, total]);
     await heartbeat({
       state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed,
       concurrency: validationConcurrency, scheduler: "provider_aware", validationMode,
@@ -713,8 +713,8 @@ async function runJob() {
   total = Math.max(total, processed);
   await pool.query(
     `update validation_jobs
-     set processed_rows=least($2, $3),
-         total_rows=$3
+     set processed_rows=least($2::integer, $3::integer),
+         total_rows=$3::integer
      where id=$1`,
     [job.id, processed, total],
   );
