@@ -95,6 +95,8 @@ const supersendCircuitCooldownMs = Math.max(
 let supersendCircuitOpenUntil = 0;
 let supersendCircuitKey: string | null = null;
 let supersendCircuitReason = "";
+let supersendCredentialProbe: Promise<ValidationVerdict> | null = null;
+let supersendCredentialProbeKey: string | null = null;
 
 function supersendCircuitAvailable(apiKey: string | null) {
   if (!apiKey) return false;
@@ -102,8 +104,15 @@ function supersendCircuitAvailable(apiKey: string | null) {
     supersendCircuitKey = apiKey;
     supersendCircuitOpenUntil = 0;
     supersendCircuitReason = "";
+    supersendCredentialProbe = null;
+    supersendCredentialProbeKey = apiKey;
   }
   return supersendCircuitOpenUntil <= Date.now();
+}
+
+function isSupersendAuthFailure(result: ValidationVerdict) {
+  const detail = String(result.detail || "");
+  return detail.startsWith("supersend_http_401") || detail.startsWith("supersend_http_403");
 }
 
 function openSupersendCircuit(apiKey: string, detail: string) {
@@ -117,8 +126,37 @@ async function verifySupersendSafely(email: string, apiKey: string): Promise<Val
   if (!supersendCircuitAvailable(apiKey)) {
     return { status: "unknown", detail: "supersend_circuit_open" };
   }
+
+  if (supersendCredentialProbeKey !== apiKey) {
+    supersendCredentialProbeKey = apiKey;
+    supersendCredentialProbe = null;
+  }
+
+  if (supersendCredentialProbe) {
+    const probe = await supersendCredentialProbe;
+    if (isSupersendAuthFailure(probe) || !supersendCircuitAvailable(apiKey)) {
+      return { status: "unknown", detail: isSupersendAuthFailure(probe) ? "supersend_circuit_open" : "supersend_circuit_open" };
+    }
+  }
+
+  if (!supersendCredentialProbe) {
+    const probe = verifyWithSupersend(email, apiKey)
+      .then((result) => {
+        if (isSupersendAuthFailure(result)) {
+          openSupersendCircuit(apiKey, result.detail);
+          return { status: "unknown", detail: result.detail + ";supersend_circuit_open" };
+        }
+        return result;
+      })
+      .finally(() => {
+        supersendCredentialProbe = null;
+      });
+    supersendCredentialProbe = probe;
+    return probe;
+  }
+
   const result = await verifyWithSupersend(email, apiKey);
-  if (result.detail.startsWith("supersend_http_401") || result.detail.startsWith("supersend_http_403")) {
+  if (isSupersendAuthFailure(result)) {
     openSupersendCircuit(apiKey, result.detail);
     return { status: "unknown", detail: result.detail + ";supersend_circuit_open" };
   }
