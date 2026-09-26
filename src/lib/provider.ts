@@ -111,6 +111,15 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
 
   // Reserve immediate sender-wide cooldowns for responses that explicitly
   // identify the local sending account/outbound SMTP path as suspended.
+  // This response has now been observed from both Yahoo and Gmail while
+  // explicitly saying the violations originated from the sending account.
+  // Treat it as sender-scoped rather than destination-provider-scoped.
+  const explicitSenderContentPolicy =
+    /jfe050005|unusual amount of content policy violations originating from your account/i.test(text);
+  if (explicitSenderContentPolicy) {
+    return { scope: "sender", reason: "sender_or_outbound_path_restriction" };
+  }
+
   const explicitSenderOrOutboundPath =
     /sending account (?:is )?(?:restricted|blocked|suspended)|outbound (?:mail|smtp).*(?:account|sender).*(?:restricted|blocked|suspended)/i.test(text);
   if (explicitSenderOrOutboundPath) {
@@ -118,7 +127,7 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
   }
 
   const explicitProviderRestriction =
-    /jfe050005|unusual amount of content policy violations originating from your account|rate[ -]?limit|too many (?:messages|connections|requests)|throttl|unusual traffic|temporar(?:y|ily) blocked|temporary block|not yet authorized to deliver mail from|sender(?: ip)? reputation|ip reputation|greylist(?:ed|ing)?(?:.*(?:sender|ip))?|try again later(?:.*(?:rate|sender|ip|reputation))?/i.test(text);
+    /rate[ -]?limit|too many (?:messages|connections|requests)|throttl|unusual traffic|temporar(?:y|ily) blocked|temporary block|not yet authorized to deliver mail from|sender(?: ip)? reputation|ip reputation|greylist(?:ed|ing)?(?:.*(?:sender|ip))?|try again later(?:.*(?:rate|sender|ip|reputation))?/i.test(text);
   if (explicitProviderRestriction) {
     return { scope: "provider", reason: "provider_restriction" };
   }
