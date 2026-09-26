@@ -194,6 +194,19 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
       where c.status='sending'
         and m.status in ('ready_for_transport','deferred')
         and (m.next_attempt_at is null or m.next_attempt_at <= now())
+        -- Do not claim ordinary messages while a sender/upstream cooldown is
+        -- still waiting for its scheduled probe. The probe itself becomes
+        -- eligible once next_probe_at is due; claiming the whole queue before
+        -- then only creates transport_attempt/provider_cooldown churn.
+        and not exists (
+          select 1
+          from provider_cooldowns pc
+          where pc.sending_account_id=c.sending_account_id
+            and pc.active=true
+            and pc.provider in ('__sender__','__upstream__')
+            and pc.next_probe_at is not null
+            and pc.next_probe_at > now()
+        )
     ),
     picked as (
       select e.id
