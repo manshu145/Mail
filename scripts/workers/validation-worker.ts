@@ -85,6 +85,34 @@ const providerFailureLevel = new Map<string, number>();
 const providerHoldReason = new Map<string, string>();
 const providerLastPressureAt = new Map<string, string>();
 
+// SuperSend is an optional enhancement in Smart Hybrid. Keep authentication
+// failures behind a circuit breaker so one missing/expired customer key cannot
+// turn into one API request per inconclusive recipient.
+const supersendCircuitCooldownMs = Math.max(
+  5 * 60_000,
+  Math.min(24 * 60 * 60_000, Number(process.env.SUPERSEND_AUTH_COOLDOWN_MS || String(24 * 60 * 60_000))),
+);
+let supersendCircuitOpenUntil = 0;
+let supersendCircuitKey: string | null = null;
+let supersendCircuitReason = "";
+
+function supersendCircuitAvailable(apiKey: string | null) {
+  if (!apiKey) return false;
+  if (supersendCircuitKey !== apiKey) {
+    supersendCircuitKey = apiKey;
+    supersendCircuitOpenUntil = 0;
+    supersendCircuitReason = "";
+  }
+  return supersendCircuitOpenUntil <= Date.now();
+}
+
+function openSupersendCircuit(apiKey: string, detail: string) {
+  supersendCircuitKey = apiKey;
+  supersendCircuitOpenUntil = Date.now() + supersendCircuitCooldownMs;
+  supersendCircuitReason = detail;
+  console.warn("[validation-worker] SuperSend authentication circuit opened for " + supersendCircuitCooldownMs + "ms detail=" + detail);
+}
+
 function currentProviderRate(provider: string) {
   return providerRatePerSecond.get(provider) || validationBasePerSecond;
 }
@@ -454,7 +482,10 @@ async function runJob() {
 
   const validationMode = normalizeValidationMode(job.validationMode);
   const apiKey = validationModeNeedsSupersend(validationMode) ? await configuredSupersendApiKey() : null;
-  if (validationModeNeedsSupersend(validationMode) && !apiKey) {
+
+  // Explicit SuperSend mode requires a credential. Smart Hybrid does not:
+  // internal validation remains fully usable when no external provider is configured.
+  if (validationMode === "supersend" && !apiKey) {
     await heartbeat({
       state: "configuration_error",
       jobId: job.id,
@@ -519,6 +550,10 @@ async function runJob() {
       providerHoldReasons: Object.fromEntries([...providerHoldReason.entries()].filter(([provider]) => (providerHoldUntil.get(provider) || 0) > Date.now())),
       providerLastPressureAt: Object.fromEntries([...providerLastPressureAt.entries()].filter(([provider]) => (providerHoldUntil.get(provider) || 0) > Date.now())),
       hardTimeoutMs: validationHardTimeoutMs,
+      supersendConfigured: Boolean(apiKey),
+      supersendCircuitOpen: Boolean(apiKey && !supersendCircuitAvailable(apiKey)),
+      supersendCircuitOpenUntil: supersendCircuitOpenUntil > Date.now() ? new Date(supersendCircuitOpenUntil).toISOString() : null,
+      supersendCircuitReason: supersendCircuitReason || null,
     });
   };
 
@@ -552,12 +587,23 @@ async function runJob() {
             }
           }
 
-          // Layer 3: every inconclusive/temporary internal outcome goes to
-          // SuperSend in Smart Hybrid. A provider hold never blocks fallback.
-          if (validationMode === "hybrid" && (result.status === "unknown" || result.status === "error")) {
-            const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey as string);
+          // Layer 3: Smart Hybrid optionally falls back to SuperSend.
+          // No key means no external call; the internal result remains unknown.
+          if (
+            validationMode === "hybrid" &&
+            apiKey &&
+            supersendCircuitAvailable(apiKey) &&
+            (result.status === "unknown" || result.status === "error")
+          ) {
+            const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey);
             if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
               result = fallback;
+            } else if (fallback.detail.startsWith("supersend_http_401") || fallback.detail.startsWith("supersend_http_403")) {
+              openSupersendCircuit(apiKey, fallback.detail);
+              result = {
+                status: result.status,
+                detail: result.detail + ";fallback:" + fallback.detail + ";supersend_circuit_open",
+              };
             } else {
               result = { status: result.status, detail: result.detail + ";fallback:" + fallback.detail };
             }
