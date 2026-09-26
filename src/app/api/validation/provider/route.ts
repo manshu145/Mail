@@ -5,7 +5,7 @@ import { systemSettings } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { canManageInfrastructure, getSession } from "@/lib/auth";
 import { decryptWorkspaceSecret, encryptWorkspaceSecret, encryptedSettingHint } from "@/lib/secure-setting";
-import { DEFAULT_VALIDATION_MODE, normalizeValidationMode, VALIDATION_MODE_KEY, validationModeNeedsSupersend, type ValidationMode } from "@/lib/validation-provider";
+import { DEFAULT_VALIDATION_MODE, normalizeValidationMode, VALIDATION_MODE_KEY, type ValidationMode } from "@/lib/validation-provider";
 
 const KEY = "validation.supersend_api_key";
 
