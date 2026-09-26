@@ -104,7 +104,7 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
   // destination provider. Keep one circuit breaker instead of fake provider
   // cards for every unrelated recipient network.
   const outboundBridgeRestriction =
-    /jfe050004|jfe050005|jfe050007|unusual number of invalid recipients originating from your account|unusual amount of content policy violations originating from your account/i.test(text);
+    /jfe050004|jfe050007|unusual number of invalid recipients originating from your account/i.test(text);
   if (outboundBridgeRestriction) {
     return { scope: "upstream", reason: "sender_or_outbound_path_restriction" };
   }
@@ -118,7 +118,7 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
   }
 
   const explicitProviderRestriction =
-    /rate[ -]?limit|too many (?:messages|connections|requests)|throttl|unusual traffic|temporar(?:y|ily) blocked|temporary block|not yet authorized to deliver mail from|sender(?: ip)? reputation|ip reputation|greylist(?:ed|ing)?(?:.*(?:sender|ip))?|try again later(?:.*(?:rate|sender|ip|reputation))?/i.test(text);
+    /jfe050005|unusual amount of content policy violations originating from your account|rate[ -]?limit|too many (?:messages|connections|requests)|throttl|unusual traffic|temporar(?:y|ily) blocked|temporary block|not yet authorized to deliver mail from|sender(?: ip)? reputation|ip reputation|greylist(?:ed|ing)?(?:.*(?:sender|ip))?|try again later(?:.*(?:rate|sender|ip|reputation))?/i.test(text);
   if (explicitProviderRestriction) {
     return { scope: "provider", reason: "provider_restriction" };
   }
