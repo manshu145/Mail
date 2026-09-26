@@ -572,7 +572,7 @@ async function runJob() {
   // contactsForJob() and remainingCountForJob(); otherwise an existing
   // terminal "unknown" can be selected again while remainingCount excludes it,
   // making processed_rows exceed total_rows.
-  const total = Math.max(Number(job.totalRows || 0), processed + remainingCount);
+  let total = Math.max(Number(job.totalRows || 0), processed + remainingCount);
 
   await db.update(validationJobs).set({ totalRows: total, processedRows: processed }).where(eq(validationJobs.id, job.id));
   await heartbeat({
@@ -710,13 +710,13 @@ async function runJob() {
   // finishes. The in-memory counter is useful for live progress, but completion
   // must be based on distinct persisted results rather than callback timing.
   processed = await existingResultCount(job.id);
-  const progressTotal = Math.max(total, processed);
+  total = Math.max(total, processed);
   await pool.query(
     `update validation_jobs
      set processed_rows=least($2, $3),
          total_rows=$3
      where id=$1`,
-    [job.id, processed, progressTotal],
+    [job.id, processed, total],
   );
   await publishProgress(true);
   const [jobAfterPool] = await db.select({ status: validationJobs.status }).from(validationJobs)
