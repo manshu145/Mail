@@ -171,7 +171,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
       select a.contact_id::text as id,a.email,a.normalized_email as "normalizedEmail"
       from (${audience}) a
       where a.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id)
+        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id and vr.status in ('accepted','valid','invalid'))
       order by a.contact_id
       limit ${limit}
     `);
@@ -264,7 +264,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
       select count(*)::int as total
       from (${audience}) a
       where a.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id)
+        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id and vr.status in ('accepted','valid','invalid'))
     `);
     return Number((result.rows[0] as { total?: number } | undefined)?.total || 0);
   }
@@ -433,15 +433,16 @@ async function runJob() {
   }
   const job = await selectWorkJob();
   if (!job) {
+    await heartbeat({ state: "idle", provider: "selectable", concurrency: validationConcurrency, scheduler: "provider_aware" });
+    return;
+  }
+
   const retryUntil = jobRetryUntil.get(job.id) || 0;
   if (retryUntil > Date.now()) {
     await heartbeat({ state: "retry_wait", jobId: job.id, scope: job.scope, retryAt: new Date(retryUntil).toISOString(), retryCooldownMs: validationRetryCooldownMs });
     return;
   }
   jobRetryUntil.delete(job.id);
-    await heartbeat({ state: "idle", provider: "selectable", concurrency: validationConcurrency, scheduler: "provider_aware" });
-    return;
-  }
 
   const dailyLimit = await validationDailyLimit();
   const dailyUsage = await validationDailyUsage();
