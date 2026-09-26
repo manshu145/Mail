@@ -7,7 +7,8 @@ export function normalizeValidationMode(value: unknown): ValidationMode {
   return value === "hybrid" || value === "supersend" ? value : "internal";
 }
 
-// Smart Hybrid is the production default: Internal first, SuperSend fallback for inconclusive results.\nexport function validationModeLabel(mode: ValidationMode) {
+// Smart Hybrid is the production default: Internal first, SuperSend fallback for inconclusive results.
+export function validationModeLabel(mode: ValidationMode) {
   if (mode === "hybrid") return "Smart hybrid";
   if (mode === "supersend") return "SuperSend primary";
   return "NexiMail internal";
