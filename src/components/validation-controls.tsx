@@ -84,7 +84,7 @@ export function ValidationControls({
 
   async function saveProviderMode(mode: ValidationMode) {
     if (!providerManage || providerModeBusy) return;
-    if (mode !== "internal" && !providerConfigured) { setProviderMessage("Add a SuperSend API key first."); return; }
+    if (mode === "supersend" && !providerConfigured) { setProviderMessage("Add a SuperSend API key first."); return; }
     setProviderModeBusy(true); setProviderMessage("");
     try {
       const r = await fetch("/api/validation/provider", { method:"PATCH", headers:{"content-type":"application/json"}, body:JSON.stringify({mode}) });
@@ -235,14 +235,14 @@ export function ValidationControls({
               ["hybrid","Smart Hybrid","Balanced","Internal first; SuperSend only for unresolved results."],
               ["supersend","SuperSend Primary","Provider powered","Every check uses SuperSend credits."],
             ] as Array<[ValidationMode,string,string,string]>).map(([mode,title,badge,body])=>{
-              const unavailable=mode!=="internal" && !providerConfigured;
+              const unavailable=mode==="supersend" && !providerConfigured;
               const selected=providerMode===mode;
               return <button key={mode} disabled={!providerManage || providerModeBusy || unavailable} onClick={()=>void saveProviderMode(mode)} className={`relative rounded-2xl border p-4 text-left transition ${selected ? "border-violet-500/40 bg-violet-500/[.07] shadow-[0_10px_30px_rgba(109,93,252,.09)]" : "border-[var(--border)] bg-[var(--surface-soft)] hover:border-violet-500/25"} disabled:cursor-not-allowed disabled:opacity-50`}>
                 {selected ? <span className="absolute right-3 top-3"><CheckCircle2 className="h-4 w-4 text-violet-600"/></span> : null}
                 <div className="text-[9px] font-black uppercase tracking-[.1em] text-[var(--muted)]">{badge}</div>
                 <h3 className="mt-2 text-[12px] font-black">{title}</h3>
                 <p className="mt-1 text-[10.5px] leading-4 text-[var(--muted)]">{body}</p>
-                {unavailable ? <p className="mt-3 text-[9px] font-black text-amber-600">SuperSend key required</p> : null}
+                {unavailable ? <p className="mt-3 text-[9px] font-black text-amber-600">SuperSend key required</p> : mode==="hybrid" && !providerConfigured ? <p className="mt-3 text-[9px] font-black text-emerald-600">Works without a provider key</p> : null}
               </button>;
             })}
           </div>

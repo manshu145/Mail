@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS validation_results_email_lower_created_idx ON validation_results (lower(email), created_at DESC);

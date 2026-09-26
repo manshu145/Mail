@@ -104,13 +104,22 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
   // destination provider. Keep one circuit breaker instead of fake provider
   // cards for every unrelated recipient network.
   const outboundBridgeRestriction =
-    /jfe050004|jfe050005|jfe050007|unusual number of invalid recipients originating from your account|unusual amount of content policy violations originating from your account/i.test(text);
+    /jfe050004|jfe050007|unusual number of invalid recipients originating from your account/i.test(text);
   if (outboundBridgeRestriction) {
     return { scope: "upstream", reason: "sender_or_outbound_path_restriction" };
   }
 
   // Reserve immediate sender-wide cooldowns for responses that explicitly
   // identify the local sending account/outbound SMTP path as suspended.
+  // This response has now been observed from both Yahoo and Gmail while
+  // explicitly saying the violations originated from the sending account.
+  // Treat it as sender-scoped rather than destination-provider-scoped.
+  const explicitSenderContentPolicy =
+    /jfe050005|unusual amount of content policy violations originating from your account/i.test(text);
+  if (explicitSenderContentPolicy) {
+    return { scope: "sender", reason: "sender_or_outbound_path_restriction" };
+  }
+
   const explicitSenderOrOutboundPath =
     /sending account (?:is )?(?:restricted|blocked|suspended)|outbound (?:mail|smtp).*(?:account|sender).*(?:restricted|blocked|suspended)/i.test(text);
   if (explicitSenderOrOutboundPath) {

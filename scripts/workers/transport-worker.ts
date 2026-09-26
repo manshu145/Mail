@@ -194,6 +194,63 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
       where c.status='sending'
         and m.status in ('ready_for_transport','deferred')
         and (m.next_attempt_at is null or m.next_attempt_at <= now())
+        -- Do not claim ordinary messages while a sender/upstream cooldown is
+        -- still waiting for its scheduled probe. When the probe time arrives,
+        -- allow only one account-level probe instead of claiming the whole queue.
+        and not exists (
+          select 1
+          from provider_cooldowns pc
+          where pc.sending_account_id=c.sending_account_id
+            and pc.active=true
+            and pc.next_probe_at is not null
+            and pc.next_probe_at > now()
+            and (
+              pc.provider in ('__sender__','__upstream__')
+              or m.last_error = 'provider_cooldown:' || pc.provider
+            )
+        )
+        -- Provider/sender cooldowns that are due may claim exactly one probe.
+        -- All other currently-eligible held messages stay unclaimed until the
+        -- probe result clears or extends the cooldown.
+        and not exists (
+          select 1
+          from provider_cooldowns pc
+          where pc.sending_account_id=c.sending_account_id
+            and pc.active=true
+            and (pc.next_probe_at is null or pc.next_probe_at <= now())
+            and (
+              (
+                pc.provider in ('__sender__','__upstream__')
+                and m.id <> (
+                  select m2.id
+                  from messages m2
+                  join campaigns c2 on c2.id=m2.campaign_id
+                  where c2.sending_account_id=c.sending_account_id
+                    and c2.status='sending'
+                    and m2.status in ('ready_for_transport','deferred')
+                    and (m2.next_attempt_at is null or m2.next_attempt_at <= now())
+                  order by m2.queued_at asc,m2.id asc
+                  limit 1
+                )
+              )
+              or (
+                pc.provider not in ('__sender__','__upstream__')
+                and m.last_error = 'provider_cooldown:' || pc.provider
+                and m.id <> (
+                  select m2.id
+                  from messages m2
+                  join campaigns c2 on c2.id=m2.campaign_id
+                  where c2.sending_account_id=c.sending_account_id
+                    and c2.status='sending'
+                    and m2.status in ('ready_for_transport','deferred')
+                    and (m2.next_attempt_at is null or m2.next_attempt_at <= now())
+                    and m2.last_error = 'provider_cooldown:' || pc.provider
+                  order by m2.queued_at asc,m2.id asc
+                  limit 1
+                )
+              )
+            )
+        )
     ),
     picked as (
       select e.id
