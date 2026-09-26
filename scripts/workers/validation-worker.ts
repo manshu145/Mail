@@ -113,6 +113,18 @@ function openSupersendCircuit(apiKey: string, detail: string) {
   console.warn("[validation-worker] SuperSend authentication circuit opened for " + supersendCircuitCooldownMs + "ms detail=" + detail);
 }
 
+async function verifySupersendSafely(email: string, apiKey: string): Promise<ValidationVerdict> {
+  if (!supersendCircuitAvailable(apiKey)) {
+    return { status: "unknown", detail: "supersend_circuit_open" };
+  }
+  const result = await verifyWithSupersend(email, apiKey);
+  if (result.detail.startsWith("supersend_http_401") || result.detail.startsWith("supersend_http_403")) {
+    openSupersendCircuit(apiKey, result.detail);
+    return { status: "unknown", detail: result.detail + ";supersend_circuit_open" };
+  }
+  return result;
+}
+
 function currentProviderRate(provider: string) {
   return providerRatePerSecond.get(provider) || validationBasePerSecond;
 }
@@ -572,7 +584,7 @@ async function runJob() {
 
       if (result.status === "unknown" || result.status === "error") {
         if (validationMode === "supersend") {
-          result = await verifyWithSupersend(contact.normalizedEmail, apiKey as string);
+          result = await verifySupersendSafely(contact.normalizedEmail, apiKey as string);
         } else {
           const holdUntil = providerHoldUntil.get(provider) || 0;
           if (holdUntil > Date.now()) {
@@ -595,15 +607,9 @@ async function runJob() {
             supersendCircuitAvailable(apiKey) &&
             (result.status === "unknown" || result.status === "error")
           ) {
-            const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey);
+            const fallback = await verifySupersendSafely(contact.normalizedEmail, apiKey);
             if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
               result = fallback;
-            } else if (fallback.detail.startsWith("supersend_http_401") || fallback.detail.startsWith("supersend_http_403")) {
-              openSupersendCircuit(apiKey, fallback.detail);
-              result = {
-                status: result.status,
-                detail: result.detail + ";fallback:" + fallback.detail + ";supersend_circuit_open",
-              };
             } else {
               result = { status: result.status, detail: result.detail + ";fallback:" + fallback.detail };
             }
