@@ -135,7 +135,7 @@ async function verifySupersendSafely(email: string, apiKey: string): Promise<Val
   if (supersendCredentialProbe) {
     const probe = await supersendCredentialProbe;
     if (isSupersendAuthFailure(probe) || !supersendCircuitAvailable(apiKey)) {
-      return { status: "unknown", detail: isSupersendAuthFailure(probe) ? "supersend_circuit_open" : "supersend_circuit_open" };
+      return { status: "unknown" as const, detail: "supersend_circuit_open" };
     }
   }
 
@@ -144,7 +144,7 @@ async function verifySupersendSafely(email: string, apiKey: string): Promise<Val
       .then((result) => {
         if (isSupersendAuthFailure(result)) {
           openSupersendCircuit(apiKey, result.detail);
-          return { status: "unknown", detail: result.detail + ";supersend_circuit_open" };
+          return { status: "unknown" as const, detail: result.detail + ";supersend_circuit_open" };
         }
         return result;
       })
