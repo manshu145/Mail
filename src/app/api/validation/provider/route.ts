@@ -100,7 +100,9 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Choose Internal, Smart hybrid or SuperSend primary." }, { status: 400 });
   }
 
-  if (validationModeNeedsSupersend(mode)) {
+  // Smart Hybrid is designed to work without SuperSend. Only the
+  // explicit SuperSend-primary mode requires provider credentials.
+  if (mode === "supersend") {
     const [row] = await db.select({ value: systemSettings.value }).from(systemSettings).where(eq(systemSettings.key, KEY)).limit(1);
     const configured = Boolean(row?.value) || Boolean(String(process.env.SUPERSEND_API_KEY || "").trim());
     if (!configured) return NextResponse.json({ error: "Add a SuperSend API key before selecting this mode." }, { status: 409 });
