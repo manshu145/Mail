@@ -630,6 +630,14 @@ async function runJob() {
           } else {
             // Layer 2: NexiMail internal syntax + DNS/MX safety check.
             result = await validateMailboxWithDeadline(contact.normalizedEmail);
+            // MX-positive addresses are treated as sendable by default. Internal
+            // validation cannot prove mailbox existence without an external
+            // mailbox-verification provider, so do not leave ordinary MX-positive
+            // recipients in an endless "unknown" bucket. Hard DNS/MX failures
+            // remain invalid/unknown and continue through the normal safeguards.
+            if (result.status === "unknown" && result.detail === "mx_present_mailbox_unverified") {
+              result = { status: "valid", detail: "mx_present_sendable" };
+            }
             if (validationIsPreRecipientFailure(result)) {
               registerProviderPressure(provider, result);
             } else {
