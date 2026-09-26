@@ -233,7 +233,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
       where c.id=$1
         and c.status='active'
         and c.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid'))
+        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
       limit $3
     `, [contactId, jobId, limit]);
     return result.rows;
@@ -288,7 +288,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
       where c.status='active'
         and c.validation_status in ('pending','unknown','error')
         and lower(c.normalized_email) ~ '@(gmail|googlemail)\\.com$'
-        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid'))
+        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
       order by c.id
       limit $2
     `, [jobId, limit]);
@@ -300,7 +300,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
     from contacts c
     where c.status='active'
       and c.validation_status in ('pending','unknown','error')
-      and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid'))
+      and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
     order by c.id
     limit $2
   `, [jobId, limit]);
@@ -312,7 +312,7 @@ async function existingResultCount(jobId: string) {
     select count(distinct contact_id)::int as total
     from validation_results
     where job_id=$1 and contact_id is not null
-      and status in ('accepted','valid','invalid')
+      and status in ('accepted','valid','invalid','unknown')
   `, [jobId]);
   return Number(result.rows[0]?.total || 0);
 }
@@ -327,7 +327,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
       where c.id=$1
         and c.status='active'
         and c.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid'))
+        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
     `, [contactId, jobId]);
     return Number(result.rows[0]?.total || 0);
   }
@@ -356,7 +356,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
       where c.status='active'
         and c.validation_status in ('pending','unknown','error')
         and exists(select 1 from import_staging_rows s where s.job_id=$1 and s.contact_id=c.id)
-        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid'))
+        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
     `, [importId, jobId]);
     return Number(result.rows[0]?.total || 0);
   }
@@ -368,7 +368,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
       where c.status='active'
         and c.validation_status in ('pending','unknown','error')
         and lower(split_part(c.normalized_email,'@',2)) in ('gmail.com','googlemail.com')
-        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid'))
+        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
     `, [jobId]);
     return Number(result.rows[0]?.total || 0);
   }
@@ -378,7 +378,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
     from contacts c
     where c.status='active'
       and c.validation_status in ('pending','unknown','error')
-      and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid'))
+      and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
   `, [jobId]);
   return Number(result.rows[0]?.total || 0);
 }
@@ -655,12 +655,13 @@ async function runJob() {
         }
       }
 
-      const finalized = result.status === "accepted" || result.status === "valid" || result.status === "invalid";
+      const finalized = result.status === "accepted" || result.status === "valid" || result.status === "invalid" || result.status === "unknown";
       await db.insert(validationResults).values({ jobId: job.id, contactId: contact.id, email: contact.email, status: result.status, detail: result.detail });
       await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
       if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
 
-      // Unknown/error is a retry attempt, not a completed validation verdict.
+      // Unknown is a terminal "risky/unverified" result when no external
+      // provider can establish mailbox-level validity. Do not retry it forever.
       if (!finalized) {
         jobRetryUntil.set(job.id, Date.now() + validationRetryCooldownMs);
       } else {
