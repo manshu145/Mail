@@ -288,6 +288,13 @@
       "when": 1790322862390,
       "tag": "0040_validation_job_cancellation",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790427673747,
+      "tag": "0041_validation_history_index",
+      "breakpoints": true
     }
   ]
 }
