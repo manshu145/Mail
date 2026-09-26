@@ -249,7 +249,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
       select a.contact_id::text as id,a.email,a.normalized_email as "normalizedEmail"
       from (${audience}) a
       where a.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id and vr.status in ('accepted','valid','invalid'))
+        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id and vr.status in ('accepted','valid','invalid','unknown'))
       order by a.contact_id
       limit ${limit}
     `);
@@ -342,7 +342,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
       select count(*)::int as total
       from (${audience}) a
       where a.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id and vr.status in ('accepted','valid','invalid'))
+        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id and vr.status in ('accepted','valid','invalid','unknown'))
     `);
     return Number((result.rows[0] as { total?: number } | undefined)?.total || 0);
   }
