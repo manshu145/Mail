@@ -273,7 +273,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
           select 1
           from validation_results vr
           where vr.job_id=$2 and vr.contact_id=c.id
-            and vr.status in ('accepted','valid','invalid')
+            and vr.status in ('accepted','valid','invalid','unknown')
         )
       order by c.id
       limit $3
@@ -567,6 +567,11 @@ async function runJob() {
   const remainingCount = await remainingCountForJob(job.scope, job.id);
   const remaining = await contactsForJob(job.scope, job.id, Math.min(validationBatchSize, dailyRemaining));
   let dailyCompleted = 0;
+  // Keep the job total aligned with the actual terminal-result population.
+  // Import scopes must use the same terminal-result filter in both
+  // contactsForJob() and remainingCountForJob(); otherwise an existing
+  // terminal "unknown" can be selected again while remainingCount excludes it,
+  // making processed_rows exceed total_rows.
   const total = Math.max(Number(job.totalRows || 0), processed + remainingCount);
 
   await db.update(validationJobs).set({ totalRows: total, processedRows: processed }).where(eq(validationJobs.id, job.id));
@@ -701,6 +706,18 @@ async function runJob() {
     },
   );
 
+  // Re-read the authoritative terminal-result count after the concurrent pool
+  // finishes. The in-memory counter is useful for live progress, but completion
+  // must be based on distinct persisted results rather than callback timing.
+  processed = await existingResultCount(job.id);
+  const progressTotal = Math.max(total, processed);
+  await pool.query(
+    `update validation_jobs
+     set processed_rows=least($2, $3),
+         total_rows=$3
+     where id=$1`,
+    [job.id, processed, progressTotal],
+  );
   await publishProgress(true);
   const [jobAfterPool] = await db.select({ status: validationJobs.status }).from(validationJobs)
     .where(eq(validationJobs.id, job.id)).limit(1);
@@ -742,7 +759,14 @@ async function runJob() {
     return;
   }
 
-  await db.update(validationJobs).set({ status: "completed", processedRows: processed, totalRows: processed, completedAt: new Date() }).where(eq(validationJobs.id, job.id));
+  processed = await existingResultCount(job.id);
+  const completedTotal = Math.max(total, processed);
+  await db.update(validationJobs).set({
+    status: "completed",
+    processedRows: Math.min(processed, completedTotal),
+    totalRows: completedTotal,
+    completedAt: new Date(),
+  }).where(eq(validationJobs.id, job.id));
   await syncImportValidationCounters(job.scope, job.id);
   await heartbeat({ state: "idle", lastJobId: job.id, scope: job.scope, processed, resumed });
 }
