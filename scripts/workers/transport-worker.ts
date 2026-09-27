@@ -260,7 +260,7 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
           select 1
           from provider_cooldowns pc
           where pc.sending_account_id=c.sending_account_id
-            and pc.provider=provider_key
+            and pc.provider=${providerExpression}
             and pc.active=true
             and (
               (pc.next_probe_at is not null and pc.next_probe_at > now())
