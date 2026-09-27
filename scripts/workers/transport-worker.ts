@@ -272,16 +272,20 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
             )
         )
     ),
-    ranked as (
+    provider_counts as (
       select
         s.*,
-        count(*) over(partition by s.campaign_id,s.provider_key) as provider_count,
-        row_number() over(
-          partition by s.campaign_id
-          order by count(*) over(partition by s.campaign_id,s.provider_key) desc,
-                   s.provider_key asc
-        ) as provider_rank
+        count(*) over(partition by s.campaign_id,s.provider_key) as provider_count
       from source s
+    ),
+    ranked as (
+      select
+        p.*,
+        dense_rank() over(
+          partition by p.campaign_id
+          order by p.provider_count desc,p.provider_key asc
+        ) as provider_rank
+      from provider_counts p
     ),
     picked as (
       select r.id
