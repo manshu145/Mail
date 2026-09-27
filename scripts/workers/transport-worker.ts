@@ -235,10 +235,20 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
           from provider_cooldowns pc
           where pc.sending_account_id=c.sending_account_id
             and pc.active=true
-            and pc.next_probe_at is not null
-            and pc.next_probe_at > now()
+            and pc.provider in ('__sender__','__upstream__')
             and (
-              pc.provider in ('__sender__','__upstream__')
+              (pc.next_probe_at is not null and pc.next_probe_at > now())
+              or m.id <> (
+                select m2.id
+                from messages m2
+                join campaigns c2 on c2.id=m2.campaign_id
+                where c2.sending_account_id=c.sending_account_id
+                  and c2.status='sending'
+                  and m2.status in ('ready_for_transport','deferred')
+                  and (m2.next_attempt_at is null or m2.next_attempt_at <= now())
+                order by m2.queued_at asc,m2.id asc
+                limit 1
+              )
             )
         )
 
@@ -253,8 +263,7 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
             and pc.provider=provider_key
             and pc.active=true
             and (
-              pc.next_probe_at is null
-              or pc.next_probe_at > now()
+              (pc.next_probe_at is not null and pc.next_probe_at > now())
               or m.id <> (
                 select m2.id
                 from messages m2
