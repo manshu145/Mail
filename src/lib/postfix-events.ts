@@ -24,9 +24,10 @@ async function sendingAccountForMessage(db: EventDb, campaignId: string) {
   return campaign?.sendingAccountId || null;
 }
 
-async function providerForRecipient(db: EventDb, recipientEmail: string, response: string) {
-  const fromResponse = providerForDelivery(recipientEmail, response);
-  if (!fromResponse.startsWith("domain:")) return fromResponse;
+async function providerForRecipient(db: EventDb, recipientEmail: string, _response: string) {
+  // The recipient destination is the source of truth for provider isolation.
+  // Do not let response text accidentally map a destination-provider event to
+  // a different/global scope.
   const domain = recipientEmail.trim().toLowerCase().split("@").pop() || "";
   const [health] = await db.select({ mxHosts: recipientDomainHealth.mxHosts })
     .from(recipientDomainHealth)

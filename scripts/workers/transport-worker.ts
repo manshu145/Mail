@@ -78,6 +78,32 @@ function warmupLimit(warmup: typeof sendingAccountWarmups.$inferSelect | null, a
   const calculated = Math.floor(warmup.dayOneLimit * Math.pow(1 + warmup.growthPercent / 100, days));
   return optionalMin(accountDaily, warmup.maxDailyLimit, Math.max(warmup.dayOneLimit, calculated));
 }
+function recipientProviderSql(emailExpression: string, mxExpression: string) {
+  const domain = `lower(split_part(${emailExpression}, '@', 2))`;
+  const mx = `coalesce(${mxExpression}::text, '')`;
+  return `case
+    when ${mx} ilike '%google.com%' or ${mx} ilike '%googlemail.com%' then 'gmail'
+    when ${mx} ilike '%yahoodns.net%' or ${mx} ilike '%yahoo.com%' or ${mx} ilike '%aol.com%' then 'yahoo'
+    when ${mx} ilike '%protection.outlook%' or ${mx} ilike '%outlook.com%' or ${mx} ilike '%hotmail.com%' then 'microsoft'
+    when ${mx} ilike '%protonmail%' or ${mx} ilike '%proton.me%' then 'proton'
+    when ${mx} ilike '%zoho.%' or ${mx} ilike '%zohomail%' then 'zoho'
+    when ${mx} ilike '%rediffmail%' then 'rediff'
+    when ${mx} ilike '%mailhostbox%' then 'mailhostbox'
+    when ${mx} ilike '%titan.email%' then 'titan'
+    when ${mx} ilike '%secureserver.net%' then 'godaddy'
+    when ${mx} ilike '%mailcore.net%' then 'mailcore'
+    when ${mx} ilike '%netcore%' then 'netcore'
+    when ${domain} in ('gmail.com','googlemail.com') then 'gmail'
+    when ${domain} = 'yahoo.com' or ${domain} like 'yahoo.%' or ${domain} in ('ymail.com','rocketmail.com','aol.com') then 'yahoo'
+    when ${domain} in ('outlook.com','hotmail.com','live.com','msn.com') or ${domain} like 'hotmail.%' or ${domain} like 'live.%' then 'microsoft'
+    when ${domain} in ('proton.me','protonmail.com','pm.me') then 'proton'
+    when ${domain} in ('rediffmail.com','rediff.com') then 'rediff'
+    when ${domain} = 'mail.com' then 'mailcom'
+    when ${domain} in ('zoho.com','zohomail.com','zoho.in','zohomail.in') then 'zoho'
+    else 'domain:' || ${domain}
+  end`;
+}
+
 async function accountWithinLimits(account: typeof sendingAccounts.$inferSelect, settings: DeliverySettings) {
   const [warmup] = await db.select().from(sendingAccountWarmups).where(eq(sendingAccountWarmups.sendingAccountId, account.id)).limit(1);
   const effectiveHourly = optionalMin(account.hourlyLimit, settings.maxRollingHour);
@@ -180,25 +206,106 @@ async function activateTransportRestriction(accountId: string, recipientEmail: s
 
 type Claimed = { id: string; attempt_count: number; recipient_email: string };
 async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> {
+  const providerExpression = recipientProviderSql("m.recipient_email", "rdh.mx_hosts");
   const result = await pool.query<Claimed>(`
-    with eligible as (
+    with source as (
       select
         m.id,
         m.campaign_id,
+        c.sending_account_id,
         m.recipient_email,
+        m.last_error,
         m.queued_at,
         coalesce(c.started_at,c.created_at) as campaign_started_at,
-        row_number() over(partition by m.campaign_id order by m.queued_at asc,m.id asc) as campaign_rank
+        row_number() over(partition by m.campaign_id order by m.queued_at asc,m.id asc) as campaign_rank,
+        ${providerExpression} as provider_key
       from messages m
       join campaigns c on c.id=m.campaign_id
+      left join recipient_domain_health rdh
+        on rdh.domain=lower(split_part(m.recipient_email,'@',2))
       where c.status='sending'
         and m.status in ('ready_for_transport','deferred')
         and (m.next_attempt_at is null or m.next_attempt_at <= now())
+
+        -- A sender/upstream cooldown is reserved for an actual shared-path
+        -- restriction only. When one exists, preserve the existing probe-only
+        -- behavior until that circuit is explicitly cleared.
+        and not exists (
+          select 1
+          from provider_cooldowns pc
+          where pc.sending_account_id=c.sending_account_id
+            and pc.active=true
+            and pc.provider in ('__sender__','__upstream__')
+            and (
+              (pc.next_probe_at is not null and pc.next_probe_at > now())
+              or m.id <> (
+                select m2.id
+                from messages m2
+                join campaigns c2 on c2.id=m2.campaign_id
+                where c2.sending_account_id=c.sending_account_id
+                  and c2.status='sending'
+                  and m2.status in ('ready_for_transport','deferred')
+                  and (m2.next_attempt_at is null or m2.next_attempt_at <= now())
+                order by m2.queued_at asc,m2.id asc
+                limit 1
+              )
+            )
+        )
+
+        -- Provider cooldowns are isolated to that destination provider.
+        -- While waiting, do not claim any ordinary message for that provider.
+        -- Once the probe time arrives, allow exactly one earliest provider
+        -- message/account-wide as the probe; all other providers remain eligible.
+        and not exists (
+          select 1
+          from provider_cooldowns pc
+          where pc.sending_account_id=c.sending_account_id
+            and pc.provider=${providerExpression}
+            and pc.active=true
+            and (
+              (pc.next_probe_at is not null and pc.next_probe_at > now())
+              or m.id <> (
+                select m2.id
+                from messages m2
+                join campaigns c2 on c2.id=m2.campaign_id
+                left join recipient_domain_health rdh2
+                  on rdh2.domain=lower(split_part(m2.recipient_email,'@',2))
+                where c2.sending_account_id=c.sending_account_id
+                  and c2.status='sending'
+                  and m2.status in ('ready_for_transport','deferred')
+                  and (m2.next_attempt_at is null or m2.next_attempt_at <= now())
+                  and ${recipientProviderSql("m2.recipient_email", "rdh2.mx_hosts")}=pc.provider
+                order by m2.queued_at asc,m2.id asc
+                limit 1
+              )
+            )
+        )
+    ),
+    provider_counts as (
+      select
+        s.*,
+        count(*) over(partition by s.campaign_id,s.provider_key) as provider_count
+      from source s
+    ),
+    ranked as (
+      select
+        p.*,
+        dense_rank() over(
+          partition by p.campaign_id
+          order by p.provider_count desc,p.provider_key asc
+        ) as provider_rank
+      from provider_counts p
     ),
     picked as (
-      select e.id
-      from eligible e
-      order by ((e.campaign_rank-1)/$2::int) asc,e.campaign_started_at asc,e.campaign_rank asc
+      select r.id
+      from ranked r
+      order by
+        r.provider_rank asc,
+        ((r.campaign_rank-1)/$2::int) asc,
+        r.campaign_started_at asc,
+        r.campaign_rank asc,
+        r.queued_at asc,
+        r.id asc
       limit $1
     )
     update messages m
@@ -207,30 +314,12 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
     where m.id=picked.id
       and m.status in ('ready_for_transport','deferred')
       and (m.next_attempt_at is null or m.next_attempt_at <= now())
-    returning m.id,m.attempt_count,m.recipient_email`, [claimBatch,campaignBurstPerRound]);
-  const buckets = new Map<string, Claimed[]>();
-  for (const row of result.rows) {
-    const provider = providerForEmail(row.recipient_email);
-    const bucket = buckets.get(provider) || [];
-    bucket.push(row);
-    buckets.set(provider, bucket);
-  }
-  const providers = [...buckets.keys()].sort((a,b) => a.localeCompare(b));
-  const ordered: Claimed[] = [];
-  let remaining = result.rows.length;
-  while (remaining > 0) {
-    let added = false;
-    for (const provider of providers) {
-      const bucket = buckets.get(provider);
-      if (!bucket?.length) continue;
-      ordered.push(bucket.shift()!);
-      remaining--;
-      added = true;
-    }
-    if (!added) break;
-  }
-  return ordered;
+    returning m.id,m.attempt_count,m.recipient_email
+  `, [claimBatch,campaignBurstPerRound]);
+
+  return result.rows;
 }
+
 async function markDeferred(id: string, attempt: number, error: unknown, settings: DeliverySettings) {
   const detail = error instanceof Error ? error.message.slice(0, 1000) : "mta_submission_error";
   const permanent = error instanceof SmtpResponseError && error.code >= 500;
@@ -513,7 +602,7 @@ async function runOnce() {
   }
 
   const nextAdaptiveRate = adaptivePacing.observe({ accepted, deferred, failed, providerHeld });
-  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, adaptivePacingEnabled: settings.adaptivePacingEnabled, adaptiveRatePerSecond: activeRatePerSecond, nextAdaptiveRatePerSecond: nextAdaptiveRate, providerIntervalMs: settings.providerIntervalMs, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "round_robin", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, deliverabilityBlocked, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
+  await heartbeat({ state: "online", sendingEnabled: true, claimed: claimed.length, accepted, deferred, failed, throttled, providerHeld, providerProbes, recoveredStale, overdueCooldownMessagesAwakened, perSecond: settings.maxPerSecond, adaptivePacingEnabled: settings.adaptivePacingEnabled, adaptiveRatePerSecond: activeRatePerSecond, nextAdaptiveRatePerSecond: nextAdaptiveRate, providerIntervalMs: settings.providerIntervalMs, pollIntervalMs: intervalMs, claimBatch, schedulingMode: "provider_priority", campaignBurstPerRound: settings.campaignBurstPerRound, maxConcurrentCampaigns: settings.maxConcurrentCampaigns, maxAttempts: settings.retryMaxAttempts, retryInitialSeconds: settings.retryInitialSeconds, retryMaxSeconds: settings.retryMaxSeconds, retryBackoffMultiplier: settings.retryBackoffMultiplier, providerCooldownMinutes: settings.providerCooldownMinutes, deliverabilityBlocked, mtaHost, mtaPort, bounceTracking: bounceSigningEnabled, source: "database_control_plane" });
 }
 
 async function main() {

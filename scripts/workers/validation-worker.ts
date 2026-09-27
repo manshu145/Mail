@@ -9,10 +9,20 @@ import { validateMailboxInternally } from "../../src/lib/mailbox-validator";
 import { recipientDomain, recipientProvider, runProviderAwarePool, validationIsPreRecipientFailure, validationNeedsBackoff } from "../../src/lib/validation-throughput";
 import { decryptWorkspaceSecret } from "../../src/lib/secure-setting";
 import { normalizeValidationMode, validationModeNeedsSupersend, type ValidationMode } from "../../src/lib/validation-provider";
+import { verifyWithSupersend } from "../../src/lib/supersend-validation";
 
 const intervalMs = Math.max(2000, Number(process.env.VALIDATION_INTERVAL_MS || "5000"));
 const timeoutMs = Math.max(3000, Number(process.env.VALIDATION_API_TIMEOUT_MS || "10000"));
 const validationHardTimeoutMs = Math.max(timeoutMs, Math.min(120_000, Number(process.env.VALIDATION_HARD_TIMEOUT_MS || "45000")));
+const validationEvidenceTtlMs = Math.max(
+  5 * 60_000,
+  Math.min(90 * 24 * 60 * 60_000, Number(process.env.VALIDATION_EVIDENCE_TTL_MS || String(30 * 24 * 60 * 60_000))),
+);
+const validationRetryCooldownMs = Math.max(
+  60_000,
+  Math.min(24 * 60 * 60_000, Number(process.env.VALIDATION_RETRY_COOLDOWN_MS || String(15 * 60_000))),
+);
+const jobRetryUntil = new Map<string, number>();
 
 async function validateMailboxWithDeadline(email: string): Promise<ValidationVerdict> {
   return Promise.race([
@@ -23,7 +33,7 @@ async function validateMailboxWithDeadline(email: string): Promise<ValidationVer
     )),
   ]);
 }
-const supersendEndpoint = String(process.env.SUPERSEND_VERIFY_URL || "https://api.supersend.io/v2/email-validation/verify").trim();
+
 
 type ExistingResult = {
   contact_id: string;
@@ -36,67 +46,10 @@ async function heartbeat(meta: Record<string, unknown> = {}) {
   await db.insert(workerHeartbeats).values({ workerName: "validation", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } });
 }
 
-function classifySupersendPayload(body: unknown): ValidationVerdict {
-  const data = body && typeof body === "object" && "data" in body
-    ? (body as { data?: unknown }).data
-    : null;
-  if (!data || typeof data !== "object") return { status: "unknown", detail: "supersend_v2_missing_data" };
-
-  const record = data as Record<string, unknown>;
-  const verdict = String(record.verdict || "").toLowerCase();
-  const subtype = String(record.subtype || record.validation_subtype || "").trim().toLowerCase();
-  if (record.is_disallowed === true) return { status: "invalid", detail: "supersend_v2_disallowed" };
-  if (verdict === "valid") return { status: "valid", detail: subtype ? `supersend_v2_valid:${subtype}` : "supersend_v2_valid" };
-  if (verdict === "invalid") return { status: "invalid", detail: subtype ? `supersend_v2_invalid:${subtype}` : "supersend_v2_invalid" };
-  if (verdict === "risky") return { status: "unknown", detail: subtype ? `supersend_v2_risky:${subtype}` : "supersend_v2_risky" };
-  if (record.valid === true) return { status: "valid", detail: "supersend_v2_valid" };
-  if (record.valid === false) return { status: "invalid", detail: "supersend_v2_invalid" };
-  return { status: "unknown", detail: "supersend_v2_ambiguous" };
-}
-
 async function configuredSupersendApiKey() {
   const [row] = await db.select({ value: systemSettings.value }).from(systemSettings)
     .where(eq(systemSettings.key, "validation.supersend_api_key")).limit(1);
   return decryptWorkspaceSecret(row?.value) || String(process.env.SUPERSEND_API_KEY || "").trim() || null;
-}
-
-async function verifyWithSupersend(email: string, apiKey: string): Promise<ValidationVerdict> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(supersendEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ email }),
-      signal: controller.signal,
-    });
-
-    const body = await response.json().catch(() => null) as unknown;
-
-    if (!response.ok) {
-      const detail = body && typeof body === "object"
-        ? JSON.stringify(body).slice(0, 240)
-        : "";
-      return {
-        status: response.status === 402 ? "error" : response.status >= 500 || response.status === 429 ? "unknown" : "error",
-        detail: `supersend_http_${response.status}:${detail}`,
-      };
-    }
-
-    return classifySupersendPayload(body);
-  } catch (error) {
-    return {
-      status: "unknown",
-      detail: error instanceof Error && error.name === "AbortError"
-        ? "supersend_timeout"
-        : "supersend_request_failed",
-    };
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 let cachedPaused = false;
@@ -131,6 +84,84 @@ const providerSuccessStreak = new Map<string, number>();
 const providerFailureLevel = new Map<string, number>();
 const providerHoldReason = new Map<string, string>();
 const providerLastPressureAt = new Map<string, string>();
+
+// SuperSend is an optional enhancement in Smart Hybrid. Keep authentication
+// failures behind a circuit breaker so one missing/expired customer key cannot
+// turn into one API request per inconclusive recipient.
+const supersendCircuitCooldownMs = Math.max(
+  5 * 60_000,
+  Math.min(24 * 60 * 60_000, Number(process.env.SUPERSEND_AUTH_COOLDOWN_MS || String(24 * 60 * 60_000))),
+);
+let supersendCircuitOpenUntil = 0;
+let supersendCircuitKey: string | null = null;
+let supersendCircuitReason = "";
+let supersendCredentialProbe: Promise<ValidationVerdict> | null = null;
+let supersendCredentialProbeKey: string | null = null;
+
+function supersendCircuitAvailable(apiKey: string | null) {
+  if (!apiKey) return false;
+  if (supersendCircuitKey !== apiKey) {
+    supersendCircuitKey = apiKey;
+    supersendCircuitOpenUntil = 0;
+    supersendCircuitReason = "";
+    supersendCredentialProbe = null;
+    supersendCredentialProbeKey = apiKey;
+  }
+  return supersendCircuitOpenUntil <= Date.now();
+}
+
+function isSupersendAuthFailure(result: ValidationVerdict) {
+  const detail = String(result.detail || "");
+  return detail.startsWith("supersend_http_401") || detail.startsWith("supersend_http_403");
+}
+
+function openSupersendCircuit(apiKey: string, detail: string) {
+  supersendCircuitKey = apiKey;
+  supersendCircuitOpenUntil = Date.now() + supersendCircuitCooldownMs;
+  supersendCircuitReason = detail;
+  console.warn("[validation-worker] SuperSend authentication circuit opened for " + supersendCircuitCooldownMs + "ms detail=" + detail);
+}
+
+async function verifySupersendSafely(email: string, apiKey: string): Promise<ValidationVerdict> {
+  if (!supersendCircuitAvailable(apiKey)) {
+    return { status: "unknown", detail: "supersend_circuit_open" };
+  }
+
+  if (supersendCredentialProbeKey !== apiKey) {
+    supersendCredentialProbeKey = apiKey;
+    supersendCredentialProbe = null;
+  }
+
+  if (supersendCredentialProbe) {
+    const probe = await supersendCredentialProbe;
+    if (isSupersendAuthFailure(probe) || !supersendCircuitAvailable(apiKey)) {
+      return { status: "unknown" as const, detail: "supersend_circuit_open" };
+    }
+  }
+
+  if (!supersendCredentialProbe) {
+    const probe = verifyWithSupersend(email, apiKey)
+      .then((result) => {
+        if (isSupersendAuthFailure(result)) {
+          openSupersendCircuit(apiKey, result.detail);
+          return { status: "unknown" as const, detail: result.detail + ";supersend_circuit_open" };
+        }
+        return result;
+      })
+      .finally(() => {
+        supersendCredentialProbe = null;
+      });
+    supersendCredentialProbe = probe;
+    return probe;
+  }
+
+  const result = await verifyWithSupersend(email, apiKey);
+  if (isSupersendAuthFailure(result)) {
+    openSupersendCircuit(apiKey, result.detail);
+    return { status: "unknown", detail: result.detail + ";supersend_circuit_open" };
+  }
+  return result;
+}
 
 function currentProviderRate(provider: string) {
   return providerRatePerSecond.get(provider) || validationBasePerSecond;
@@ -202,7 +233,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
       where c.id=$1
         and c.status='active'
         and c.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id)
+        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
       limit $3
     `, [contactId, jobId, limit]);
     return result.rows;
@@ -218,7 +249,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
       select a.contact_id::text as id,a.email,a.normalized_email as "normalizedEmail"
       from (${audience}) a
       where a.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id)
+        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id and vr.status in ('accepted','valid','invalid','unknown'))
       order by a.contact_id
       limit ${limit}
     `);
@@ -242,6 +273,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
           select 1
           from validation_results vr
           where vr.job_id=$2 and vr.contact_id=c.id
+            and vr.status in ('accepted','valid','invalid','unknown')
         )
       order by c.id
       limit $3
@@ -256,7 +288,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
       where c.status='active'
         and c.validation_status in ('pending','unknown','error')
         and lower(c.normalized_email) ~ '@(gmail|googlemail)\\.com$'
-        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id)
+        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
       order by c.id
       limit $2
     `, [jobId, limit]);
@@ -268,7 +300,7 @@ async function contactsForJob(scope: string, jobId: string, limit = validationBa
     from contacts c
     where c.status='active'
       and c.validation_status in ('pending','unknown','error')
-      and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id)
+      and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
     order by c.id
     limit $2
   `, [jobId, limit]);
@@ -280,6 +312,7 @@ async function existingResultCount(jobId: string) {
     select count(distinct contact_id)::int as total
     from validation_results
     where job_id=$1 and contact_id is not null
+      and status in ('accepted','valid','invalid','unknown')
   `, [jobId]);
   return Number(result.rows[0]?.total || 0);
 }
@@ -294,7 +327,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
       where c.id=$1
         and c.status='active'
         and c.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id)
+        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
     `, [contactId, jobId]);
     return Number(result.rows[0]?.total || 0);
   }
@@ -309,7 +342,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
       select count(*)::int as total
       from (${audience}) a
       where a.validation_status in ('pending','unknown','error')
-        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id)
+        and not exists(select 1 from validation_results vr where vr.job_id=${jobId} and vr.contact_id=a.contact_id and vr.status in ('accepted','valid','invalid','unknown'))
     `);
     return Number((result.rows[0] as { total?: number } | undefined)?.total || 0);
   }
@@ -323,7 +356,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
       where c.status='active'
         and c.validation_status in ('pending','unknown','error')
         and exists(select 1 from import_staging_rows s where s.job_id=$1 and s.contact_id=c.id)
-        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id)
+        and not exists(select 1 from validation_results vr where vr.job_id=$2 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
     `, [importId, jobId]);
     return Number(result.rows[0]?.total || 0);
   }
@@ -335,7 +368,7 @@ async function remainingCountForJob(scope: string, jobId: string) {
       where c.status='active'
         and c.validation_status in ('pending','unknown','error')
         and lower(split_part(c.normalized_email,'@',2)) in ('gmail.com','googlemail.com')
-        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id)
+        and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
     `, [jobId]);
     return Number(result.rows[0]?.total || 0);
   }
@@ -345,14 +378,19 @@ async function remainingCountForJob(scope: string, jobId: string) {
     from contacts c
     where c.status='active'
       and c.validation_status in ('pending','unknown','error')
-      and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id)
+      and not exists(select 1 from validation_results vr where vr.job_id=$1 and vr.contact_id=c.id and vr.status in ('accepted','valid','invalid','unknown'))
   `, [jobId]);
   return Number(result.rows[0]?.total || 0);
 }
 async function applyHistoricalRecipientEvidence(email: string, verdict: ValidationVerdict): Promise<ValidationVerdict> {
   if (verdict.status !== "unknown") return verdict;
   const normalized = normalizeEmail(email);
-  const result = await pool.query<{ delivered: boolean; hardFailure: boolean }>(`
+  const result = await pool.query<{
+    delivered: boolean;
+    hardFailure: boolean;
+    cachedStatus: "accepted" | "valid" | "invalid" | null;
+    cachedDetail: string | null;
+  }>(`
     select
       exists(
         select 1 from messages m
@@ -363,14 +401,34 @@ async function applyHistoricalRecipientEvidence(email: string, verdict: Validati
         select 1 from suppressions s
         where s.normalized_email=$1
           and s.reason in ('hard_bounce','invalid')
-      ) as "hardFailure"
-  `, [normalized]);
+      ) as "hardFailure",
+      (
+        select vr.status::text
+        from validation_results vr
+        where lower(vr.email)=lower($1)
+          and vr.status in ('accepted','valid','invalid')
+          and vr.created_at > now() - ($2 * interval '1 millisecond')
+        order by vr.created_at desc
+        limit 1
+      ) as "cachedStatus",
+      (
+        select vr.detail
+        from validation_results vr
+        where lower(vr.email)=lower($1)
+          and vr.status in ('accepted','valid','invalid')
+          and vr.created_at > now() - ($2 * interval '1 millisecond')
+        order by vr.created_at desc
+        limit 1
+      ) as "cachedDetail"
+  `, [normalized, validationEvidenceTtlMs]);
   const row = result.rows[0];
-  if (row?.hardFailure) {
-    return { status: "invalid", detail: "historical_hard_failure" };
+  if (row?.hardFailure) return { status: "invalid", detail: "historical_hard_failure" };
+  if (row?.delivered) return { status: "valid", detail: "historical_successful_delivery" };
+  if (row?.cachedStatus === "accepted" || row?.cachedStatus === "valid") {
+    return { status: "valid", detail: "validation_cache_hit:" + String(row.cachedDetail || "valid") };
   }
-  if (row?.delivered) {
-    return { status: "valid", detail: "historical_successful_delivery" };
+  if (row?.cachedStatus === "invalid") {
+    return { status: "invalid", detail: "validation_cache_hit:" + String(row.cachedDetail || "invalid") };
   }
   return verdict;
 }
@@ -457,6 +515,13 @@ async function runJob() {
     return;
   }
 
+  const retryUntil = jobRetryUntil.get(job.id) || 0;
+  if (retryUntil > Date.now()) {
+    await heartbeat({ state: "retry_wait", jobId: job.id, scope: job.scope, retryAt: new Date(retryUntil).toISOString(), retryCooldownMs: validationRetryCooldownMs });
+    return;
+  }
+  jobRetryUntil.delete(job.id);
+
   const dailyLimit = await validationDailyLimit();
   const dailyUsage = await validationDailyUsage();
   const dailyRemaining = Math.max(0, dailyLimit - dailyUsage);
@@ -467,7 +532,10 @@ async function runJob() {
 
   const validationMode = normalizeValidationMode(job.validationMode);
   const apiKey = validationModeNeedsSupersend(validationMode) ? await configuredSupersendApiKey() : null;
-  if (validationModeNeedsSupersend(validationMode) && !apiKey) {
+
+  // Explicit SuperSend mode requires a credential. Smart Hybrid does not:
+  // internal validation remains fully usable when no external provider is configured.
+  if (validationMode === "supersend" && !apiKey) {
     await heartbeat({
       state: "configuration_error",
       jobId: job.id,
@@ -499,7 +567,12 @@ async function runJob() {
   const remainingCount = await remainingCountForJob(job.scope, job.id);
   const remaining = await contactsForJob(job.scope, job.id, Math.min(validationBatchSize, dailyRemaining));
   let dailyCompleted = 0;
-  const total = processed + remainingCount;
+  // Keep the job total aligned with the actual terminal-result population.
+  // Import scopes must use the same terminal-result filter in both
+  // contactsForJob() and remainingCountForJob(); otherwise an existing
+  // terminal "unknown" can be selected again while remainingCount excludes it,
+  // making processed_rows exceed total_rows.
+  let total = Math.max(Number(job.totalRows || 0), processed + remainingCount);
 
   await db.update(validationJobs).set({ totalRows: total, processedRows: processed }).where(eq(validationJobs.id, job.id));
   await heartbeat({
@@ -517,7 +590,7 @@ async function runJob() {
     const now = Date.now();
     if (!force && processed % 10 !== 0 && now - lastProgressPublish < 2000) return;
     lastProgressPublish = now;
-    await pool.query(`update validation_jobs set processed_rows=greatest(processed_rows,$2), total_rows=greatest(total_rows,$3) where id=$1`, [job.id, processed, total]);
+    await pool.query(`update validation_jobs set processed_rows=greatest(processed_rows,$2::integer), total_rows=greatest(total_rows,$3::integer) where id=$1`, [job.id, processed, total]);
     await heartbeat({
       state: "processing", jobId: job.id, scope: job.scope, processed, total, resumed,
       concurrency: validationConcurrency, scheduler: "provider_aware", validationMode,
@@ -532,6 +605,10 @@ async function runJob() {
       providerHoldReasons: Object.fromEntries([...providerHoldReason.entries()].filter(([provider]) => (providerHoldUntil.get(provider) || 0) > Date.now())),
       providerLastPressureAt: Object.fromEntries([...providerLastPressureAt.entries()].filter(([provider]) => (providerHoldUntil.get(provider) || 0) > Date.now())),
       hardTimeoutMs: validationHardTimeoutMs,
+      supersendConfigured: Boolean(apiKey),
+      supersendCircuitOpen: Boolean(apiKey && !supersendCircuitAvailable(apiKey)),
+      supersendCircuitOpenUntil: supersendCircuitOpenUntil > Date.now() ? new Date(supersendCircuitOpenUntil).toISOString() : null,
+      supersendCircuitReason: supersendCircuitReason || null,
     });
   };
 
@@ -542,38 +619,67 @@ async function runJob() {
       const provider = recipientProvider(recipientDomain(contact.normalizedEmail));
       let result: ValidationVerdict;
 
-      if (validationMode === "supersend") {
-        result = await verifyWithSupersend(contact.normalizedEmail, apiKey as string);
-      } else {
-        const holdUntil = providerHoldUntil.get(provider) || 0;
-        if (holdUntil > Date.now()) {
-          return { status: "unknown", detail: "provider_hold_active" };
-        }
+      // Layer 1: exact-email cache + delivery/suppression history.
+      result = await applyHistoricalRecipientEvidence(contact.normalizedEmail, {
+        status: "unknown",
+        detail: "validation_cache_miss",
+      });
 
-        result = await validateMailboxWithDeadline(contact.normalizedEmail);
-        result = await applyHistoricalRecipientEvidence(contact.normalizedEmail, result);
-
-        if (validationIsPreRecipientFailure(result)) {
-          registerProviderPressure(provider, result);
-          return result;
-        }
-
-        registerProviderOutcome(provider, result);
-
-        if (validationMode === "hybrid" && (result.status === "unknown" || result.status === "error")) {
-          const fallback = await verifyWithSupersend(contact.normalizedEmail, apiKey as string);
-          if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
-            result = fallback;
+      if (result.status === "unknown" || result.status === "error") {
+        if (validationMode === "supersend") {
+          result = await verifySupersendSafely(contact.normalizedEmail, apiKey as string);
+        } else {
+          const holdUntil = providerHoldUntil.get(provider) || 0;
+          if (holdUntil > Date.now()) {
+            result = { status: "unknown", detail: "provider_hold_active" };
           } else {
-            result = { status: result.status, detail: `${result.detail};fallback:${fallback.detail}` };
+            // Layer 2: NexiMail internal syntax + DNS/MX safety check.
+            result = await validateMailboxWithDeadline(contact.normalizedEmail);
+            // MX-positive addresses are treated as sendable by default. Internal
+            // validation cannot prove mailbox existence without an external
+            // mailbox-verification provider, so do not leave ordinary MX-positive
+            // recipients in an endless "unknown" bucket. Hard DNS/MX failures
+            // remain invalid/unknown and continue through the normal safeguards.
+            if (result.status === "unknown" && result.detail === "mx_present_mailbox_unverified") {
+              result = { status: "valid", detail: "mx_present_sendable" };
+            }
+            if (validationIsPreRecipientFailure(result)) {
+              registerProviderPressure(provider, result);
+            } else {
+              registerProviderOutcome(provider, result);
+            }
+          }
+
+          // Layer 3: Smart Hybrid optionally falls back to SuperSend.
+          // No key means no external call; the internal result remains unknown.
+          if (
+            validationMode === "hybrid" &&
+            apiKey &&
+            supersendCircuitAvailable(apiKey) &&
+            (result.status === "unknown" || result.status === "error")
+          ) {
+            const fallback = await verifySupersendSafely(contact.normalizedEmail, apiKey);
+            if (fallback.status === "accepted" || fallback.status === "valid" || fallback.status === "invalid") {
+              result = fallback;
+            } else {
+              result = { status: result.status, detail: result.detail + ";fallback:" + fallback.detail };
+            }
           }
         }
       }
 
+      const finalized = result.status === "accepted" || result.status === "valid" || result.status === "invalid" || result.status === "unknown";
       await db.insert(validationResults).values({ jobId: job.id, contactId: contact.id, email: contact.email, status: result.status, detail: result.detail });
       await db.update(contacts).set({ validationStatus: result.status, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
       if (result.status === "invalid") await addInvalidSuppression(contact.email, contact.id, result.detail);
-      processed++;
+
+      // Unknown is a terminal "risky/unverified" result when no external
+      // provider can establish mailbox-level validity. Do not retry it forever.
+      if (!finalized) {
+        jobRetryUntil.set(job.id, Date.now() + validationRetryCooldownMs);
+      } else {
+        processed++;
+      }
       dailyCompleted++;
       await publishProgress(false);
       return result;
@@ -600,6 +706,18 @@ async function runJob() {
     },
   );
 
+  // Re-read the authoritative terminal-result count after the concurrent pool
+  // finishes. The in-memory counter is useful for live progress, but completion
+  // must be based on distinct persisted results rather than callback timing.
+  processed = await existingResultCount(job.id);
+  total = Math.max(total, processed);
+  await pool.query(
+    `update validation_jobs
+     set processed_rows=least($2::integer, $3::integer),
+         total_rows=$3::integer
+     where id=$1`,
+    [job.id, processed, total],
+  );
   await publishProgress(true);
   const [jobAfterPool] = await db.select({ status: validationJobs.status }).from(validationJobs)
     .where(eq(validationJobs.id, job.id)).limit(1);
@@ -641,7 +759,14 @@ async function runJob() {
     return;
   }
 
-  await db.update(validationJobs).set({ status: "completed", processedRows: processed, totalRows: processed, completedAt: new Date() }).where(eq(validationJobs.id, job.id));
+  processed = await existingResultCount(job.id);
+  const completedTotal = Math.max(total, processed);
+  await db.update(validationJobs).set({
+    status: "completed",
+    processedRows: Math.min(processed, completedTotal),
+    totalRows: completedTotal,
+    completedAt: new Date(),
+  }).where(eq(validationJobs.id, job.id));
   await syncImportValidationCounters(job.scope, job.id);
   await heartbeat({ state: "idle", lastJobId: job.id, scope: job.scope, processed, resumed });
 }

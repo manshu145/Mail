@@ -99,32 +99,18 @@ export function classifyDeliveryRestriction(response: string, dsn?: string | nul
     return { scope: "none", reason: "recipient_or_mailbox_condition" };
   }
 
-  // Known bridge responses can be returned as the initial SMTP greeting before
-  // EHLO/MAIL/RCPT. They describe the shared outbound infrastructure, not the
-  // destination provider. Keep one circuit breaker instead of fake provider
-  // cards for every unrelated recipient network.
-  const outboundBridgeRestriction =
-    /jfe050004|jfe050005|jfe050007|unusual number of invalid recipients originating from your account|unusual amount of content policy violations originating from your account/i.test(text);
-  if (outboundBridgeRestriction) {
-    return { scope: "upstream", reason: "sender_or_outbound_path_restriction" };
-  }
-
-  // Reserve immediate sender-wide cooldowns for responses that explicitly
-  // identify the local sending account/outbound SMTP path as suspended.
-  const explicitSenderOrOutboundPath =
-    /sending account (?:is )?(?:restricted|blocked|suspended)|outbound (?:mail|smtp).*(?:account|sender).*(?:restricted|blocked|suspended)/i.test(text);
-  if (explicitSenderOrOutboundPath) {
-    return { scope: "upstream", reason: "sender_or_outbound_path_restriction" };
-  }
-
-  const explicitProviderRestriction =
-    /rate[ -]?limit|too many (?:messages|connections|requests)|throttl|unusual traffic|temporar(?:y|ily) blocked|temporary block|not yet authorized to deliver mail from|sender(?: ip)? reputation|ip reputation|greylist(?:ed|ing)?(?:.*(?:sender|ip))?|try again later(?:.*(?:rate|sender|ip|reputation))?/i.test(text);
-  if (explicitProviderRestriction) {
+  // SMTP responses observed from a destination MX are destination-provider
+  // signals. Even when the response mentions the sending account, only the
+  // provider that issued the response is cooled down. The shared outbound
+  // infrastructure is never paused by a remote-provider response.
+  const providerRestriction =
+    /jfe050004|jfe050005|jfe050007|unusual number of invalid recipients originating from your account|unusual amount of content policy violations originating from your account|rate[ -]?limit|too many (?:messages|connections|requests)|throttl|unusual traffic|temporar(?:y|ily) blocked|temporary block|not yet authorized to deliver mail from|sender(?: ip)? reputation|ip reputation|greylist(?:ed|ing)?(?:.*(?:sender|ip))?|try again later(?:.*(?:rate|sender|ip|reputation))?|sending account (?:is )?(?:restricted|blocked|suspended)|outbound (?:mail|smtp).*(?:account|sender).*(?:restricted|blocked|suspended)/i.test(text);
+  if (providerRestriction) {
     return { scope: "provider", reason: "provider_restriction" };
   }
 
   // A bare SMTP 4xx/4.x enhanced status is deliberately not enough evidence
-  // for a provider-wide cooldown.
+  // for any provider-wide or infrastructure-wide cooldown.
   void dsn;
   return { scope: "none", reason: "none" };
 }
