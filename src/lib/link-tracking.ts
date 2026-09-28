@@ -1,7 +1,7 @@
 export type TrackingLinkSigner = (payload: { messageId: string; url: string }) => Promise<string>;
 
 const ANCHOR_OPEN_TAG = /<a\b[^>]*>/gi;
-const HREF_ATTRIBUTE = /(\s)href\s*=\s*(["'])(https?:\/\/[^"']+)\2/i;
+const HREF_ATTRIBUTE = /(\s)(href)(\s*=\s*)(["'])(https?:\/\/[^"']+)\4/i;
 
 function shouldSkipTarget(target: string, appUrl: string) {
   return target.startsWith(`${appUrl}/unsubscribe/`) || target.startsWith(`${appUrl}/tracking/`);
@@ -29,13 +29,13 @@ export async function rewriteTrackingLinks(
     const hrefMatch = HREF_ATTRIBUTE.exec(tag);
     if (!hrefMatch) continue;
 
-    const target = hrefMatch[3];
+    const target = hrefMatch[5];
     if (shouldSkipTarget(target, appUrl)) continue;
 
     const token = await signToken({ messageId, url: target });
     const rewrittenTag = tag.replace(
       HREF_ATTRIBUTE,
-      `${hrefMatch[1]}href=${hrefMatch[2]}${appUrl}/tracking/click/${token}${hrefMatch[2]}`,
+      `${hrefMatch[1]}${hrefMatch[2]}${hrefMatch[3]}${hrefMatch[4]}${appUrl}/tracking/click/${token}${hrefMatch[4]}`,
     );
     output = output.replace(tag, rewrittenTag);
   }
