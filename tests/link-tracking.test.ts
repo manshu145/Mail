@@ -17,8 +17,8 @@ test("rewrites only absolute HTTP(S) anchor href attributes", async () => {
 
   const result = await rewriteTrackingLinks(html, APP_URL, MESSAGE_ID, signToken);
 
-  assert.match(result, /href="https://mail.example.com/tracking/click//);
-  assert.match(result, /HREF='https://mail.example.com/tracking/click//);
+  assert.match(result, /href="https:\/\/mail\.example\.com\/tracking\/click\//);
+  assert.match(result, /HREF='https:\/\/mail\.example\.com\/tracking\/click\//);
   assert.doesNotMatch(result, /href="https://example.com/offer"/);
   assert.doesNotMatch(result, /HREF='https://example.com/pricing'/);
 });
