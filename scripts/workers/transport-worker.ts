@@ -198,7 +198,7 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
     picked as (
       select e.id
       from eligible e
-      order by ((e.campaign_rank-1)/$2::int) asc,e.campaign_started_at asc,e.campaign_rank asc
+      order by (case when e.last_error like 'provider_cooldown:%' then 1 else 0 end) asc,((e.campaign_rank-1)/$2::int) asc,e.campaign_started_at asc,e.campaign_rank asc
       limit $1
     )
     update messages m
