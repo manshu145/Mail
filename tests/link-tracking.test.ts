@@ -38,7 +38,7 @@ test("does not rewrite resource href/src attributes outside anchors", async () =
   assert.match(result, /src="https://cdn.example.com/image.png"/);
   assert.match(result, /src="https://cdn.example.com/app.js"/);
   assert.match(result, /data-href="https://example.com/not-a-click"/);
-  assert.match(result, /href="https://mail.example.com/tracking/click//);
+  assert.match(result, /href="https:\/\/mail\.example\.com\/tracking\/click\//);
 });
 
 test("preserves NexiMail unsubscribe and existing tracking links", async () => {
