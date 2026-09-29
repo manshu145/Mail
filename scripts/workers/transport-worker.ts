@@ -300,6 +300,7 @@ async function claimMessages(campaignBurstPerRound: number): Promise<Claimed[]> 
       select r.id
       from ranked r
       order by
+        (case when r.last_error like 'provider_cooldown:%' then 1 else 0 end) asc,
         r.provider_rank asc,
         ((r.campaign_rank-1)/$2::int) asc,
         r.campaign_started_at asc,
