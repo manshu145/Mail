@@ -40,3 +40,17 @@ test("disabled controller never changes configured rate", () => {
   assert.equal(controller.currentRate, 3);
   assert.equal(controller.observe({ accepted: 0, deferred: 10, failed: 0, providerHeld: 0 }), 3);
 });
+
+
+
+test("provider-held messages do not slow healthy provider traffic", () => {
+  const controller = new AdaptivePacingController({ ...config, basePerSecond: 4 });
+  const next = controller.observe({ accepted: 10, deferred: 0, failed: 0, providerHeld: 20 });
+  assert.equal(next, 4);
+});
+
+test("actual deferred delivery pressure still slows the active rate", () => {
+  const controller = new AdaptivePacingController({ ...config, basePerSecond: 4 });
+  const next = controller.observe({ accepted: 10, deferred: 1, failed: 0, providerHeld: 20 });
+  assert.equal(next, 2);
+});
