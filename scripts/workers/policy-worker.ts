@@ -78,7 +78,7 @@ async function runOnce(){
   if(safety.paused)safetyPaused++;
  }
 
- const activeResult=await db.execute(sql`select count(*)::int as count from messages where status in ('ready_for_transport','sending','mta_accepted','deferred')`);
+ const activeResult=await db.execute(sql`select count(*)::int as count from messages where status in ('sending','mta_accepted','deferred') or (status='ready_for_transport' and (last_error is null or last_error not like 'provider_cooldown:%'))`);
  const active=Number((activeResult.rows[0] as Record<string,unknown>|undefined)?.count||0);
  const available=Math.max(0,settings.maxActiveQueued-active);
  if(!available){
