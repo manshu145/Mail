@@ -19,6 +19,7 @@ import { emailContentBlockReason } from "../../src/lib/email-content-policy";
 import { sendingDomainBlockReason } from "../../src/lib/sending-domain-policy";
 import { buildBulkDeliverabilityHeaders } from "../../src/lib/deliverability-headers";
 import { AdaptivePacingController } from "../../src/lib/adaptive-pacing";
+import { rewriteTrackingLinks } from "../../src/lib/link-tracking";
 
 const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
 const mtaHost = process.env.MTA_HOST || "mta";
@@ -54,19 +55,6 @@ function ensureUnsubscribe(html: string, text: string, unsubscribeUrl: string) {
 }
 async function event(messageId:string,type:string,payload:Record<string,unknown>={}){await db.insert(messageEvents).values({messageId,type,payload}).catch((error)=>console.error("[transport-event]",error));}
 async function heartbeat(meta: Record<string, unknown> = {}) { await db.insert(workerHeartbeats).values({ workerName: "transport", metadata: meta }).onConflictDoUpdate({ target: workerHeartbeats.workerName, set: { lastSeenAt: new Date(), metadata: meta } }); }
-
-async function rewriteLinks(html: string, messageId: string) {
-  if (!appUrl) return html;
-  let output = html;
-  for (const match of [...html.matchAll(/href=(['"])(https?:\/\/[^'\"]+)\1/gi)]) {
-    const target = match[2];
-    if (target.startsWith(`${appUrl}/unsubscribe/`) || target.startsWith(`${appUrl}/tracking/`)) continue;
-    const token = await signPublicToken({ messageId, url: target }, "30d");
-    output = output.replace(match[0], `href=${match[1]}${appUrl}/tracking/click/${token}${match[1]}`);
-  }
-  return output;
-}
-
 
 function optionalMin(...values: number[]) {
   const finiteCaps = values.filter((value) => Number.isFinite(value) && value > 0);
@@ -395,7 +383,7 @@ async function runOnce() {
     const preheader = personalize(campaign.preheader || "", contact);
     html = injectPreheader(html, preheader);
     ({ html, text } = ensureUnsubscribe(html, text, unsubscribeUrl));
-    if (campaign.trackClicks) html = await rewriteLinks(html, message.id);
+    if (campaign.trackClicks) html = await rewriteTrackingLinks(html, appUrl, message.id, signPublicToken);
     if (campaign.trackOpens) {
       const token = await signPublicToken({ messageId: message.id }, "30d");
       html += `<img src="${appUrl}/tracking/open/${token}" width="1" height="1" alt="" style="display:none!important" />`;
