@@ -31,16 +31,19 @@ export class AdaptivePacingController {
   observe(outcome: AdaptivePacingOutcome) {
     if (!this.config.enabled) return this.rate;
 
-    const attempted = outcome.accepted + outcome.deferred + outcome.failed + outcome.providerHeld;
+    // Provider-held messages are already isolated by provider cooldowns and
+    // should not reduce the global transport rate for healthy providers.
+    // Only actual deferred/failed outcomes are delivery pressure.
+    const attempted = outcome.accepted + outcome.deferred + outcome.failed;
     if (attempted === 0) return this.rate;
 
-    const pressure = outcome.providerHeld > 0 || outcome.deferred > 0;
+    const pressure = outcome.deferred > 0;
     const hardFailure = outcome.failed > 0;
-    const pressureRatio = (outcome.deferred + outcome.providerHeld) / attempted;
+    const pressureRatio = outcome.deferred / attempted;
 
     if (pressure || pressureRatio >= 0.02 || hardFailure && outcome.accepted === 0) {
       this.healthyRounds = 0;
-      const multiplier = pressureRatio >= 0.10 || outcome.providerHeld > 0
+      const multiplier = pressureRatio >= 0.10
         ? Math.min(this.config.pressureMultiplier, 0.5)
         : this.config.pressureMultiplier;
       this.rate = Math.max(this.config.minimumPerSecond, Number((this.rate * multiplier).toFixed(3)));
